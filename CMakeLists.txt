@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.9)
 
 project(enyo)
 
-add_subdirectory(3rdparty/fathom)
+add_subdirectory(3rdparty/Fathom)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -130,7 +130,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Profile")
     target_link_libraries(enyo PRIVATE ${PROFILER_LIBRARY})
 endif()
 
-target_include_directories(enyo PRIVATE ${CMAKE_BINARY_DIR} 3rdparty/fathom/src)
+target_include_directories(enyo PRIVATE ${CMAKE_BINARY_DIR} 3rdparty/Fathom/src)
 
 #--- gtest
 find_library(GTEST_LIBRARY gtest HINTS /opt/homebrew)
