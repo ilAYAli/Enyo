@@ -1,0 +1,6 @@
+build/
+libfathom.so
+obj/
+CMakeFiles/
+CMakeCache.txt
+

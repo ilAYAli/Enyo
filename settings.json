@@ -1,0 +1,11 @@
+{
+  "toggles": {
+    "use_lmr":                  true
+  },
+  "constants": {
+    "threads":                  8,
+    "opening_file":             "book.txt",
+    "nnue_file":                "nn-eba324f53044.nnue",
+    "logfile":                  "/tmp/enyo.log"
+  }
+}
