@@ -345,37 +345,20 @@ void Uci::go(std::istringstream & iss)
     thread::pool.init_threads(std::move(si), cfgmgr.num_threads);
 }
 
-// position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -
 // bench 0 0 5 current perft
-//
 // ===========================
 // Total time (ms) : 461
 // Nodes searched  : 11.906.0324
 // Nodes/second    : 2.58.265.344
-void Uci::bench(std::istringstream& iss) {
+void Uci::bench(std::istringstream & iss)
+{
     int depth = 5;
     std::string token;
-
     while (iss >> token) {
-        if (token == "depth" && (iss >> depth)) {
-            // Depth specified
-        }
+        if (token == "depth" && (iss >> depth))
+            break;
     }
-    //const auto start_time = std::chrono::high_resolution_clock::now();
-    const auto nodes = perft<true>(b, depth);
-
-    #if 0
-    const auto now = std::chrono::high_resolution_clock::now();
-    const auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time);
-    using rep_type = std::chrono::milliseconds::rep;
-    const auto elapsed_time_ms = std::max(elapsed_time.count(), static_cast<rep_type>(1LL));
-
-    fmt::print("\n===========================\n");
-    fmt::print("Total time (ms) : {}\n", elapsed_time.count());
-    fmt::print("Nodes searched  : {}\n", nodes);
-    fmt::print("Nodes/second    : {}\n", nodes * 1000 / elapsed_time_ms);
-    fmt::print("\n");
-    #endif
+    perft<true>(b, depth);
 }
 
 
