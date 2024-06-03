@@ -1,5 +1,5 @@
 #include "probe.hpp"
-#include "3rdparty/fathom/src/tbprobe.h"
+#include "3rdparty/Fathom/src/tbprobe.h"
 
 #include "board.hpp"
 #include "config.hpp"

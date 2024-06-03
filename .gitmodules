@@ -1,0 +1,3 @@
+[submodule "3rdparty/fathom"]
+	path = 3rdparty/fathom
+	url = https://github.com/ilAYAli/Fathom.git
