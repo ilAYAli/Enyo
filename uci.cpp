@@ -23,7 +23,8 @@ using namespace enyo;
 
 namespace {
 
-[[maybe_unused]] std::vector<std::string> history_to_vec(const Board & b, int max_size = 0) {
+[[maybe_unused]] std::vector<std::string> history_to_vec(const Board & b, int max_size = 0)
+{
     auto const N = max_size
         ? std::min(b.histply, max_size)
         : MAX_PLY;
@@ -37,7 +38,8 @@ namespace {
 }
 
 
-std::chrono::milliseconds calculate_time_slot(const SearchInfo & si, int uci_time, int uci_inc) {
+std::chrono::milliseconds calculate_time_slot(const SearchInfo & si, int uci_time, int uci_inc)
+{
     using namespace std::chrono;
 
     constexpr milliseconds lag(50);
@@ -61,7 +63,8 @@ std::chrono::milliseconds calculate_time_slot(const SearchInfo & si, int uci_tim
     return time_slot;
 }
 
-std::chrono::milliseconds handle_time_management(const Board& b, SearchInfo & si) {
+std::chrono::milliseconds handle_time_management(const Board& b, SearchInfo & si)
+{
     bool have_time_limit = si.wtime != -1 || si.btime != -1 || si.movestogo != -1;
     if (!have_time_limit) {
         si.stoptime = std::chrono::high_resolution_clock::time_point::max();
@@ -85,7 +88,8 @@ std::chrono::milliseconds handle_time_management(const Board& b, SearchInfo & si
     return time_slot;
 }
 
-PieceType get_promo_piece(std::string const & token) {
+PieceType get_promo_piece(std::string const & token)
+{
     if (token.length() == 5) {
         if (token[4] == 'q') {
             return PieceType::queen;
@@ -107,7 +111,8 @@ Uci::Uci(enyo::Board & board)
     : b(board)
 { }
 
-int Uci::operator()(const std::string& command) {
+int Uci::operator()(const std::string& command)
+{
     if (command.length() == 0)
         return 1;
 
@@ -193,7 +198,8 @@ int Uci::operator()(const std::string& command) {
     return 0;
 }
 
-void Uci::uci() {
+void Uci::uci()
+{
     auto & config = cfgmgr;
 
     fmt::print("id name {}\n", g_version);
@@ -204,7 +210,8 @@ void Uci::uci() {
 }
 
 // setoption name Debug Log File value /tmp/foo
-void Uci::setoption(std::istringstream& iss) {
+void Uci::setoption(std::istringstream& iss)
+{
     std::string token;
     std::string name;
     std::string value;
@@ -224,7 +231,8 @@ void Uci::setoption(std::istringstream& iss) {
     cfgmgr.setopt(name, value);
 }
 
-void Uci::debug(std::istringstream& iss) {
+void Uci::debug(std::istringstream& iss)
+{
     std::string token;
     iss >> token;
     if (token == "on") {
@@ -236,17 +244,20 @@ void Uci::debug(std::istringstream& iss) {
     }
 }
 
-void Uci::isready() {
+void Uci::isready()
+{
     log("readyok\n");
 }
 
-void Uci::newgame() {
+void Uci::newgame()
+{
     b.set();
     tt::ttable.clear();
     thread::pool.kill();
 }
 
-void Uci::position(std::istringstream& iss) {
+void Uci::position(std::istringstream& iss)
+{
     std::string token;
     iss >> token;
 
