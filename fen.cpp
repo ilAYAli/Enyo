@@ -46,13 +46,13 @@ inline void set_castling_rights(Board &b, std::vector<std::string> tokens) {
 
 inline void set_enpassant(Board & b, std::vector<std::string> tokens)
 {
-    if (tokens.size() > 1) {
+    if (tokens.size() > 2) {
         b.gamestate.enpassant_square = str2sq(tokens[2].c_str());
     }
 }
 
 inline void set_half_move_clock(Board & b, std::vector<std::string> tokens) {
-    if (tokens.size() > 2) {
+    if (tokens.size() > 3) {
         auto const str = tokens[3];
         uint16_t num = 0;
         std::from_chars(str.data(), str.data() + str.size(), num);
@@ -61,7 +61,7 @@ inline void set_half_move_clock(Board & b, std::vector<std::string> tokens) {
 }
 
 inline void set_full_moves(Board & /* b */, std::vector<std::string> tokens) {
-    if (tokens.size() > 3) {
+    if (tokens.size() > 4) {
         auto const str = tokens[4];
         uint16_t num = 0;
         std::from_chars(str.data(), str.data() + str.size(), num);
