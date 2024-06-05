@@ -70,7 +70,7 @@ Value evaluate(Board & b, NNUE::Net * nnue)
         return score;
     } else {
         auto mv = b.history[b.histply -1].move;
-        if (mv.get_flags() == Move::Flags::Promote)
+        if (mv.flags() == Move::Flags::Promote)
             return enyo::HCE_evaluation<Us>(b);
         const auto score = enyo::HCE_evaluation<Us>(b);
         if constexpr (Constexpr::debug_eval)
@@ -84,10 +84,10 @@ Value evaluate(Board & b, NNUE::Net * nnue)
 template <Color Us, NodeType Node>
 inline bool see(Board & b, Move move, int threshold)
 {
-    const auto src = move.get_src();
-    const auto dst = move.get_dst();
-    const auto src_piece = move.get_src_piece();
-    const auto dst_piece = move.get_dst_piece();
+    const auto src = move.src_sq();
+    const auto dst = move.dst_sq();
+    const auto src_piece = move.src_piece();
+    const auto dst_piece = move.dst_piece();
     constexpr auto Them = ~Us;
 }
 
@@ -424,7 +424,7 @@ moves_loop:
         ss->move = move;
         ss->move_count++;
 
-        const bool is_quiet = move.get_dst_piece() == no_piece_type && move.get_flags() != Move::Flags::Promote;
+        const bool is_quiet = move.dst_piece() == no_piece_type && move.flags() != Move::Flags::Promote;
 
         // todo: Pruning at shallow depth
         // todo: Extensions
@@ -434,7 +434,7 @@ moves_loop:
         // make move
         apply_move<Us, true, true>(b, move, &worker.si.nnue);
 
-        const bool is_capture = move.get_dst_piece() != no_piece_type;
+        const bool is_capture = move.dst_piece() != no_piece_type;
 
         // LMR: Late Move Reductions
         if (depth >= 3 && !ss->in_check && ss->move_count > 3 + 2 * pv_node) {

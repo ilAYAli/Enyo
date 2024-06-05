@@ -238,31 +238,31 @@ bool pgntokenToMove(Board & b, PgnMove & pm, int half_move = 0)
             : resolve_move<black>(b, king, e8, c8);
     } else if (pm.promotion != enyo::no_piece_type) {
         for (auto const move : moves) {
-            const auto src_mask = 1ULL << move.get_src();
-            if (move.get_src_piece() == pm.pt)
+            const auto src_mask = 1ULL << move.src_sq();
+            if (move.src_piece() == pm.pt)
                 continue;
             if (!(src_mask & pm.src_file))
                 continue;
             if (!(src_mask & pm.src_rank))
                 continue;
-            if (move.get_dst() != pm.dst)
+            if (move.dst_sq() != pm.dst)
                 continue;
             pm.move = Us == white
-                ? resolve_move<white>(b, pm.pt, move.get_src(), pm.dst)
-                : resolve_move<black>(b, pm.pt, move.get_src(), pm.dst);
+                ? resolve_move<white>(b, pm.pt, move.src_sq(), pm.dst)
+                : resolve_move<black>(b, pm.pt, move.src_sq(), pm.dst);
             pm.move.set_promo_piece(pm.promotion);
             break;
         }
     } else {
         for (auto const move : moves) {
-            const auto src_mask = 1ULL << move.get_src();
-            if (move.get_src_piece() != pm.pt)
+            const auto src_mask = 1ULL << move.src_sq();
+            if (move.src_piece() != pm.pt)
                 continue;
             if (!(src_mask & pm.src_file))
                 continue;
             if (!(src_mask & pm.src_rank))
                 continue;
-            if (move.get_dst() != pm.dst)
+            if (move.dst_sq() != pm.dst)
                 continue;
             pm.move = move;
             break;
@@ -273,7 +273,7 @@ bool pgntokenToMove(Board & b, PgnMove & pm, int half_move = 0)
         fmt::print("{}\n", b);
         fmt::print("\n{} moves:\n", pm.pt);
         for (auto const move : moves) {
-            if (move.get_src_piece() == pm.pt) {
+            if (move.src_piece() == pm.pt) {
                 fmt::print("  {}\n", move);
             }
         }
@@ -420,11 +420,11 @@ std::vector<Move> extract_moves(Board & b, const std::vector<std::string> & toke
 std::string move2algebra(Move m, bool check = false)
 {
     std::string s;
-    const auto src = m.get_src();
-    const auto dst = m.get_dst();
-    const auto src_piece = m.get_src_piece();
-    const auto dst_piece = m.get_dst_piece();
-    const auto flags = m.get_flags();
+    const auto src = m.src_sq();
+    const auto dst = m.dst_sq();
+    const auto src_piece = m.src_piece();
+    const auto dst_piece = m.dst_piece();
+    const auto flags = m.flags();
 
     bool is_capture = dst_piece != PieceType::no_piece_type;
     //s = fmt::format("({}) ", m);
@@ -435,7 +435,7 @@ std::string move2algebra(Move m, bool check = false)
         else if (dst == g8) s += "O-O";
         else if (dst == c8) s += "O-O-O";
     } else if (flags & Move::Flags::Promote) {
-        const auto promo_piece = m.get_promo_piece();
+        const auto promo_piece = m.promo_piece();
         s += sq2str(dst);
         switch (promo_piece) {
             case PieceType::queen:  s += "Q"; break;
@@ -490,7 +490,7 @@ std::string move2algebra(Move m, bool check = false)
         if (is_capture) {
             s += "x";
         }
-        s += sq2str(m.get_dst());
+        s += sq2str(m.dst_sq());
         s += check ? "+" : "";
     }
     return s;

@@ -34,8 +34,8 @@ inline static constexpr int mvvlva(Move move) {
         {   0,     0,    0,    0,    0,    0,  0 }, // K
     }};
     return MVV_LVA
-        [static_cast<size_t>(move.get_dst_piece())]
-        [static_cast<size_t>(move.get_src_piece())];
+        [static_cast<size_t>(move.dst_piece())]
+        [static_cast<size_t>(move.src_piece())];
 }
 
 
@@ -69,8 +69,8 @@ std::vector<enyo::Move> prioritize_moves(Worker & worker, Movelist const & moves
 
     auto is_castle = [](Move m) {
         return
-             (m.get_src() == e1 || m.get_src() == e8) &&
-            ((m.get_dst() == c1 || m.get_dst() == c8) || (m.get_dst() == g1 || m.get_dst() == g8));
+             (m.src_sq() == e1 || m.src_sq() == e8) &&
+            ((m.dst_sq() == c1 || m.dst_sq() == c8) || (m.dst_sq() == g1 || m.dst_sq() == g8));
     };
 
     /*
@@ -101,8 +101,8 @@ std::vector<enyo::Move> prioritize_moves(Worker & worker, Movelist const & moves
         }
 
         // promote: 8000
-        if (move.get_flags() & Move::Flags::Promote) {
-            if (move.get_promo_piece() == queen)
+        if (move.flags() & Move::Flags::Promote) {
+            if (move.promo_piece() == queen)
                 scored_moves.emplace_back(ScoredMove{800, move});
             else
                 scored_moves.emplace_back(ScoredMove{-100, move});
@@ -288,7 +288,7 @@ public:
         if constexpr (ST == QSEARCH) {
             if (move == available_tt_move_) {
                 return TT_SCORE;
-            } else if (move.get_dst_piece() != no_piece_type) {
+            } else if (move.dst_piece() != no_piece_type) {
                 return CAPTURE_SCORE + mvvlva(move);
             }
         }

@@ -103,16 +103,16 @@ static inline constexpr void apply_promotion(Board & b, enyo::Move move, NNUE::N
         log(Log::info, "[+] apply promotion: {}\n", move);
 
     constexpr auto Them = ~Us;
-    const auto src_bit = move.get_src();
-    const auto dst_piece = move.get_dst_piece();
-    const auto dst_bit = move.get_dst();
+    const auto src_bit = move.src_sq();
+    const auto dst_piece = move.dst_piece();
+    const auto dst_bit = move.dst_sq();
 
     const square_t w_ksq = lsb(b.pt_bb[white][king]);
     const square_t b_ksq = lsb(b.pt_bb[black][king]);
     clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, src_bit, nnue, w_ksq, b_ksq);
     if (dst_piece != no_piece_type)
         clr_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst_bit, nnue, w_ksq, b_ksq);
-    set_piece<Us, UpdateZobrist, UpdateNNUE>(b, move.get_promo_piece(), dst_bit, nnue, w_ksq, b_ksq);
+    set_piece<Us, UpdateZobrist, UpdateNNUE>(b, move.promo_piece(), dst_bit, nnue, w_ksq, b_ksq);
 }
 
 
@@ -123,13 +123,13 @@ static inline constexpr void revert_promotion(Board & b, Undo const& undo, NNUE:
         log(Log::info, "[-] revert promotion: {}\n", undo.move);
 
     constexpr auto Them = ~Us;
-    const auto src_bit = undo.move.get_src();
-    const auto dst_piece = undo.move.get_dst_piece();
-    const auto dst_bit = undo.move.get_dst();
+    const auto src_bit = undo.move.src_sq();
+    const auto dst_piece = undo.move.dst_piece();
+    const auto dst_bit = undo.move.dst_sq();
 
     const square_t w_ksq = lsb(b.pt_bb[white][king]);
     const square_t b_ksq = lsb(b.pt_bb[black][king]);
-    clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, undo.move.get_promo_piece(), dst_bit, nnue, w_ksq, b_ksq);
+    clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, undo.move.promo_piece(), dst_bit, nnue, w_ksq, b_ksq);
     if (dst_piece != no_piece_type)
         set_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst_bit, nnue, w_ksq, b_ksq);
     set_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, src_bit, nnue, w_ksq, b_ksq);
@@ -139,8 +139,8 @@ template <Color Us, bool UpdateZobrist, bool UpdateNNUE>
 static constexpr bool apply_enpassant(Board & b, enyo::Move move, unsigned enpassant_square, NNUE::Net * nnue)
 {
     constexpr auto Them = ~Us;
-    const auto src = move.get_src();
-    const auto dst = move.get_dst();
+    const auto src = move.src_sq();
+    const auto dst = move.dst_sq();
 
     square_t const target = static_cast<square_t>(enpassant_square + (Us == black ? 8 : -8U));
     if constexpr (false)
@@ -165,8 +165,8 @@ static constexpr bool revert_enpassant(Board & b, Undo const & undo, NNUE::Net *
 {
     constexpr auto Them = ~Us;
     const auto move = undo.move;
-    const auto src = move.get_src();
-    const auto dst = move.get_dst();
+    const auto src = move.src_sq();
+    const auto dst = move.dst_sq();
 
     square_t const target = static_cast<square_t>(undo.gamestate.enpassant_square + (Us == black ? 8 : -8U));
     if constexpr (false)
@@ -564,10 +564,10 @@ static inline void init_checkers_bb(Board & b) {
 template <Color Us, bool UpdateZobrist, bool UpdateNNUE = false>
 inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
 {
-    const auto src = mv.get_src();
-    const auto dst = mv.get_dst();
-    const auto src_piece = mv.get_src_piece();
-    const auto dst_piece = mv.get_dst_piece();
+    const auto src = mv.src_sq();
+    const auto dst = mv.dst_sq();
+    const auto src_piece = mv.src_piece();
+    const auto dst_piece = mv.dst_piece();
     constexpr auto Them = ~Us;
 
 #if 0
@@ -754,10 +754,10 @@ inline void restore_castling_rights(Board & b, Undo const & undo)
 
 template<Color Us, bool UpdateZobrist, bool UpdateNNUE>
 inline void revert_move_generic(Board & b, Undo const & undo, NNUE::Net * nnue) {
-    const auto src_piece = undo.move.get_src_piece();
-    const auto dst_piece = undo.move.get_dst_piece();
-    const auto src = undo.move.get_src();
-    const auto dst = undo.move.get_dst();
+    const auto src_piece = undo.move.src_piece();
+    const auto dst_piece = undo.move.dst_piece();
+    const auto src = undo.move.src_sq();
+    const auto dst = undo.move.dst_sq();
 
     const square_t w_ksq = lsb(b.pt_bb[white][king]);
     const square_t b_ksq = lsb(b.pt_bb[black][king]);
@@ -795,8 +795,8 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
         nnue->push();
     }
 
-    const auto src_piece = move.get_src_piece();
-    const auto dst_piece = move.get_dst_piece();
+    const auto src_piece = move.src_piece();
+    const auto dst_piece = move.dst_piece();
     assert((src_piece != PieceType::no_piece_type) && "error, source position not specified");
 
     auto & undo = b.history[b.histply++] = Undo{
@@ -807,9 +807,9 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
     b.gamestate.enpassant_square = 0;
     b.side = Us;
 
-    switch (move.get_flags()) {
+    switch (move.flags()) {
         case Move::Flags::Castle:
-            if (move.get_dst() < move.get_src())
+            if (move.dst_sq() < move.src_sq())
                 apply_castle<Us, CastleSide::Kingside, UpdateZobrist, UpdateNNUE>(b, nnue);
             else
                 apply_castle<Us, CastleSide::Queenside, UpdateZobrist, UpdateNNUE>(b, nnue);
@@ -857,7 +857,7 @@ inline void revert_move(Board & b, [[maybe_unused]] NNUE::Net * nnue = nullptr)
     }
 
     if constexpr (Constexpr::constexpr_assert) {
-        if (b.histply < 0 || undo.move.get_src_piece() == no_piece_type) {
+        if (b.histply < 0 || undo.move.src_piece() == no_piece_type) {
             if (b.histply < 0) {
                 fmt::print("[ERROR] {}<{}> can't undo due to negative ply: {}, fen: {}\n",
                 __func__, Us, b.histply, b.fen());
@@ -888,9 +888,9 @@ inline void revert_move(Board & b, [[maybe_unused]] NNUE::Net * nnue = nullptr)
         fmt::print("<{}> zobrist: {} move, hash: {:016X}\n",
             __func__, Us, b.hash);
 
-    switch (undo.move.get_flags()) {
+    switch (undo.move.flags()) {
         case Move::Flags::Castle:
-            if (undo.move.get_dst() < undo.move.get_src())
+            if (undo.move.dst_sq() < undo.move.src_sq())
                 revert_castle<Us, CastleSide::Kingside, UpdateZobrist, UpdateNNUE>(b, nnue);
             else
                 revert_castle<Us, CastleSide::Queenside, UpdateZobrist, UpdateNNUE>(b, nnue);
@@ -1125,10 +1125,10 @@ Movelist generate_legal_moves(Board & b)
 
         if (!king_in_check) {
             for (auto mv : moves) {
-                bitboard_t mm = 1ULL << mv.get_dst();
-                bitboard_t src_sq_mask = 1ULL << mv.get_src();
+                bitboard_t mm = 1ULL << mv.dst_sq();
+                bitboard_t src_sq_mask = 1ULL << mv.src_sq();
                 if (!(b.blockers_bb[Us] & src_sq_mask)) {
-                    if (mv.get_dst() != b.gamestate.enpassant_square) {
+                    if (mv.dst_sq() != b.gamestate.enpassant_square) {
                         legal_moves.emplace(mv);
                     } else { // todo: enpass might result in discovered check
                         apply_move<Us>(b, mv);

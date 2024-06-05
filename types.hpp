@@ -255,36 +255,31 @@ struct alignas(4) Move {
         : data(0)
     { }
 
-    constexpr uint8_t get_src() const {
+    [[nodiscard]] constexpr square_t src_sq() const {
         return static_cast<uint8_t>((data >> src_shift) & pos_mask);
     }
 
-    constexpr uint8_t get_dst() const {
+    [[nodiscard]] constexpr square_t dst_sq() const {
         return static_cast<uint8_t>((data >> dst_shift) & pos_mask);
     }
 
-    constexpr PieceType get_src_piece() const {
+    [[nodiscard]] constexpr PieceType src_piece() const {
         return static_cast<PieceType>((data >> src_piece_shift) & pos_mask);
     }
 
-    constexpr PieceType get_dst_piece() const {
+    [[nodiscard]] constexpr PieceType dst_piece() const {
         return static_cast<PieceType>((data >> dst_piece_shift) & piece_mask);
     }
 
-    constexpr Color get_src_color() const {
+    [[nodiscard]] constexpr Color src_color() const {
         return static_cast<Color>((data >> src_color_shift) & color_mask);
     }
 
-    constexpr int get_flags() const {
+    [[nodiscard]] constexpr int flags() const {
         return static_cast<int>((data >> flags_shift) & flags_mask);
     }
 
-    constexpr void set_flags(Flags move_flags) {
-        data &= ~(flags_mask << flags_shift);
-        data |= (static_cast<uint32_t>(move_flags) & flags_mask) << flags_shift;
-    }
-
-    constexpr PieceType get_promo_piece() const {
+    [[nodiscard]] constexpr PieceType promo_piece() const {
         uint32_t val = (data >> promo_shift) & promo_mask;
         switch (val) {
             case 0: return knight;
@@ -295,6 +290,11 @@ struct alignas(4) Move {
                 assert(false && "promo_piece is not knight, bishop, rook, or queen");
         }
         return no_piece_type;
+    }
+
+    constexpr void set_flags(Flags move_flags) {
+        data &= ~(flags_mask << flags_shift);
+        data |= (static_cast<uint32_t>(move_flags) & flags_mask) << flags_shift;
     }
 
     constexpr void set_promo_piece(PieceType piece) {
@@ -416,12 +416,12 @@ struct formatter<enyo::Value> {
 template<>
 struct formatter<enyo::Move> : formatter<const char*> {
     auto format(enyo::Move type, format_context& ctx) const {
-        if (type.get_flags() != enyo::Move::Flags::Promote) {
+        if (type.flags() != enyo::Move::Flags::Promote) {
             return fmt::format_to(ctx.out(), "{}",
-                mvlookup[type.get_src()][type.get_dst()]);
+                mvlookup[type.src_sq()][type.dst_sq()]);
         }
-        auto s = fmt::format("{}", mvlookup[type.get_src()][type.get_dst()]);
-        auto const promo_piece = type.get_promo_piece();
+        auto s = fmt::format("{}", mvlookup[type.src_sq()][type.dst_sq()]);
+        auto const promo_piece = type.promo_piece();
         switch (promo_piece) {
             case enyo::knight: s += "n"; break;
             case enyo::bishop: s += "b"; break;

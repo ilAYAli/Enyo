@@ -116,14 +116,14 @@ std::pair<int, Move> probe_DTZ(Board & board)
 
     // no piece
     for (auto move : legalmoves) {
-        if (move.get_src() == sqFrom && move.get_dst() == sqTo) {
+        if (move.src_sq() == sqFrom && move.dst_sq() == sqTo) {
             if (promoTranslation[promo] == no_piece_type) {
-               if (move.get_flags() != Move::Flags::Promote) {
+               if (move.flags() != Move::Flags::Promote) {
                     return {score, move};
                 }
             } else {
                 if (promo < 5) {
-                    if (move.get_promo_piece() == promoTranslation[promo] && move.get_flags() == Move::Flags::Promote) {
+                    if (move.promo_piece() == promoTranslation[promo] && move.flags() == Move::Flags::Promote) {
                         return {score, move};
                     }
                 }

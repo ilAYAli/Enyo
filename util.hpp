@@ -61,7 +61,7 @@ constexpr inline uint8_t str2sq(char const * str) {
 
 inline __attribute__((always_inline)) const char * mv2str(Move m)
 {
-    return mvlookup[m.get_src()][m.get_dst()];
+    return mvlookup[m.src_sq()][m.dst_sq()];
 }
 
 //---[ misc ]-------------------------------------------------------------------
