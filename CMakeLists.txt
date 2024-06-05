@@ -100,8 +100,8 @@ find_package(nlohmann_json REQUIRED)
 include_directories(${NLOHMANN_JSON_INCLUDE_DIRS})
 
 #---[ targets ]----------------------------------------------------------------
-add_library(version OBJECT version.cpp)
-target_compile_definitions(version PRIVATE
+add_library(version_lib OBJECT version.cpp)
+target_compile_definitions(version_lib PRIVATE
     BUILD_HASH="${GIT_HASH}"
     BUILD_DIRTY=${GIT_DIRTY}
     BUILD_DATE="${BUILD_DATE}"
@@ -124,7 +124,7 @@ add_executable(enyo
 )
 
 add_dependencies(enyo update_version)
-target_link_libraries(enyo PRIVATE version fmt::fmt-header-only nlohmann_json::nlohmann_json fathom_lib)
+target_link_libraries(enyo PRIVATE version_lib fmt::fmt-header-only nlohmann_json::nlohmann_json fathom_lib)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Profile")
     target_link_libraries(enyo PRIVATE ${PROFILER_LIBRARY})
@@ -132,36 +132,29 @@ endif()
 
 target_include_directories(enyo PRIVATE ${CMAKE_BINARY_DIR} 3rdparty/Fathom/src)
 
-#--- gtest
-find_library(GTEST_LIBRARY gtest HINTS /opt/homebrew)
-if(NOT GTEST_LIBRARY)
-    message(FATAL_ERROR "Google Test library not found. Make sure it's installed or set GTEST_LIBRARY variable.")
+if(BUILD_GTEST)
+    find_library(GTEST_LIBRARY gtest HINTS /opt/homebrew)
+    if(NOT GTEST_LIBRARY)
+        message(FATAL_ERROR "Google Test library not found. Make sure it's installed or set GTEST_LIBRARY variable.")
+    endif()
+
+    add_executable(gtest
+        test/gtest.cpp
+        fen.cpp
+        board.cpp
+        exepath.cpp
+        magic/magic.cpp
+        thread.cpp
+        uci.cpp
+        pgn.cpp
+        nnue.cpp
+        search.cpp
+        zobrist.cpp
+        probe.cpp
+    )
+    target_include_directories(gtest PRIVATE ${GTEST_INCLUDE_DIRS})
+    target_link_libraries(gtest PRIVATE version_lib fmt::fmt-header-only ${GTEST_LIBRARY} nlohmann_json::nlohmann_json)
 endif()
-
-# gtest:
-add_executable(gtest
-    test/gtest.cpp
-    fen.cpp
-    board.cpp
-    exepath.cpp
-    magic/magic.cpp
-    thread.cpp
-    uci.cpp
-    pgn.cpp
-    nnue.cpp
-    search.cpp
-    zobrist.cpp
-    probe.cpp
-)
-target_include_directories(gtest PRIVATE ${GTEST_INCLUDE_DIRS})
-target_link_libraries(gtest PRIVATE fmt::fmt-header-only ${GTEST_LIBRARY} nlohmann_json::nlohmann_json)
-
-
-#---[ target output ]----------------------------------------------------------
-message(STATUS "${COLOR_CYAN}${PROJECT_NAME}${COLOR_RESET} build: ${CMAKE_BUILD_TYPE}")
-message(STATUS "${COLOR_CYAN}${PROJECT_NAME}${COLOR_RESET} flags: ${CMAKE_CXX_FLAGS}")
-get_target_property(LINK_LIBRARIES ${PROJECT_NAME} LINK_LIBRARIES)
-message(STATUS "${COLOR_CYAN}${PROJECT_NAME}${COLOR_RESET} libs: ${LINK_LIBRARIES}")
 
 #---[ install targets ]--------------------------------------------------------
 add_custom_command(
