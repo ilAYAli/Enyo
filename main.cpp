@@ -21,10 +21,6 @@
 using json = nlohmann::json;
 using namespace enyo;
 
-namespace thread {
-Pool pool;
-}
-
 namespace {
 
 namespace fs = std::filesystem;
