@@ -25,8 +25,8 @@ struct Movelist {
 
     constexpr inline int find(enyo::Move m) {
         auto it = std::ranges::find_if(moves, [&](const auto move) {
-            return move.get_src() == m.get_src()
-                && move.get_dst() == m.get_dst();
+            return move.src_sq() == m.src_sq()
+                && move.dst_sq() == m.dst_sq();
         });
         return (it != moves + size_)
             ? static_cast<int>(std::distance(moves, it))
