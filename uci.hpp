@@ -10,6 +10,7 @@
 #include "eventlog.hpp"
 #include "thread.hpp"
 #include "movelist.hpp"
+#include "version.hpp"
 
 extern bool UCILogEnabled;
 
