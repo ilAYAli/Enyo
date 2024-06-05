@@ -4,7 +4,6 @@
 
 using namespace enyo;
 
-
 [[nodiscard]] bool Worker::time_expired()
 {
     if (thread::pool.stop.load(std::memory_order_relaxed)) {
@@ -28,6 +27,7 @@ void Worker::start()
 }
 
 namespace thread {
+Pool pool;
 
 uint64_t Pool::get_nps() const
 {
