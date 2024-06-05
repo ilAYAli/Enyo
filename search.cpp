@@ -18,6 +18,7 @@
 #include "config.hpp"
 #include "tt.hpp"
 #include "hce.hpp"
+#include "see.hpp"
 
 using namespace enyo;
 using namespace eventlog;
@@ -78,17 +79,6 @@ Value evaluate(Board & b, NNUE::Net * nnue)
                 Us, b.history[b.histply -1].move, score, is_repetition(b), b.hash, b.fen());
         return score;
     }
-}
-
-// Static Exchange Evaluation
-template <Color Us, NodeType Node>
-inline bool see(Board & b, Move move, int threshold)
-{
-    const auto src = move.src_sq();
-    const auto dst = move.dst_sq();
-    const auto src_piece = move.src_piece();
-    const auto dst_piece = move.dst_piece();
-    constexpr auto Them = ~Us;
 }
 
 template <Color Us, NodeType Node>
