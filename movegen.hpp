@@ -459,7 +459,6 @@ inline void init_attacks_bb(Board & b)
     std::memset(b.attacks_bb[c], 0, sizeof(b.attacks_bb[c]));
 
     bitboard_t const pieces = (b.color_bb[~c] | b.color_bb[c]) & ~b.pt_bb[~c][king];
-    //bitboard_t const pieces = b.color_bb[~c] | b.color_bb[c];
     b.all_attacks_bb[c] = 0;
 
     bool constexpr debug = false;

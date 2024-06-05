@@ -1,4 +1,4 @@
 #pragma once
-#include <string_view>
+#include <string>
 
-extern const std::string_view g_version;
+extern const std::string g_version;
