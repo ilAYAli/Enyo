@@ -11,27 +11,23 @@ namespace {
 template <Color Us>
 inline PieceType remove_least_valuable_attacker(Board &b, square_t sq) {
     constexpr Color Them = ~Us;
-    const auto pawns_bb = b.pt_bb[Them][pawn];
-    if (pawns_bb & pawn_attack_table[Us][sq]) {
-        square_t attack_sq = 1ULL << lsb(pawns_bb & pawn_attack_table[Us][sq]);
-        b.pt_bb[Them][pawn] &= ~attack_sq;
-        return pawn;
-    } else if (b.pt_bb[Them][knight] & knight_attack_table[sq]) {
-        square_t attack_sq = 1ULL << lsb(b.pt_bb[Them][knight] & knight_attack_table[sq]);
-        b.pt_bb[Them][knight] &= ~attack_sq;
-        return knight;
-    } else if (b.pt_bb[Them][bishop] & bishop_moves<Us>(b, sq)) {
-        square_t attack_sq = 1ULL << lsb(b.pt_bb[Them][bishop] & bishop_moves<Us>(b, sq));
-        b.pt_bb[Them][bishop] &= ~attack_sq;
-        return bishop;
-    } else if (b.pt_bb[Them][rook] & rook_moves<Us>(b, sq)) {
-        square_t attack_sq = 1ULL << lsb(b.pt_bb[Them][rook] & rook_moves<Us>(b, sq));
-        b.pt_bb[Them][rook] &= ~attack_sq;
-        return rook;
-    } else if (b.pt_bb[Them][queen] & (bishop_moves<Us>(b, sq) | rook_moves<Us>(b, sq))) {
-        square_t attack_sq = 1ULL << lsb(b.pt_bb[Them][queen] & (bishop_moves<Us>(b, sq) | rook_moves<Us>(b, sq)));
-        b.pt_bb[Them][queen] &= ~attack_sq;
-        return queen;
+    for (PieceType pt : {pawn, knight, bishop, rook, queen}) {
+        const auto attackers_bb = b.pt_bb[Them][pt];
+        bitboard_t attacks;
+        switch (pt) {
+            case pawn:   attacks = pawn_attack_table[Us][sq]; break;
+            case knight: attacks = knight_attack_table[sq]; break;
+            case bishop: attacks = bishop_moves<Us>(b, sq); break;
+            case rook:   attacks = rook_moves<Us>(b, sq); break;
+            case queen:  attacks = bishop_moves<Us>(b, sq) | rook_moves<Us>(b, sq); break;
+            default:     attacks = 0;
+        }
+
+        if (attackers_bb & attacks) {
+            square_t attack_sq = lsb(attackers_bb & attacks);
+            b.pt_bb[Them][pt] &= ~(1ULL << attack_sq);
+            return pt;
+        }
     }
     return no_piece_type;
 }
