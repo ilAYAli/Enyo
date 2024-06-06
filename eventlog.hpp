@@ -1,64 +1,54 @@
 #pragma once
 
 #include <fstream>
-#include "unistd.h"
-#include "fmt/format.h"
+#include <unistd.h>
+#include <fmt/format.h>
 #include "config.hpp"
-
-//#ifdef PROFILE_BUILD
-//    inline constexpr auto dbg_enabled = false;
-//#else
-//    inline constexpr auto dbg_enabled = false;
-//#endif
-
-inline constexpr auto dbg_enabled = true;
-inline constexpr auto log_enabled = false;
-
+#include <thread>
+#include <sstream>
+#include <mutex>
+#include <atomic>
 namespace eventlog {
 
 enum class Log {
+    none = 0,
     debug,
     verbose,
+    uci,
     info,
     warning,
     error,
-    none,
+    all,
 };
 
-inline auto logLevel = Log::none;
+constexpr inline auto defaultLogLevel = Log::info;
 
-inline constexpr const char* levelToString(Log l) {
-    switch (l) {
-        case Log::verbose:  return "[verbose]";
-        case Log::debug:    return "[debug]";
-        case Log::info:     return "[info]";
-        case Log::warning:  return "[warning]";
-        case Log::error:    return "[error]";
-        default:            return "[unknown]";
-    }
+inline std::string getLogFilename(const std::string& baseFilename) {
+    std::ostringstream oss;
+    oss << baseFilename.substr(0, baseFilename.find_last_of('.'))
+        << "_" << getpid()
+        << "_" << std::this_thread::get_id()
+        << baseFilename.substr(baseFilename.find_last_of('.'));
+    return oss.str();
 }
 
-// compile time: debug (debug on):
-template <Log level = Log::debug, typename... T>
-void debug(fmt::format_string<T...> fmt, T &&... args) {
-    if constexpr (true) {
-        auto const filename = fmt::format("{}", enyo::cfgmgr.logfile);
-        auto const str = fmt::format(fmt, std::forward<T>(args)...);
-        std::ofstream logFile(filename, std::ios::app);
+inline std::string logFilename = getLogFilename(enyo::cfgmgr.logfile);
+inline std::ofstream logFile(logFilename, std::ios::app);
+
+template <Log level = Log::info, typename... T>
+inline void log(fmt::format_string<T...> fmtStr, T&&... args) {
+    if constexpr (level <= defaultLogLevel) {
         if (logFile.is_open()) {
-            logFile << fmt::format("{}", str);
-            logFile.close();
+            constexpr std::size_t average_log_size = 64000;
+            static thread_local std::vector<char> buffer(average_log_size);
+            auto it = fmt::format_to(buffer.begin(), fmtStr, std::forward<T>(args)...);
+            if (it > buffer.end()) {
+                buffer.resize(it - buffer.begin());
+                it = fmt::format_to(buffer.begin(), fmtStr, std::forward<T>(args)...);
+            }
+            logFile.write(buffer.data(), it - buffer.begin());
         }
     }
 }
 
-// runtime: system logging:
-template<typename... T>
-void log(Log level, fmt::format_string<T...> fmt = {}, T&&... args) {
-    if (level < logLevel)
-        return;
-    auto const str = fmt::format(fmt, std::forward<T>(args)...);
-    fmt::print("{}",  str);
-}
-
-}
+} // namespace eventlog
