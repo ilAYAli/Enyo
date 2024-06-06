@@ -70,7 +70,7 @@ Value evaluate(Board & b, NNUE::Net * nnue)
             fmt::print("<{}> move: {}, score: {}\n", Us, b.history[b.histply -1].move, score);
         return score;
     } else {
-        auto mv = b.history[b.histply -1].move;
+        const auto mv = b.history[b.histply -1].move;
         if (mv.flags() == Move::Flags::Promote)
             return enyo::HCE_evaluation<Us>(b);
         const auto score = enyo::HCE_evaluation<Us>(b);
@@ -610,7 +610,7 @@ void search_position(Worker & worker)
             tt::ttable.get_hashfull(),
             worker.pvline.str());
 
-        Uci::log("{}\n", info_string);
+        ucilog("{}\n", info_string);
 
         // not making progress:
         if (prev_nodes == thread::pool.get_nodes())
@@ -620,10 +620,7 @@ void search_position(Worker & worker)
             break;
     }
     if (worker.id == 0) {
-        Uci::log("bestmove {}\n", shortest_mate.move
-            ? shortest_mate.move
-            : worker.bestmove);
-
+        ucilog("bestmove {}\n", shortest_mate.move ? shortest_mate.move : worker.bestmove);
     }
 }
 

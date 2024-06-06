@@ -21,7 +21,6 @@
 #include "util.hpp"
 #include "fmt/core.h"
 
-using namespace eventlog;
 using namespace enyo;
 
 namespace {
@@ -100,7 +99,7 @@ template <Color Us, bool UpdateZobrist, bool UpdateNNUE>
 static inline constexpr void apply_promotion(Board & b, enyo::Move move, NNUE::Net * nnue)
 {
     if constexpr (false)
-        log(Log::info, "[+] apply promotion: {}\n", move);
+        log<Log::debug>("[+] apply promotion: {}\n", move);
 
     constexpr auto Them = ~Us;
     const auto src_bit = move.src_sq();
@@ -120,7 +119,7 @@ template <Color Us, bool UpdateZobrist, bool UpdateNNUE>
 static inline constexpr void revert_promotion(Board & b, Undo const& undo, NNUE::Net * nnue)
 {
     if constexpr(false)
-        log(Log::info, "[-] revert promotion: {}\n", undo.move);
+        log<Log::debug>("[-] revert promotion: {}\n", undo.move);
 
     constexpr auto Them = ~Us;
     const auto src_bit = undo.move.src_sq();

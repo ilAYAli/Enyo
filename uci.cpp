@@ -17,9 +17,10 @@
 #include "movegen.hpp"
 #include "tt.hpp"
 #include "version.hpp"
+#include "eventlog.hpp"
 
-using namespace eventlog;
 using namespace enyo;
+using namespace eventlog;
 
 namespace {
 
@@ -116,7 +117,7 @@ int Uci::operator()(const std::string& command)
     if (command.length() == 0)
         return 1;
 
-    eventlog::debug("{}\n", command); // received command "[rx]"
+    eventlog::log<Log::uci>("{}\n", command);
 
     std::istringstream iss(command);
     std::string token;
@@ -203,10 +204,10 @@ void Uci::uci()
     auto & config = cfgmgr;
 
     fmt::print("id name {}\n", g_version);
-    log("id author Petter Wahlman\n\n");
-    log("{}", config.allopts());
-    log("\n");
-    log("uciok\n");
+    ucilog("id author Petter Wahlman\n\n");
+    ucilog("{}", config.allopts());
+    ucilog("\n");
+    ucilog("uciok\n");
 }
 
 // setoption name Debug Log File value /tmp/foo
@@ -236,17 +237,17 @@ void Uci::debug(std::istringstream& iss)
     std::string token;
     iss >> token;
     if (token == "on") {
-        log("info string debug: on\n");
-        enable_debug = true;
+        ucilog("info string debug: on\n");
+        eventlog::uci_debug_log = true;
     } else if (token == "off") {
-        log("info string debug: off\n");
-        enable_debug = false;
+        ucilog("info string debug: off\n");
+        eventlog::uci_debug_log = false;
     }
 }
 
 void Uci::isready()
 {
-    log("readyok\n");
+    ucilog("readyok\n");
 }
 
 void Uci::newgame()
@@ -263,7 +264,7 @@ void Uci::position(std::istringstream& iss)
 
     if (token == "startpos") {
         if (iss >> token && token != "moves") {
-            eventlog::debug("Error, unexpected token after startpos: {}\n", token);
+            eventlog::log<Log::debug>("Error, unexpected token after startpos: {}\n", token);
             return;
         }
         b.set();
@@ -284,7 +285,7 @@ void Uci::position(std::istringstream& iss)
             b.set(fen);
         }
     } else {
-        eventlog::debug("Error, unknown position type: {}\n", token);
+        eventlog::log<Log::error>("Error, unknown position type: {}\n", token);
         return;
     }
 
