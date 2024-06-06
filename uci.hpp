@@ -11,35 +11,25 @@
 #include "thread.hpp"
 #include "movelist.hpp"
 #include "version.hpp"
+#include "eventlog.hpp"
 
 extern bool UCILogEnabled;
+static bool uci_debug_log = false;
 
-static bool enable_debug = false;
+using namespace eventlog;
+
+namespace enyo {
 
 class Uci {
 public:
-    explicit Uci(enyo::Board & board);
+    explicit Uci(Board & board);
 
     void parse(std::string const & command);
     int operator()(const std::string & command);
 
-    template<typename... T>
-    static void log(fmt::format_string<T...> fmt = {}, T&&... args) {
-        if constexpr (true) {
-            const auto str = fmt::format(fmt, std::forward<T>(args)...);
-            eventlog::debug("{}", str); // [tx]
-            if (!enable_debug && str.starts_with("info string")) {
-                return;
-            }
-            fmt::print("{}", str);
-            fflush(stdout);
-        }
-    }
-
     std::chrono::milliseconds time_limit {};
     std::thread main_search_thread {};
-    enyo::Board & b;
-    //enyo::ThreadPool pool;
+    Board & b;
     std::string white_player = "?";
     std::string black_player = "?";
 
@@ -57,3 +47,4 @@ private:
     void quit();
 };
 
+}

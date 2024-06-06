@@ -161,12 +161,10 @@ bool set_fen(Board & b, std::string_view fenstr)
 {
     if (fenstr == "startpos")
         fenstr = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    if constexpr(false)
-        log(Log::debug, "{} {}\n", __func__, fenstr);
 
     auto tokens = split(std::string(fenstr), '/');
     if  (tokens.empty() || tokens.size() != 8) {
-        log(Log::error, "incorrect FEN string\n");
+        log<Log::error>("incorrect FEN string\n");
         return false;
     }
 

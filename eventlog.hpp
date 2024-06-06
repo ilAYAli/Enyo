@@ -21,6 +21,7 @@ enum class Log {
     all,
 };
 
+
 constexpr inline auto defaultLogLevel = Log::info;
 
 inline std::string getLogFilename(const std::string& baseFilename) {
@@ -48,6 +49,19 @@ inline void log(fmt::format_string<T...> fmtStr, T&&... args) {
             }
             logFile.write(buffer.data(), it - buffer.begin());
         }
+    }
+}
+
+static inline std::atomic<bool> uci_debug_log = false;
+template<typename... T>
+static void ucilog(fmt::format_string<T...> fmt = {}, T&&... args) {
+    if constexpr (true) {
+        const auto str = fmt::format(fmt, std::forward<T>(args)...);
+        log<Log::info>(fmt, std::forward<T>(args)...);
+        if (!uci_debug_log && str.starts_with("info string"))
+            return;
+        fmt::print("{}", str);
+        fflush(stdout);
     }
 }
 
