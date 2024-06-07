@@ -414,7 +414,9 @@ moves_loop:
         ss->move = move;
         ss->move_count++;
 
-        const bool is_quiet = move.dst_piece() == no_piece_type && move.flags() != Move::Flags::Promote;
+       const bool is_quiet = move.dst_piece() == no_piece_type && move.flags() != Move::Flags::Promote;
+       const bool is_capture = move.dst_piece() != no_piece_type;
+
 
         // todo: Pruning at shallow depth
         // todo: Extensions
@@ -423,8 +425,6 @@ moves_loop:
 
         // make move
         apply_move<Us, true, true>(b, move, &worker.si.nnue);
-
-        const bool is_capture = move.dst_piece() != no_piece_type;
 
         // LMR: Late Move Reductions
         if (depth >= 3 && !ss->in_check && ss->move_count > 3 + 2 * pv_node) {

@@ -14,7 +14,6 @@
 #include "eventlog.hpp"
 
 extern bool UCILogEnabled;
-static bool uci_debug_log = false;
 
 using namespace eventlog;
 
