@@ -108,14 +108,26 @@ std::vector<enyo::Move> prioritize_moves(Worker & worker, Movelist const & moves
                 scored_moves.emplace_back(ScoredMove{-100, move});
             continue;
         }
-        // TODO: add "Hash move from hash tables"
-
+        #if 0
+        // captures: SEE score
+        if (move.dst_piece() != no_piece_type) {
+            int see_score = see<Us>(b, move, 0);
+            if (see_score >= 0) {
+                score = 5000 + see_score;
+            } else {
+                score = 1000 + see_score;
+            }
+            scored_moves.emplace_back(ScoredMove{score, move});
+            continue;
+        }
+        #else
         // captures: 1100 -> 5500
         score = mvvlva(move);
         if (score) {
             scored_moves.emplace_back(ScoredMove{score, move});
             continue;
         }
+        #endif
 
         // killers: 800-900
         score = get_killer_score(worker, move);

@@ -34,9 +34,9 @@ inline PieceType remove_least_valuable_attacker(Board &b, square_t sq) {
 
 }
 
-// Static Exchange Evaluation
+// Static Exchange Evaluation (note: board must be passed by value)
 template <Color Us>
-inline bool see(Board const & b, Move move, int threshold)
+inline bool see(Board b, Move move, int threshold)
 {
     constexpr auto Them = ~Us;
     const auto dst_sq = move.dst_sq();
@@ -44,32 +44,38 @@ inline bool see(Board const & b, Move move, int threshold)
     auto attacker = move.src_piece();
     int gain[MAX_PLY] {};
 
-    Board tmpBoard = b;
-    tmpBoard.pt_bb[Us][attacker] &= ~(1ULL << move.src_sq());
+    // Remove attacker:
+    b.pt_bb[Us][attacker] &= ~(1ULL << move.src_sq());
+    // remove capture if any:
     if (dst_piece != no_piece_type) {
-        tmpBoard.pt_bb[Them][dst_piece] &= ~(1ULL << dst_sq);
+        b.pt_bb[Them][dst_piece] &= ~(1ULL << dst_sq);
     }
 
     gain[0] = piece_value(dst_piece);
+    if (gain[0] < threshold)
+        return false;
 
     int d = 0;
     while (true) {
-        attacker = remove_least_valuable_attacker<Them>(tmpBoard, dst_sq);
-        if (attacker == no_piece_type)
-            break;
+        // Opponent attack:
+        attacker = remove_least_valuable_attacker<Them>(b, dst_sq);
+        if (attacker == no_piece_type) break;
         gain[++d] = piece_value(attacker) - gain[d - 1];
-        if (std::max(-gain[d - 1], gain[d]) < 0)
-            break;
+        if (std::max(-gain[d - 1], gain[d]) < 0) break;
 
-        attacker = remove_least_valuable_attacker<Us>(tmpBoard, dst_sq);
-        if (attacker == no_piece_type)
-            break;
+        // Our recapture:
+        attacker = remove_least_valuable_attacker<Us>(b, dst_sq);
+        if (attacker == no_piece_type) break;
         gain[++d] = piece_value(attacker) - gain[d - 1];
-        if (std::max(-gain[d - 1], gain[d]) < 0)
-            break;
+        if (std::max(-gain[d - 1], gain[d]) < 0) break;
     }
-    while (--d)
+
+    if (!d)
+        return false;
+    while (--d) {
         gain[d - 1] = -std::max(-gain[d - 1], gain[d]);
+    }
+
     return gain[0] >= threshold;
 }
 
