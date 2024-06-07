@@ -82,11 +82,11 @@ Board::Board(std::string_view fenstr)
     set(fenstr);
 }
 
-void Board::set(std::string_view s) {
+void Board::set(std::string_view fen) {
     // clear ply, captues, bitboards, ...
     clear_data();
 
-    set_fen(*this, s);
+    set_fen(*this, fen);
     hash = zobrist::generate_hash(*this);
 
     init_sliders_attacks(bishop);
