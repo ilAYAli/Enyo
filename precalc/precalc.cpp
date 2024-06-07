@@ -43,21 +43,21 @@ void init_rook_attacks()
 
 void init_bishop_attacks()
 {
-    auto bishop_attacks = [](uint8_t srcBit) {
+    auto bishop_attacks = [](uint8_t src_sq) {
         uint64_t validMoves = 0;
         const int offsets[] = { 7, 9, -7, -9 };
         for (auto offset : offsets) {
-            auto dstBit = (srcBit + offset);
-            while (dstBit >= 0 && dstBit < 64) {
-                auto const srcRow = 7 - (srcBit % 8);
-                auto const srcCol = 7 - (srcBit / 8);
-                auto const dstRow = 7 - (dstBit % 8);
-                auto const dstCol = 7 - (dstBit / 8);
+            auto dst_sq = (src_sq + offset);
+            while (dst_sq >= 0 && dst_sq < 64) {
+                auto const srcRow = 7 - (src_sq % 8);
+                auto const srcCol = 7 - (src_sq / 8);
+                auto const dstRow = 7 - (dst_sq % 8);
+                auto const dstCol = 7 - (dst_sq / 8);
                 // Check if the destination is on the same diagonal:
                 if (std::abs(dstRow - srcRow) == std::abs(dstCol - srcCol)) {
                     validMoves |= (1ULL << dstBit);
                 }
-                dstBit += offset;
+                dst_sq += offset;
             }
         }
         return validMoves;

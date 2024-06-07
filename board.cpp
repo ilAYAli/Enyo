@@ -141,12 +141,12 @@ std::string Board::str(uint64_t attack_mask, unsigned indent) const
     fmt::format_to(out, "\n{}     0   1   2   3   4   5   6   7\n", prefix);
     fmt::format_to(out, "{}   +---+---+---+---+---+---+---+---+\n", prefix);
 
-    for (int bit = 63; bit >= 0; bit--) {
-        auto const mask = 1ULL << bit;
-        if (bit == 63) {
+    for (int sq = 63; sq >= 0; sq--) {
+        auto const mask = 1ULL << sq;
+        if (sq == 63) {
             fmt::format_to(out, "{}{:>2d} | ", prefix, /*rank*/8);
-        } else if (bit && (bit % 8 == 7)) {
-            int const rank = bit / 8 + 1;
+        } else if (sq && (sq % 8 == 7)) {
+            int const rank = sq / 8 + 1;
             std::string extra = "";
             if (rank == 7) extra = fmt::format("  key: {:16X}", hash);
             if (rank == 6) extra = fmt::format("  side: {}", side);
@@ -158,13 +158,13 @@ std::string Board::str(uint64_t attack_mask, unsigned indent) const
                 " {} {}\n"
                 " {}  +---+---+---+---+---+---+---+---+\n"
                 "{}{:>2d} | ",
-                /*bit*/bit + 1, extra,
+                /*bit*/sq + 1, extra,
                 prefix,
                 /*idx:*/prefix,
                 /* rank */ rank);
         }
 
-        if (attack_mask & (1ULL << bit)) {
+        if (attack_mask & (1ULL << sq)) {
             fmt::format_to(out, "* | ");
         } else {
             if (mask & pt_bb[black][static_cast<uint8_t>(pawn)]) {
