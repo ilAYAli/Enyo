@@ -221,17 +221,7 @@ enum PieceType : uint32_t {
     piece_type_nb = king + 1
 };
 
-static inline int piece_value(PieceType pt) {
-    switch (pt) {
-        case pawn:   return 100;
-        case knight: return 320;
-        case bishop: return 330;
-        case rook:   return 500;
-        case queen:  return 900;
-        case king:   return 0;
-        default:     return 0;
-    }
-}
+
 //----[ move ]-----------------------------------------------------------------
 struct alignas(4) Move {
     static constexpr uint32_t no_move = 0x0000000000000000;
