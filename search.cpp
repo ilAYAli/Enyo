@@ -132,16 +132,10 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     if (best_value > alpha)
         alpha = best_value;
 
-#if 1
-    MovePicker<Us, QSEARCH> mp(worker, ss, tt_move);
-    //auto const moves = mp.filter_captures();
-#else
-    auto const moves = filter_captures(generate_legal_moves<Us>(b), tt_move);
-#endif
-
-    Move move {};
+    auto const lm = generate_legal_moves<Us>(b);
+    auto const mp = prioritize_moves<Us, QSEARCH>(worker, lm, tt_move, depth);
     Move best_move {};
-    while ((move = mp.next_move())) {
+    for (auto move : mp) {
         si.nodes++;
 
         apply_move<Us, true, true>(b, move, &si.nnue);
@@ -405,11 +399,16 @@ moves_loop:
         }
         return Value::DRAW;
     }
-    auto const mp = prioritize_moves<Us>(worker, lm, tt_move);
+#if 1
+    auto const mp = prioritize_moves<Us, ABSEARCH>(worker, lm, tt_move, depth);
+#else
+    auto mp = MovePicker2<Us>(worker, lm, tt_move);
+#endif
 
     bool do_fullsearch = false;
     ss->move_count = 0;
     for (const auto move : mp) {
+    //while (const auto move = mp.next()) {
         si.nodes++;
         ss->move = move;
         ss->move_count++;
