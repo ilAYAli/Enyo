@@ -102,16 +102,16 @@ static inline constexpr void apply_promotion(Board & b, enyo::Move move, NNUE::N
         log<Log::debug>("[+] apply promotion: {}\n", move);
 
     constexpr auto Them = ~Us;
-    const auto src_bit = move.src_sq();
+    const auto src_sq = move.src_sq();
     const auto dst_piece = move.dst_piece();
-    const auto dst_bit = move.dst_sq();
+    const auto dst_sq = move.dst_sq();
 
     const square_t w_ksq = lsb(b.pt_bb[white][king]);
     const square_t b_ksq = lsb(b.pt_bb[black][king]);
-    clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, src_bit, nnue, w_ksq, b_ksq);
+    clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, src_sq, nnue, w_ksq, b_ksq);
     if (dst_piece != no_piece_type)
-        clr_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst_bit, nnue, w_ksq, b_ksq);
-    set_piece<Us, UpdateZobrist, UpdateNNUE>(b, move.promo_piece(), dst_bit, nnue, w_ksq, b_ksq);
+        clr_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst_sq, nnue, w_ksq, b_ksq);
+    set_piece<Us, UpdateZobrist, UpdateNNUE>(b, move.promo_piece(), dst_sq, nnue, w_ksq, b_ksq);
 }
 
 
@@ -122,16 +122,16 @@ static inline constexpr void revert_promotion(Board & b, Undo const& undo, NNUE:
         log<Log::debug>("[-] revert promotion: {}\n", undo.move);
 
     constexpr auto Them = ~Us;
-    const auto src_bit = undo.move.src_sq();
+    const auto src_sq = undo.move.src_sq();
     const auto dst_piece = undo.move.dst_piece();
-    const auto dst_bit = undo.move.dst_sq();
+    const auto dst_sq = undo.move.dst_sq();
 
     const square_t w_ksq = lsb(b.pt_bb[white][king]);
     const square_t b_ksq = lsb(b.pt_bb[black][king]);
-    clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, undo.move.promo_piece(), dst_bit, nnue, w_ksq, b_ksq);
+    clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, undo.move.promo_piece(), dst_sq, nnue, w_ksq, b_ksq);
     if (dst_piece != no_piece_type)
-        set_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst_bit, nnue, w_ksq, b_ksq);
-    set_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, src_bit, nnue, w_ksq, b_ksq);
+        set_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst_sq, nnue, w_ksq, b_ksq);
+    set_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, src_sq, nnue, w_ksq, b_ksq);
 }
 
 template <Color Us, bool UpdateZobrist, bool UpdateNNUE>

@@ -149,9 +149,9 @@ std::vector<enyo::Move> prioritize_moves(Worker & worker, Movelist const & moves
     std::sort(scored_moves.begin(), scored_moves.end());
 
     if constexpr (debug) {
-        fmt::print("moves:{}\n", moves.size());
-        for (auto const move: scored_moves) {
-            fmt::print("  {}: {}\n", move.move, move.score);
+        fmt::print("{} moves:{}\n", ST == QSEARCH ? "QS" : "AB", moves.size());
+        for (const auto& [score, move] : scored_moves) {
+            if (score) fmt::print("  {}: {}\n", move, score);
         }
     }
 
