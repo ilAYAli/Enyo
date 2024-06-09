@@ -332,6 +332,8 @@ struct alignas(4) Move {
         return data != no_move;
     }
 
+    auto operator<=>(const Move&) const = default;
+
     Move & operator=(uint32_t value) {
         data = value;
         return *this;
@@ -365,9 +367,7 @@ static_assert(sizeof(Move) == 4, "Move must be exactly 32 bits");
 struct ScoredMove {
     int score {};
     enyo::Move move {};
-    bool operator<(ScoredMove const & other) const {
-        return score > other.score; // Sort in descending order
-    }
+    auto operator<=>(const ScoredMove&) const = default;
 };
 
 struct Gamestate {
