@@ -109,12 +109,14 @@ std::string get_fen(Board const & b) {
                 s += "K"; ++row;
             } else {
                 uint8_t empty = 0;
-                for (uint8_t r = row + 0; r < 8; r++) {
+                for (uint8_t r = row; r < 8; r++) {
                     auto const m = 1ULL << fencr2bit(col, r);
                     if (m & (b.color_bb[white] | b.color_bb[black]))
                         break;
                     empty++;
                 }
+                if (!empty)
+                    empty = 1;
                 s += std::to_string(empty);
                 row += empty;
             }

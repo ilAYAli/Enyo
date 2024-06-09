@@ -12,18 +12,6 @@ namespace enyo {
 
 enum SearchType { QSEARCH, ABSEARCH };
 
-static inline int piece_value(PieceType pt) {
-    switch (pt) {
-        case pawn:   return 100;
-        case knight: return 320;
-        case bishop: return 330;
-        case rook:   return 500;
-        case queen:  return 900;
-        case king:   return 0;
-        default:     return 0;
-    }
-}
-
 inline static constexpr int mvvlva(Move move) {
     constexpr std::array<std::array<int, piece_type_nb>, piece_type_nb> MVV_LVA = {{
         // attacker ... ->
