@@ -201,6 +201,5 @@ std::string Board::str(uint64_t attack_mask, unsigned indent) const
     fmt::format_to(out, "{}   +---+---+---+---+---+---+---+---+\n", prefix);
     fmt::format_to(out, "{}     A   B   C   D   E   F   G   H  \n", prefix);
     fmt::format_to(out, "\nFen: {}", ::get_fen(*this));
-
     return fmt::to_string(tmp);
 };

@@ -47,14 +47,16 @@ constexpr Color get_side_to_move(std::string_view fen) {
 
 
 TEST(check, static_exchange_evaluation) {
-    std::string fen = "7k/p7/1p6/8/8/1Q6/8/7K w - - 0 1";
+    std::string fen = "7k/p1p5/1p6/8/8/1Q2B3/8/7K w - - 0 1";
     Board b(fen);
 
     //template <Color Us>
     //inline bool see(Board b, Move move, int threshold)
     auto qm = resolve_move<white>(b, queen, b3, b6);
-    fmt::print("qm: {}\n", qm);
-    fmt::println("board: {}", b.str());
+    //fmt::print("qm: {}\n", qm);
+    //fmt::println("board: {}", b.str());
+    constexpr auto score = piece_value(pawn) - piece_value(queen) + piece_value(pawn) - piece_value(bishop);
+    ASSERT_EQ(score, see<white>(b, qm, 0));
     fmt::println("result: {}", see<white>(b, qm, 0));
 }
 
