@@ -107,7 +107,7 @@ static inline std::vector<enyo::Move> prioritize_moves(
         scored_moves.emplace_back(ScoredMove{score, move});
     }
 
-    std::sort(scored_moves.begin(), scored_moves.end());
+    std::ranges::sort(scored_moves);
 
     if constexpr (debug) {
         fmt::print("{} moves:{}\n", ST == QSEARCH ? "QS" : "AB", moves.size());
