@@ -132,14 +132,15 @@ endif()
 
 target_include_directories(enyo PRIVATE ${CMAKE_BINARY_DIR} 3rdparty/Fathom/src)
 
-if(BUILD_GTEST)
+option(BUILD_TESTS "Build the gtest target" ON)
+if(BUILD_TESTS)
     find_library(GTEST_LIBRARY gtest HINTS /opt/homebrew)
     if(NOT GTEST_LIBRARY)
         message(FATAL_ERROR "Google Test library not found. Make sure it's installed or set GTEST_LIBRARY variable.")
     endif()
 
-    add_executable(gtest
-        test/gtest.cpp
+    add_executable(test
+        test/tests.cpp
         fen.cpp
         board.cpp
         exepath.cpp
@@ -152,8 +153,8 @@ if(BUILD_GTEST)
         zobrist.cpp
         probe.cpp
     )
-    target_include_directories(gtest PRIVATE ${GTEST_INCLUDE_DIRS})
-    target_link_libraries(gtest PRIVATE version_lib fmt::fmt-header-only ${GTEST_LIBRARY} nlohmann_json::nlohmann_json)
+    target_include_directories(test PRIVATE ${CMAKE_SOURCE_DIR} ${GTEST_INCLUDE_DIRS})
+    target_link_libraries(test PRIVATE version_lib fathom_lib fmt::fmt-header-only ${GTEST_LIBRARY} nlohmann_json::nlohmann_json)
 endif()
 
 #---[ install targets ]--------------------------------------------------------
