@@ -312,31 +312,19 @@ struct alignas(4) Move {
         data |= (val & promo_mask) << promo_shift;
     }
 
-    constexpr bool operator==(Move const & other) const {
-        return data == other.data;
+    constexpr auto operator<=>(const Move&) const = default;
+
+    constexpr auto operator<=>(uint32_t value) const {
+        return data <=> value;
     }
 
-    constexpr bool operator!=(Move const & other) const {
-        return !(*this == other);
-    }
-
-    constexpr bool operator==(uint32_t value) const {
-        return data == static_cast<uint32_t>(value);
-    }
-
-    constexpr bool operator!=(uint32_t value) const {
-        return !(*this == value);
+    constexpr auto & operator=(uint32_t value) {
+        data = value;
+        return *this;
     }
 
     constexpr explicit operator bool() const {
         return data != no_move;
-    }
-
-    auto operator<=>(const Move&) const = default;
-
-    Move & operator=(uint32_t value) {
-        data = value;
-        return *this;
     }
 
     uint32_t data = no_move;
@@ -367,7 +355,10 @@ static_assert(sizeof(Move) == 4, "Move must be exactly 32 bits");
 struct ScoredMove {
     int score {};
     enyo::Move move {};
-    auto operator<=>(const ScoredMove&) const = default;
+    // sort in descending order by score:
+    constexpr auto operator<=>(const ScoredMove& other) const {
+        return other.score <=> score;
+    }
 };
 
 struct Gamestate {
