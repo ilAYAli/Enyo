@@ -78,7 +78,7 @@ static inline std::vector<enyo::Move> prioritize_moves(
     std::vector<ScoredMove> scored_moves;
     scored_moves.reserve(moves.size());
 
-    for (const auto& move : moves) {
+    for (const auto move : moves) {
         int score = DRAW_SCORE;
         if (move == tt_move) {
             score = TT_SCORE;
