@@ -94,7 +94,8 @@ class ConfigManager {
 public:
     int num_threads         = 1;
     int hash_size           = 64;
-    bool use_lmr            = false; // fail
+    bool use_chess_960      = false;
+    bool use_lmr            = false;
     std::string nnue_file   = "nn-eba324f53044.nnue";
     std::string logfile     = "/tmp/enyo.log";
 
@@ -117,11 +118,12 @@ public:
 
     std::string allopts() const {
         return
-            concat("Threads",   "spin",     num_threads, int(1), int(64)) +
-            concat("Hash",      "spin",     hash_size, int(1), int(33554432)) +
-            concat("nnue_file", "string",   nnue_file) +
-            concat("logfile",   "string",   logfile) +
-            concat("use_lmr",   "check",    use_lmr);
+            concat("Threads",       "spin", num_threads, int(1), int(64)) +
+            concat("Hash",          "spin", hash_size, int(1), int(33554432)) +
+            //concat("UCI_Chess960",  "check", use_chess_960) +
+            concat("nnue_file",     "string", nnue_file) +
+            concat("logfile",       "string", logfile) +
+            concat("use_lmr",       "check", use_lmr);
     }
 
     bool setopt(const std::string& opt, const std::string& value)
@@ -134,6 +136,8 @@ public:
             num_threads = std::stoi(value);
         else if (lc == "hash")
             hash_size = std::stoi(value);
+        else if (lc == "uci_chess960")
+            use_chess_960 = true;
         else if (lc == "nue_file")
             nnue_file = value;
         else if (lc == "use_lmr")
