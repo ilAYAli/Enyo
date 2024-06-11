@@ -48,31 +48,31 @@ struct SMPentry {
 };
 
 struct HashEntry {
-    enyo::Move move {};
-    enyo::Value value {};
+    Move move {};
+    Value value {};
     int flag {};
     int depth {};
 };
 
 
-constexpr inline uint64_t fold_data(enyo::Move move, int depth, enyo::Value value, int flag) {
+constexpr inline uint64_t fold_data(Move move, int depth, Value value, int flag) {
     uint64_t data = 0;
     data |= static_cast<uint64_t>(move.data)                  << move_shift;
     data |= static_cast<uint64_t>(depth)                      << depth_shift;
-    data |= static_cast<uint64_t>((value + enyo::Constexpr::infinite)) << value_shift;
+    data |= static_cast<uint64_t>((value + Constexpr::infinite)) << value_shift;
     data |= static_cast<uint64_t>(flag)                       << flag_shift;
 
     return data;
 }
 
-constexpr inline enyo::Move extract_move(uint64_t data)
+constexpr inline Move extract_move(uint64_t data)
 {
-    return enyo::Move{static_cast<uint32_t>((data >> move_shift) & move_mask)};
+    return Move{static_cast<uint32_t>((data >> move_shift) & move_mask)};
 }
 
-constexpr inline enyo::Value extract_value(uint64_t data)
+constexpr inline Value extract_value(uint64_t data)
 {
-    return static_cast<enyo::Value>(((data >> value_shift) & value_mask) - enyo::Constexpr::infinite);
+    return static_cast<Value>(((data >> value_shift) & value_mask) - Constexpr::infinite);
 }
 
 constexpr inline int extract_depth(uint64_t data)
@@ -132,7 +132,7 @@ public:
     Transposition(const Transposition&) = delete;
     Transposition& operator=(const Transposition&) = delete;
 
-    std::vector<enyo::ScoredMove> get_pv_line(enyo::Board& b, int maxdepth = enyo::MAX_PLY);
+    std::vector<ScoredMove> get_pv_line(enyo::Board& b, int maxdepth = enyo::MAX_PLY);
     enyo::ScoredMove get_best_move(enyo::Board& b);
 
     void store(uint64_t poskey, enyo::Move move, enyo::Value value, type flag, int depth)
