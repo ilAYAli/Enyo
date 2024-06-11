@@ -30,7 +30,7 @@ namespace enyo {
 
 class Board;
 
-static inline constexpr bool use_aligned_alloc = false;
+static inline constexpr bool use_aligned_alloc = true;
 
 namespace tt {
 
