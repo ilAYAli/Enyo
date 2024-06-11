@@ -11,6 +11,7 @@ inline Move resolve_move(Board & b, PieceType src_piece, square_t src, uint8_t d
 template <>
 inline Move resolve_move<white>(Board &b, PieceType src_piece, square_t src, uint8_t dst)
 {
+    //fmt::println("dst_sq: {}, dst/_piece: {}", sq2str(dst), get_piece_type<black>(b, dst));
     auto const dst_piece = get_piece_type<black>(b, dst);
     Move mv{ src, white, src_piece, dst, dst_piece };
     //if (dst_piece == king) BREAKPOINT("dst piece can't be king");
