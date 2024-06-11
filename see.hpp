@@ -12,7 +12,7 @@ template <Color Us>
 inline std::pair<PieceType, bitboard_t> get_lva_bb(Board &b, enyo::square_t sq)
 {
     constexpr auto Them = ~Us;
-    for (PieceType pt : {pawn, knight, bishop, rook, queen, king}) { 
+    for (PieceType pt : {pawn, knight, bishop, rook, queen, king}) {
         bitboard_t pt_attacks_bb = 0;
         switch (pt) {
             case pawn:   pt_attacks_bb = pawn_attack_table[Us][sq]; break;
