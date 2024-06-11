@@ -8,6 +8,8 @@
 #include <sstream>
 #include <mutex>
 #include <atomic>
+
+
 namespace eventlog {
 
 enum class Log {
@@ -23,6 +25,40 @@ enum class Log {
 
 
 constexpr inline auto defaultLogLevel = Log::info;
+constexpr inline auto logfilesToKeep = 20;
+
+namespace fs = std::filesystem;
+
+inline void remove_old_logfiles(const std::string& baseFilename, std::size_t maxFiles) {
+    fs::path basePath(baseFilename);
+    std::string logFilePattern = basePath.stem().string() + "_";
+    fs::path logDir = basePath.parent_path();
+
+    std::vector<fs::directory_entry> logFiles;
+
+    for (const auto& entry : fs::directory_iterator(logDir)) {
+        if (entry.is_regular_file()) {
+            const auto& path = entry.path();
+            if (path.filename().string().find(logFilePattern) == 0) {
+                logFiles.push_back(entry);
+            }
+        }
+    }
+
+    std::sort(logFiles.begin(), logFiles.end(), [](const fs::directory_entry& a, const fs::directory_entry& b) {
+        return fs::last_write_time(a) < fs::last_write_time(b);
+    });
+
+    while (logFiles.size() > maxFiles) {
+        fs::remove(logFiles.front());
+        logFiles.erase(logFiles.begin());
+    }
+}
+
+
+inline void init() {
+    remove_old_logfiles(enyo::cfgmgr.logfile, logfilesToKeep);
+}
 
 inline std::string getLogFilename(const std::string& baseFilename) {
     std::ostringstream oss;

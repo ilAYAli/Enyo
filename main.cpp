@@ -24,10 +24,6 @@ using namespace enyo;
 namespace {
 
 namespace fs = std::filesystem;
-void truncate(std::string filename) {
-    if (fs::exists(filename))
-        fs::resize_file(filename, 0);
-}
 
 std::string get_default_config_file_path() {
     const char * home_directory = getenv("HOME");
@@ -174,7 +170,7 @@ int main(int argc, char **argv)
         load_pgn(b, pgnfile);
     }
 
-    truncate(cfgmgr.logfile);
+    eventlog::init();
 
     if (!fen.empty())
         uci(fmt::format("position fen {}", fen));
