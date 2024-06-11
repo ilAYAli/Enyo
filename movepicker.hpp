@@ -7,6 +7,7 @@
 #include "movegen.hpp"
 #include "types.hpp"
 #include "thread.hpp"
+#include "see.hpp"
 
 namespace enyo {
 
@@ -61,7 +62,7 @@ static inline std::vector<enyo::Move> prioritize_moves(
     int ply = MAX_PLY)
 {
     constexpr bool debug = false;
-    const auto& board = worker.si.board;
+    auto & board = worker.si.board;
 
     std::vector<ScoredMove> scored_moves;
     scored_moves.reserve(moves.size());
@@ -71,7 +72,14 @@ static inline std::vector<enyo::Move> prioritize_moves(
         if (move == tt_move) {
             score = TT_SCORE;
         } else if (move.dst_piece() != no_piece_type) {
+#if 0
+            auto tmp = see<Us>(board, move, 0);
+            score = CAPTURE_SCORE + tmp;
+            if (tmp < 0)
+                score *= -1;
+#else
             score = CAPTURE_SCORE + mvvlva(move);
+#endif
         } else if (move.flags() & Move::Flags::Promote) {
             score = (move.promo_piece() == queen) ? PROMOTE_SCORE : DRAW_SCORE;
         } else if constexpr (ST == QSEARCH) {
@@ -95,7 +103,9 @@ static inline std::vector<enyo::Move> prioritize_moves(
         scored_moves.emplace_back(ScoredMove{score, move});
     }
 
-    std::sort(scored_moves.begin(), scored_moves.end());
+    std::ranges::sort(scored_moves, [](const auto & a, const auto & b) {
+        return a.score > b.score;
+    });
 
     if constexpr (debug) {
         fmt::print("{} moves:{}\n", ST == QSEARCH ? "QS" : "AB", moves.size());

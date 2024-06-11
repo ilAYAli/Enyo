@@ -367,10 +367,6 @@ static_assert(sizeof(Move) == 4, "Move must be exactly 32 bits");
 struct ScoredMove {
     int score {};
     enyo::Move move {};
-    // sort in descending order by score:
-    constexpr auto operator<=>(const ScoredMove& other) const {
-        return other.score <=> score;
-    }
 };
 
 struct Gamestate {
