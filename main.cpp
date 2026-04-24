@@ -14,6 +14,7 @@
 #include <iostream>
 #include <cstdio>
 #include <filesystem>
+#include <thread>
 #include <nlohmann/json.hpp>
 
 #include "fmt/core.h"
@@ -46,10 +47,8 @@ void read_input_from_stdin(Uci& uci) {
 
 void read_input_from_tty(Uci & uci) {
     int tty_fd = open("/dev/tty", O_RDONLY);
-    if (tty_fd == -1) {
-        std::cerr << fmt::format("Failed to open /dev/tty\n");
+    if (tty_fd == -1)
         return;
-    }
 
     FILE * tty_file = fdopen(tty_fd, "r");
     if (tty_file == nullptr) {
@@ -200,8 +199,8 @@ int main(int argc, char **argv)
 
     init_search();
 
+    std::jthread tty_input_thread([&uci] { read_input_from_tty(uci); });
     read_input_from_stdin(uci);
-    read_input_from_tty(uci);
 
     return 0;
 }
