@@ -384,7 +384,6 @@ void Uci::stop() {
 }
 
 void Uci::quit() {
-    thread::pool.wait();
-    exit(0);
+    thread::pool.kill();
+    quitting = true;
 }
-
