@@ -34,6 +34,9 @@ inline void remove_old_logfiles(const std::string& baseFilename, std::size_t max
     std::string logFilePattern = basePath.stem().string() + "_";
     fs::path logDir = basePath.parent_path();
 
+    if (!fs::exists(logDir))
+        return;
+
     std::vector<fs::directory_entry> logFiles;
 
     for (const auto& entry : fs::directory_iterator(logDir)) {
@@ -46,11 +49,18 @@ inline void remove_old_logfiles(const std::string& baseFilename, std::size_t max
     }
 
     std::sort(logFiles.begin(), logFiles.end(), [](const fs::directory_entry& a, const fs::directory_entry& b) {
-        return fs::last_write_time(a) < fs::last_write_time(b);
+        std::error_code a_ec;
+        std::error_code b_ec;
+        const auto a_time = fs::last_write_time(a, a_ec);
+        const auto b_time = fs::last_write_time(b, b_ec);
+        if (a_ec || b_ec)
+            return a.path().filename().string() < b.path().filename().string();
+        return a_time < b_time;
     });
 
     while (logFiles.size() > maxFiles) {
-        fs::remove(logFiles.front());
+        std::error_code ec;
+        fs::remove(logFiles.front(), ec);
         logFiles.erase(logFiles.begin());
     }
 }
