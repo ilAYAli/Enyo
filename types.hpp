@@ -453,7 +453,7 @@ struct formatter<enyo::PieceType> {
     constexpr auto parse(ParseContext &ctx) { return ctx.begin(); }
 
     template <typename FormatContext>
-    auto format(enyo::PieceType type, FormatContext& ctx) {
+    auto format(enyo::PieceType type, FormatContext& ctx) const {
         auto str = [](enyo::PieceType t) {
             switch (t) {
                 case enyo::PieceType::pawn:   return "pawn";
@@ -486,4 +486,3 @@ constexpr inline const char * sq2str(enyo::square_t sq) {
 }
 
 } // fmt
-

@@ -129,7 +129,7 @@ struct formatter<PgnMove> {
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(const PgnMove& pm, FormatContext& ctx) {
+    auto format(const PgnMove& pm, FormatContext& ctx) const {
         return fmt::format_to(ctx.out(),
             "Pgn {{\n"
             "  token: \"{}\",\n"

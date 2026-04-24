@@ -1,12 +1,13 @@
-cmake_minimum_required(VERSION 3.9)
+cmake_minimum_required(VERSION 3.16)
 
-project(enyo)
-
-add_subdirectory(3rdparty/Fathom)
+project(enyo LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+option(ENYO_USE_SYZYGY "Enable Syzygy tablebase probing via Fathom" OFF)
 
 #---[ git versioning/output ]--------------------------------------------------
 string(ASCII 27 Esc)
@@ -95,20 +96,10 @@ set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} CACHE INTERNAL "cxx flags")
 add_compile_definitions(EVAL_FILE="${CMAKE_CURRENT_SOURCE_DIR}/nnue/default.net")
 
 #---[ dependencies ]-----------------------------------------------------------
-find_package(fmt)
+find_package(fmt REQUIRED)
 find_package(nlohmann_json REQUIRED)
-include_directories(${NLOHMANN_JSON_INCLUDE_DIRS})
 
-#---[ targets ]----------------------------------------------------------------
-add_library(version_lib OBJECT version.cpp)
-target_compile_definitions(version_lib PRIVATE
-    BUILD_HASH="${GIT_HASH}"
-    BUILD_DIRTY=${GIT_DIRTY}
-    BUILD_DATE="${BUILD_DATE}"
-    BUILD_TYPE="${CMAKE_BUILD_TYPE}"
-)
-
-add_executable(enyo
+set(ENYO_SOURCES
     main.cpp
     fen.cpp
     board.cpp
@@ -123,8 +114,36 @@ add_executable(enyo
     probe.cpp
 )
 
+if(ENYO_USE_SYZYGY)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/3rdparty/Fathom/src/tbprobe.c" AND EXISTS "${CMAKE_SOURCE_DIR}/3rdparty/Fathom/src/tbprobe.h")
+        add_library(fathom_lib STATIC 3rdparty/Fathom/src/tbprobe.c)
+        target_include_directories(fathom_lib PUBLIC 3rdparty/Fathom/src)
+    else()
+        message(WARNING "ENYO_USE_SYZYGY is ON, but 3rdparty/Fathom sources were not found. Building without Syzygy support.")
+        set(ENYO_USE_SYZYGY OFF)
+    endif()
+endif()
+
+#---[ targets ]----------------------------------------------------------------
+add_library(version_lib OBJECT version.cpp)
+target_compile_definitions(version_lib PRIVATE
+    BUILD_HASH="${GIT_HASH}"
+    BUILD_DIRTY=${GIT_DIRTY}
+    BUILD_DATE="${BUILD_DATE}"
+    BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+)
+
+add_executable(enyo
+    ${ENYO_SOURCES}
+)
+
 add_dependencies(enyo update_version)
-target_link_libraries(enyo PRIVATE version_lib fmt::fmt-header-only nlohmann_json::nlohmann_json fathom_lib)
+target_compile_definitions(enyo PRIVATE ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>)
+target_link_libraries(enyo PRIVATE version_lib fmt::fmt-header-only nlohmann_json::nlohmann_json)
+
+if(ENYO_USE_SYZYGY)
+    target_link_libraries(enyo PRIVATE fathom_lib)
+endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Profile")
     target_link_libraries(enyo PRIVATE ${PROFILER_LIBRARY})
@@ -134,12 +153,9 @@ target_include_directories(enyo PRIVATE ${CMAKE_BINARY_DIR} 3rdparty/Fathom/src)
 
 option(BUILD_TESTS "Build the gtest target" ON)
 if(BUILD_TESTS)
-    find_library(GTEST_LIBRARY gtest HINTS /opt/homebrew)
-    if(NOT GTEST_LIBRARY)
-        message(FATAL_ERROR "Google Test library not found. Make sure it's installed or set GTEST_LIBRARY variable.")
-    endif()
+    find_package(GTest REQUIRED)
 
-    add_executable(test
+    set(ENYO_TEST_SOURCES
         test/tests.cpp
         fen.cpp
         board.cpp
@@ -153,8 +169,17 @@ if(BUILD_TESTS)
         zobrist.cpp
         probe.cpp
     )
-    target_include_directories(test PRIVATE ${CMAKE_SOURCE_DIR} ${GTEST_INCLUDE_DIRS})
-    target_link_libraries(test PRIVATE version_lib fathom_lib fmt::fmt-header-only ${GTEST_LIBRARY} nlohmann_json::nlohmann_json)
+
+    add_executable(test
+        ${ENYO_TEST_SOURCES}
+    )
+    target_compile_definitions(test PRIVATE ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>)
+    target_include_directories(test PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(test PRIVATE version_lib fmt::fmt-header-only GTest::gtest nlohmann_json::nlohmann_json)
+
+    if(ENYO_USE_SYZYGY)
+        target_link_libraries(test PRIVATE fathom_lib)
+    endif()
 endif()
 
 #---[ install targets ]--------------------------------------------------------
