@@ -355,6 +355,13 @@ void Uci::go(std::istringstream & iss)
 #endif
 
     thread::pool.init_threads(std::move(si), cfgmgr.num_threads);
+
+    // Batch stdin commonly closes immediately after 'go depth ...'. For fixed-depth
+    // analysis without time controls, wait for the workers here so the main thread
+    // does not tear the process down while search threads are still running.
+    if (isatty(STDIN_FILENO) == 0 && si.movetime == -1 && si.wtime == -1 && si.btime == -1) {
+        thread::pool.wait();
+    }
 }
 
 // bench 0 0 5 current perft

@@ -41,6 +41,8 @@ void read_input_from_stdin(Uci& uci) {
     while (std::getline(std::cin, input)) {
         if (!input.empty()) {
             uci(input);
+            if (uci.quitting)
+                break;
         }
     }
 }
@@ -64,6 +66,8 @@ void read_input_from_tty(Uci & uci) {
         if (!input.empty()) {
             uci(input);
             if (input == "quit")
+                break;
+            if (uci.quitting)
                 break;
         }
     }
@@ -199,7 +203,10 @@ int main(int argc, char **argv)
 
     init_search();
 
-    std::jthread tty_input_thread([&uci] { read_input_from_tty(uci); });
+    std::jthread tty_input_thread;
+    if (isatty(STDIN_FILENO) != 0) {
+        tty_input_thread = std::jthread([&uci] { read_input_from_tty(uci); });
+    }
     read_input_from_stdin(uci);
 
     return 0;
