@@ -180,7 +180,7 @@ namespace fmt {
 template <>
 struct formatter<enyo::Color> : formatter<const char *> {
     using formatter<const char *>::format;
-    auto format(enyo::Color type, format_context & ctx) {
+    auto format(enyo::Color type, format_context & ctx) const {
         return fmt::format_to(ctx.out(), "{}", type == enyo::white ? "white" : "black");
     }
 };
@@ -188,7 +188,7 @@ struct formatter<enyo::Color> : formatter<const char *> {
 template <>
 struct formatter<enyo::Board> : formatter<const char *> {
     using formatter<const char *>::format;
-    auto format(enyo::Board & b, format_context & ctx) {
+    auto format(const enyo::Board & b, format_context & ctx) const {
         return fmt::format_to(ctx.out(), "{}", b.str());
     }
 };

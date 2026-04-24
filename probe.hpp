@@ -44,7 +44,7 @@ struct fmt::formatter<syzygy::pos> {
     constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
 
     template <typename FormatContext>
-    auto format(const syzygy::pos& p, FormatContext& ctx) {
+    auto format(const syzygy::pos& p, FormatContext& ctx) const {
         return format_to(ctx.out(),
             "{{\n"
             "    white:    {:#018x},\n"
@@ -99,4 +99,3 @@ struct fmt::formatter<syzygy::pv_status> {
     }
 };
 #endif
-

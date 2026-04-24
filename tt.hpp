@@ -256,7 +256,7 @@ struct fmt::formatter<enyo::tt::type> {
     }
 
     template<typename FormatContext>
-    auto format(const enyo::tt::type& entry, FormatContext& ctx) {
+    auto format(const enyo::tt::type& entry, FormatContext& ctx) const {
         switch (entry) {
             case enyo::tt::LowerBound:
                 return fmt::format_to(ctx.out(), "LowerBound");

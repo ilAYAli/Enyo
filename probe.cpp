@@ -1,5 +1,7 @@
 #include "probe.hpp"
+#if ENYO_USE_SYZYGY
 #include "3rdparty/Fathom/src/tbprobe.h"
+#endif
 
 #include "board.hpp"
 #include "config.hpp"
@@ -15,8 +17,14 @@ namespace syzygy {
 
 bool init(const std::string & tb_path)
 {
+#if ENYO_USE_SYZYGY
     initialized = tb_init(tb_path.c_str());
     return initialized;
+#else
+    (void)tb_path;
+    initialized = false;
+    return false;
+#endif
 }
 
 pos board2pos(Board & b)
@@ -42,6 +50,10 @@ pos board2pos(Board & b)
 
 Status WDL_probe(Board &board)
 {
+#if !ENYO_USE_SYZYGY
+    (void)board;
+    return Status::Error;
+#else
     if (!initialized)
         return Status::Error;
 
@@ -64,10 +76,15 @@ Status WDL_probe(Board &board)
         default:
             return Status::Error;
     }
+#endif
 }
 
 std::pair<int, Move> probe_DTZ(Board & board)
 {
+#if !ENYO_USE_SYZYGY
+    (void)board;
+    return {0, Move{}};
+#else
     if (!initialized) {
         return {TB_RESULT_FAILED, Move{}};
     }
@@ -131,6 +148,7 @@ std::pair<int, Move> probe_DTZ(Board & board)
         }
     }
     return {TB_RESULT_FAILED, Move{}};
+#endif
 }
 
 }  // namespace syzygy
