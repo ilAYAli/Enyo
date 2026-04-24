@@ -41,12 +41,6 @@ enum type {
     ExactBound,
 };
 
-struct SMPentry {
-    uint8_t age {};
-    uint64_t smp_key {};
-    uint64_t smp_data {};
-};
-
 struct HashEntry {
     Move move {};
     Value value {};
@@ -54,36 +48,13 @@ struct HashEntry {
     int depth {};
 };
 
+struct SMPentry {
+    uint8_t age {};
+    uint64_t key {};
+    HashEntry entry {};
+    bool occupied {};
+};
 
-constexpr inline uint64_t fold_data(Move move, int depth, Value value, int flag) {
-    uint64_t data = 0;
-    data |= static_cast<uint64_t>(move.data)                  << move_shift;
-    data |= static_cast<uint64_t>(depth)                      << depth_shift;
-    data |= static_cast<uint64_t>((value + Constexpr::infinite)) << value_shift;
-    data |= static_cast<uint64_t>(flag)                       << flag_shift;
-
-    return data;
-}
-
-constexpr inline Move extract_move(uint64_t data)
-{
-    return Move{static_cast<uint32_t>((data >> move_shift) & move_mask)};
-}
-
-constexpr inline Value extract_value(uint64_t data)
-{
-    return static_cast<Value>(((data >> value_shift) & value_mask) - Constexpr::infinite);
-}
-
-constexpr inline int extract_depth(uint64_t data)
-{
-    return static_cast<int>((data >> depth_shift) & depth_mask);
-}
-
-constexpr inline type extract_flag(uint64_t data)
-{
-    return static_cast<type>(data & flag_mask);
-}
 
 constexpr inline Value value_from(Value v, int plies) {
     if (v == Value::none)
@@ -101,16 +72,6 @@ constexpr inline Value value_to(Value v, int plies) {
     else if (v <= Value::tb_loss_in_max_ply)
         return static_cast<Value>(static_cast<int>(v) - plies);
     return v;
-}
-
-constexpr inline HashEntry extract_entry(uint64_t data)
-{
-    return HashEntry{
-        extract_move(data),
-        extract_value(data),
-        extract_flag(data),
-        extract_depth(data)
-    };
 }
 
 class Transposition {
@@ -137,37 +98,41 @@ public:
 
     void store(uint64_t poskey, enyo::Move move, enyo::Value value, type flag, int depth)
     {
-        if (move == enyo::Move::no_move)
+        if (flag == NoneBound)
+            return;
+
+        if (move == enyo::Move::no_move && flag != ExactBound)
             return;
         auto index = poskey % buckets;
         auto & entry = hash_table[index];
 
-        if (entry.smp_key && entry.age >= current_age && extract_depth(entry.smp_data) > depth) {
+        if (entry.occupied && entry.age >= current_age && entry.entry.depth > depth) {
             return;
         }
 
-        if (!entry.smp_key)
+        if (!entry.occupied)
             new_write++;
         else
             over_write++;
 
-        const uint64_t smp_data = fold_data(move, depth, value, flag);
-        entry.smp_data = smp_data;
-        entry.smp_key = poskey ^ smp_data;
+        entry.key = poskey;
+        entry.entry = HashEntry{move, value, flag, depth};
         entry.age = current_age;
+        entry.occupied = true;
     }
 
     std::optional<HashEntry> probe(uint64_t poskey) {
         auto index = poskey % buckets;
         auto & entry = hash_table[index];
 
-        const uint64_t test_key = poskey ^ hash_table[index].smp_data;
-        if (hash_table[index].smp_key != test_key) {
+        if (!entry.occupied || entry.key != poskey) {
             return std::nullopt;
         }
 
-        auto he = extract_entry(entry.smp_data);
-        if (he.move == enyo::Move::no_move)
+        auto he = entry.entry;
+        if (he.flag == NoneBound)
+            return std::nullopt;
+        if (he.move == enyo::Move::no_move && he.flag != ExactBound)
             return std::nullopt;
         return he;
     }
