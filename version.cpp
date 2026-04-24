@@ -1,4 +1,5 @@
 #include "version.hpp"
+#include "version_info.hpp"
 #include <format>
 
 const std::string g_version = std::format(

@@ -125,13 +125,23 @@ if(ENYO_USE_SYZYGY)
 endif()
 
 #---[ targets ]----------------------------------------------------------------
-add_library(version_lib OBJECT version.cpp)
-target_compile_definitions(version_lib PRIVATE
-    BUILD_HASH="${GIT_HASH}"
-    BUILD_DIRTY=${GIT_DIRTY}
-    BUILD_DATE="${BUILD_DATE}"
-    BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/version_info.hpp
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DINPUT_FILE=${CMAKE_SOURCE_DIR}/version_info.hpp.in
+        -DOUTPUT_FILE=${CMAKE_BINARY_DIR}/version_info.hpp
+        -DBUILD_DATE_VALUE=${BUILD_DATE}
+        -DBUILD_TYPE_VALUE=${CMAKE_BUILD_TYPE}
+        -P ${CMAKE_SOURCE_DIR}/cmake/update_version_info.cmake
+    DEPENDS ${CMAKE_SOURCE_DIR}/version_info.hpp.in
+    COMMENT "Generating version_info.hpp"
 )
+
+add_custom_target(update_version_info DEPENDS ${CMAKE_BINARY_DIR}/version_info.hpp)
+add_library(version_lib OBJECT version.cpp)
+add_dependencies(version_lib update_version_info)
+target_include_directories(version_lib PRIVATE ${CMAKE_BINARY_DIR})
 
 add_executable(enyo
     ${ENYO_SOURCES}
