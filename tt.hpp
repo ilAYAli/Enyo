@@ -224,9 +224,6 @@ private:
         const auto bytes = static_cast<size_t>(megabytes * 1024 * 1024);
         if constexpr (use_aligned_alloc) {
             buckets = bytes / sizeof(SMPentry);
-            hash_table = new SMPentry[buckets];
-        } else {
-            buckets = bytes / sizeof(SMPentry);
             size_t alloc_size = buckets * sizeof(SMPentry);
             size_t alignment = get_page_size();
             alloc_size = ((alloc_size + alignment - 1) / alignment) * alignment;
@@ -237,6 +234,9 @@ private:
                 std::exit(EXIT_FAILURE);
             }
             std::fill(hash_table, hash_table + buckets, SMPentry{});
+        } else {
+            buckets = bytes / sizeof(SMPentry);
+            hash_table = new SMPentry[buckets];
         }
     }
 
