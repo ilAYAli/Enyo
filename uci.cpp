@@ -157,6 +157,10 @@ int Uci::operator()(const std::string& command)
             return 0;
         } else if (token == "print" || token == "d") {
             fmt::print("{}\n", b.str());
+        } else if (token == "hash") {
+            fmt::print("hash {:016X}\n", b.hash);
+        } else if (token == "sfhash") {
+            fmt::print("hash {:016X}\n", zobrist::generate_stockfish_hash(b));
         } else if (token == "pgn") {
             pgn();
         } else if (token == "move") { // non-UCI command

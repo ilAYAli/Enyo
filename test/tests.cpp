@@ -86,6 +86,64 @@ TEST(check, static_exchange_evaluation3) {
     ASSERT_EQ(score, see<white>(b, move, 0));
     fmt::print("result: {}\n", see<white>(b, move, 0));
 }
+TEST(hash, recompute_matches_initial_position) {
+    Board b{"startpos"};
+    EXPECT_EQ(b.hash, zobrist::generate_hash(b));
+}
+
+TEST(hash, apply_revert_restores_hash) {
+    Board b{"startpos"};
+    const auto initial_hash = b.hash;
+
+    auto move = resolve_move<white>(b, pawn, e2, e4);
+    apply_move<white>(b, move);
+    const auto applied_recomputed = zobrist::generate_hash(b);
+    EXPECT_EQ(b.hash, applied_recomputed) << fmt::format("after apply fen={} inc={:016X} rec={:016X}", b.fen(), b.hash, applied_recomputed);
+
+    revert_move<white>(b);
+    const auto reverted_recomputed = zobrist::generate_hash(b);
+    EXPECT_EQ(b.hash, reverted_recomputed) << fmt::format("after revert fen={} inc={:016X} rec={:016X}", b.fen(), b.hash, reverted_recomputed);
+    EXPECT_EQ(b.hash, initial_hash) << fmt::format("initial={:016X} reverted={:016X}", initial_hash, b.hash);
+}
+
+TEST(hash, enpassant_double_push_matches_recompute) {
+    Board b{"8/8/8/8/3p1p2/8/4P3/4K2k w - - 0 1"};
+    auto move = resolve_move<white>(b, pawn, e2, e4);
+    apply_move<white>(b, move);
+
+    ASSERT_NE(0, b.gamestate.enpassant_square);
+    const auto recomputed = zobrist::generate_hash(b);
+    EXPECT_EQ(b.hash, recomputed) << fmt::format("fen={} inc={:016X} rec={:016X} ep={}", b.fen(), b.hash, recomputed, sq2str(b.gamestate.enpassant_square));
+}
+
+TEST(hash, compare_single_push_vs_double_push_delta) {
+    Board single{"8/8/8/8/3p1p2/8/4P3/4K2k w - - 0 1"};
+    Board dbl{single};
+
+    auto e2e3 = resolve_move<white>(single, pawn, e2, e3);
+    auto e2e4 = resolve_move<white>(dbl, pawn, e2, e4);
+    apply_move<white>(single, e2e3);
+    apply_move<white>(dbl, e2e4);
+
+    const auto single_recomputed = zobrist::generate_hash(single);
+    const auto double_recomputed = zobrist::generate_hash(dbl);
+
+    EXPECT_EQ(single.hash, single_recomputed);
+    EXPECT_EQ(double_recomputed ^ single_recomputed, dbl.hash ^ single.hash)
+        << fmt::format("single={:016X}/{:016X} double={:016X}/{:016X}", single.hash, single_recomputed, dbl.hash, double_recomputed);
+}
+
+TEST(hash, castling_rights_mask_hash_matches_recompute) {
+    Board b{"r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"};
+    EXPECT_EQ(b.hash, zobrist::generate_hash(b));
+
+    auto move = resolve_move<white>(b, rook, h1, h2);
+    apply_move<white>(b, move);
+    EXPECT_EQ(b.hash, zobrist::generate_hash(b));
+
+    revert_move<white>(b);
+    EXPECT_EQ(b.hash, zobrist::generate_hash(b));
+}
 #endif
 
 int main(int argc, char **argv) {
