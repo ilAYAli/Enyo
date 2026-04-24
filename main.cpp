@@ -47,35 +47,6 @@ void read_input_from_stdin(Uci& uci) {
     }
 }
 
-void read_input_from_tty(Uci & uci) {
-    int tty_fd = open("/dev/tty", O_RDONLY);
-    if (tty_fd == -1)
-        return;
-
-    FILE * tty_file = fdopen(tty_fd, "r");
-    if (tty_file == nullptr) {
-        std::cerr << fmt::format("Failed to create file stream for /dev/tty\n");
-        close(tty_fd);
-        return;
-    }
-
-    char buffer[1024];
-    while (fgets(buffer, sizeof(buffer), tty_file) != nullptr) {
-        std::string input(buffer);
-        input.erase(input.find_last_not_of(" \n\r\t") + 1);
-        if (!input.empty()) {
-            uci(input);
-            if (input == "quit")
-                break;
-            if (uci.quitting)
-                break;
-        }
-    }
-
-    fclose(tty_file);
-    close(tty_fd);
-}
-
 } // anon ns
 
 // setoption name Ponder value false
@@ -203,10 +174,6 @@ int main(int argc, char **argv)
 
     init_search();
 
-    std::jthread tty_input_thread;
-    if (isatty(STDIN_FILENO) != 0) {
-        tty_input_thread = std::jthread([&uci] { read_input_from_tty(uci); });
-    }
     read_input_from_stdin(uci);
 
     return 0;
