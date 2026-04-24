@@ -31,36 +31,40 @@ std::vector<std::string> split(const std::string & str, char delim = ' ') {
     return tokens;
 }
 
-inline void set_white_to_move(Board & b, std::vector<std::string> tokens) {
-    bool const white_to_move = tokens[0][0] == 'w';
+inline void set_white_to_move(Board & b, const std::vector<std::string> & tokens) {
+    bool const white_to_move = !tokens.empty() && !tokens[0].empty() && tokens[0][0] == 'w';
     b.gamestate.white_to_move = white_to_move;
 }
 
-inline void set_castling_rights(Board &b, std::vector<std::string> tokens) {
-    auto const & token = tokens[1];
+inline void set_castling_rights(Board &b, const std::vector<std::string> & tokens) {
+    auto const token = tokens.size() > 1 ? tokens[1] : "-";
     b.gamestate.set_castle(CastlingRights::white_oo,  token.find('K') != std::string::npos);
     b.gamestate.set_castle(CastlingRights::white_ooo, token.find('Q') != std::string::npos);
     b.gamestate.set_castle(CastlingRights::black_oo,  token.find('k') != std::string::npos);
     b.gamestate.set_castle(CastlingRights::black_ooo, token.find('q') != std::string::npos);
 }
 
-inline void set_enpassant(Board & b, std::vector<std::string> tokens)
+inline void set_enpassant(Board & b, const std::vector<std::string> & tokens)
 {
     if (tokens.size() > 2) {
         b.gamestate.enpassant_square = str2sq(tokens[2].c_str());
+    } else {
+        b.gamestate.enpassant_square = 0;
     }
 }
 
-inline void set_half_move_clock(Board & b, std::vector<std::string> tokens) {
+inline void set_half_move_clock(Board & b, const std::vector<std::string> & tokens) {
     if (tokens.size() > 3) {
         auto const str = tokens[3];
         uint16_t num = 0;
         std::from_chars(str.data(), str.data() + str.size(), num);
         b.gamestate.half_moves = num;
+    } else {
+        b.gamestate.half_moves = 0;
     }
 }
 
-inline void set_full_moves(Board & /* b */, std::vector<std::string> tokens) {
+inline void set_full_moves(Board & /* b */, const std::vector<std::string> & tokens) {
     if (tokens.size() > 4) {
         auto const str = tokens[4];
         uint16_t num = 0;
