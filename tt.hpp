@@ -86,19 +86,19 @@ constexpr inline type extract_flag(uint64_t data)
 }
 
 constexpr inline Value value_from(Value v, int plies) {
-    if (v == Value::NONE)
-        return Value::NONE;
-    else if (v >= Value::TB_WIN_IN_MAX_PLY)
+    if (v == Value::none)
+        return Value::none;
+    else if (v >= Value::tb_win_in_max_ply)
         return static_cast<Value>(static_cast<int>(v) - plies);
-    else if (v <= Value::TB_LOSS_IN_MAX_PLY)
+    else if (v <= Value::tb_loss_in_max_ply)
         return static_cast<Value>(static_cast<int>(v) + plies);
     return v;
 }
 
 constexpr inline Value value_to(Value v, int plies) {
-    if (v >= Value::TB_WIN_IN_MAX_PLY)
+    if (v >= Value::tb_win_in_max_ply)
         return static_cast<Value>(static_cast<int>(v) + plies);
-    else if (v <= Value::TB_LOSS_IN_MAX_PLY)
+    else if (v <= Value::tb_loss_in_max_ply)
         return static_cast<Value>(static_cast<int>(v) - plies);
     return v;
 }

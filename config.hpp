@@ -72,7 +72,7 @@ namespace Constexpr {
 
 inline constexpr Value mate_in(int ply)
 {
-    return static_cast<Value>(Value::MATE - 1 - ply);
+    return static_cast<Value>(Value::mate - 1 - ply);
 }
 
 inline constexpr Value mated_in(int ply)

@@ -143,8 +143,8 @@ void Net::updateAccumulator(
                 from_square,
                 side,
                 side == enyo::white
-                ? sqconv(kingSquare_White)
-                : sqconv(kingSquare_Black)
+                ? h1a1(kingSquare_White)
+                : h1a1(kingSquare_Black)
             );
         const int inputAdd =
             index(
@@ -153,8 +153,8 @@ void Net::updateAccumulator(
                 to_square,
                 side,
                 side == enyo::white
-                ? sqconv(kingSquare_White)
-                : sqconv(kingSquare_Black)
+                ? h1a1(kingSquare_White)
+                : h1a1(kingSquare_Black)
             );
 
         const auto weightSub = inputWeights.data() + inputClear * HIDDEN_SIZE;
@@ -245,9 +245,9 @@ void Net::print_indexes(
 
     auto color = board.color_bb[enyo::white] & sq ? enyo::white : enyo::black;
     std::cout << "W [" << int(pt) << ", " << int(color) << ", " << int(sq)
-              << "  ]: " << index(pt, color, sq, enyo::white, sqconv(kingSquare)) << "\n";
+              << "  ]: " << index(pt, color, sq, enyo::white, h1a1(kingSquare)) << "\n";
     std::cout << "B [" << int(pt) << ", " << int(color) << ", " << int(sq)
-              << "  ]: " << index(pt, color, sq, enyo::black, sqconv(kingSquare)) << "\n";
+              << "  ]: " << index(pt, color, sq, enyo::black, h1a1(kingSquare)) << "\n";
 }
 
 #if 1

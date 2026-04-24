@@ -80,7 +80,7 @@ static inline std::vector<enyo::Move> prioritize_moves(
 #else
             score = CAPTURE_SCORE + mvvlva(move);
 #endif
-        } else if (move.flags() & Move::Flags::Promote) {
+        } else if (move.flags() & Move::Flags::promote) {
             score = (move.promo_piece() == queen) ? PROMOTE_SCORE : DRAW_SCORE;
         } else if constexpr (ST == QSEARCH) {
             // Skip non-capturing, non-promoting moves in QSEARCH

@@ -71,7 +71,7 @@ Value evaluate(Board & b, NNUE::Net * nnue)
         return score;
     } else {
         const auto mv = b.history[b.histply -1].move;
-        if (mv.flags() == Move::Flags::Promote)
+        if (mv.flags() == Move::Flags::promote)
             return enyo::HCE_evaluation<Us>(b);
         const auto score = enyo::HCE_evaluation<Us>(b);
         if constexpr (Constexpr::debug_eval)
@@ -85,7 +85,7 @@ template <Color Us, NodeType Node>
 Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int beta)
 {
     if (worker.time_expired())
-        return Value::DRAW;
+        return Value::draw;
 
     constexpr bool pv_node = Node == NodeType::PV;
     constexpr Color Them = ~Us;
@@ -96,18 +96,18 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     }
 
     if (is_repetition(b, 1 + pv_node)) {
-        return Value::DRAW;
+        return Value::draw;
     }
 
     Move tt_move {};
-    auto tt_value = Value::NONE;
+    auto tt_value = Value::none;
     auto tthit = tt::ttable.probe(b.hash);
     ss->tthit = tthit.has_value();
     if (ss->tthit) {
         tt_value = tt::value_from(tthit->value, ss->ply);
         tt_move = tthit->move;
 
-        if (Node != NodeType::PV && tt_value != Value::NONE) {
+        if (Node != NodeType::PV && tt_value != Value::none) {
             if (tthit->flag == tt::type::ExactBound
             || (tthit->flag == tt::type::UpperBound && (tt_value <= alpha))
             || (tthit->flag == tt::type::LowerBound && (tt_value >= beta)))
@@ -176,20 +176,20 @@ template <Color Us, NodeType NT>
 Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
 {
     if (worker.time_expired())
-        return Value::DRAW;
+        return Value::draw;
 
     constexpr Color Them = ~Us;
     constexpr bool pv_node = NT != NodeType::NonPV;
     auto & b = worker.si.board;
     auto & si = worker.si;
-    Value value = Value::NONE;
+    Value value = Value::none;
     Move best_move {};
-    Value best_value = -Value::INFINITE;
+    Value best_value = -Value::infinite;
 
     worker.pvline.setlen(ss->ply);
 
     ss->in_check = is_check<Us>(b);
-    ss->eval = Value::NONE;
+    ss->eval = Value::none;
 
     if (depth <= 0) {
         return qsearch<Us, NT != NodeType::NonPV ? NodeType::PV : NodeType::NonPV>(
@@ -199,13 +199,13 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
 
     if (NT != NodeType::Root) {
         if (is_repetition(b, 1 + pv_node)) {
-            return Value::DRAW;
+            return Value::draw;
         }
 
         if (ss->ply >= MAX_PLY) {
             return !ss->in_check
                 ? evaluate<Us, true>(b, &si.nnue)
-                : Value::DRAW;
+                : Value::draw;
         }
 
         alpha = std::max(alpha, mated_in(ss->ply));
@@ -217,14 +217,14 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
 
     // tt lookup:
     Move tt_move {};
-    auto tt_value = -Value::NONE;
+    auto tt_value = -Value::none;
     auto tte = tt::ttable.probe(b.hash);
     ss->tthit = tte.has_value();
     if (ss->tthit) {
         tt::ttable.hit++;
         tt_value = tt::value_from(tte->value, ss->ply);
         tt_move = tte->move;
-        if (tt_value != Value::NONE && tte->depth >= depth) {
+        if (tt_value != Value::none && tte->depth >= depth) {
             if (tte->flag == tt::type::ExactBound
             || (tte->flag == tt::type::UpperBound && tt_value <= alpha)
             || (tte->flag == tt::type::LowerBound && tt_value >= beta)) {
@@ -244,7 +244,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             && !board.gamestate.can_castle(CastlingRights::any_castling)) {
 
             using namespace syzygy;
-            Value tb_value = Value::DRAW;
+            Value tb_value = Value::draw;
             auto tb_flag = tt::type::NoneBound;
             if (auto status = WDL_probe(si.board) != syzygy::Status::Error) {
                 switch (WDL_probe(si.board)) {
@@ -257,7 +257,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
                         tb_flag = tt::type::UpperBound;
                         break;
                     default:
-                        tb_value = Value::DRAW;
+                        tb_value = Value::draw;
                         tb_flag = tt::type::ExactBound;
                         break;
                 }
@@ -294,7 +294,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     bool improving = true;
     if (ss->in_check) {
         improving = false;
-        ss->eval = Value::DRAW;
+        ss->eval = Value::draw;
         depth++;
         goto moves_loop;
     }
@@ -302,10 +302,10 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     // static eval:
     if (ss->tthit) {
         ss->eval = tt_value;
-        if (ss->eval == Value::NONE)
+        if (ss->eval == Value::none)
             ss->eval =  evaluate<Us, true>(b, &si.nnue);
 
-        if (tt_value != Value::NONE
+        if (tt_value != Value::none
             && (tte->flag != tt::type::NoneBound)
             & (tt_value > ss->eval ? tt::type::LowerBound : tt::type::UpperBound))
             ss->eval = tt_value;
@@ -320,7 +320,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         );
     }
 
-    improving = (ss - 2)->eval != Value::NONE
+    improving = (ss - 2)->eval != Value::none
              && (ss - 2)->eval < ss->eval;
 
     if constexpr (true) { // Todo: check Elo
@@ -397,7 +397,7 @@ moves_loop:
             }
             return mated_in(ss->ply);
         }
-        return Value::DRAW;
+        return Value::draw;
     }
 #if 1
     auto const mp = prioritize_moves<Us, ABSEARCH>(worker, lm, tt_move, depth);
@@ -413,7 +413,7 @@ moves_loop:
         ss->move = move;
         ss->move_count++;
 
-       const bool is_quiet = move.dst_piece() == no_piece_type && move.flags() != Move::Flags::Promote;
+       const bool is_quiet = move.dst_piece() == no_piece_type && move.flags() != Move::Flags::promote;
        const bool is_capture = move.dst_piece() != no_piece_type;
 
 
@@ -453,7 +453,7 @@ moves_loop:
         // revert move
         revert_move<Us, true, true>(b, &worker.si.nnue);
         if (thread::pool.stop.load(std::memory_order_relaxed))
-            return Value::DRAW;
+            return Value::draw;
 
         if (value > best_value) {
             best_value = value;
@@ -506,8 +506,8 @@ template <Color Us>
 Value aspiration_window(Value prev_eval, int depth, Worker & worker, Stack * ss)
 {
     constexpr Value initial_delta = static_cast<Value>(12);
-    constexpr Value infinite = Value::INFINITE;
-    constexpr Value mate_value = Value::MATE;
+    constexpr Value infinite = Value::infinite;
+    constexpr Value mate_value = Value::mate;
     constexpr auto aspiration_depth = 5;
 
     if (depth < aspiration_depth || std::abs(prev_eval) >= mate_value / 2) {
@@ -517,13 +517,13 @@ Value aspiration_window(Value prev_eval, int depth, Worker & worker, Stack * ss)
     Value alpha = prev_eval - initial_delta;
     Value beta = prev_eval + initial_delta;
     Value delta = initial_delta;
-    Value score = Value::DRAW;
+    Value score = Value::draw;
 
     while (true) {
         score = negamax<Us, NodeType::Root>(depth, worker, ss, alpha, beta);
 
         if (thread::pool.stop.load(std::memory_order_relaxed)) {
-            return Value::DRAW;
+            return Value::draw;
         }
 
         if (score <= alpha) {
@@ -563,7 +563,7 @@ void search_position(Worker & worker)
         Move move {};
     } shortest_mate;
 
-    Value value = Value::DRAW;
+    Value value = Value::draw;
     uint64_t prev_nodes {};
     auto const max_depth = std::min(si.depth, MAX_PLY);
     for (auto depth = 1; depth <= max_depth; ++depth) {
