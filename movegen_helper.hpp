@@ -22,16 +22,16 @@ inline Move resolve_move<white>(Board &b, PieceType src_piece, square_t src, uin
             constexpr square_t king_home = e1;
             constexpr bitboard_t castle_mask = 0x2200000000000022;
             if (src == king_home && ((1ULL << dst) & castle_mask)) {
-                move_type |= Move::Flags::Castle;
+                move_type |= Move::Flags::castle;
             }
             break;
         }
         case pawn: {
             auto const attack = frtab[src][0] != frtab[dst][0];
                 if (frtab[dst][1] == rank_8) {
-                    move_type |= Move::Flags::Promote;
+                    move_type |= Move::Flags::promote;
                 } else if ((dst == b.gamestate.enpassant_square) && attack) {
-                    move_type |= Move::Flags::Enpassant;
+                    move_type |= Move::Flags::enpassant;
                 }
             break;
         }
@@ -62,16 +62,16 @@ inline Move resolve_move<black>(Board & b, PieceType src_piece, square_t src, ui
             constexpr square_t king_home = e8;
             constexpr bitboard_t castle_mask = 0x2200000000000022;
             if (src == king_home && ((1ULL << dst) & castle_mask)) {
-                move_type |= static_cast<uint32_t>(Move::Flags::Castle);
+                move_type |= static_cast<uint32_t>(Move::Flags::castle);
             }
             break;
         }
         case pawn: {
             auto const attack = frtab[src][0] != frtab[dst][0];
             if (frtab[dst][1] == rank_1) {
-                move_type |= Move::Flags::Promote;
+                move_type |= Move::Flags::promote;
             } else if ((dst == b.gamestate.enpassant_square) && attack) {
-                move_type |= Move::Flags::Enpassant;
+                move_type |= Move::Flags::enpassant;
             }
             break;
         }

@@ -83,27 +83,46 @@ int main(int argc, char **argv)
     Board b{"startpos"};
     Uci uci(b);
 
-    const char* const short_opts = "t:c:l:f:p:w:b:h";
+    const char* const short_opts = "hb:d:f:p:t:c:l:W:B:";
     const option long_opts[] = {
+        { "help",    no_argument,        nullptr, 'h' },
+        { "perft",   no_argument,        nullptr, 'b' },
+        { "depth",   required_argument,  nullptr, 'd' },
+        { "fen",     required_argument,  nullptr, 'f' },
         { "threads", required_argument,  nullptr, 't' },
         { "config",  required_argument,  nullptr, 'c' },
         { "logfile", required_argument,  nullptr, 'l' },
-        { "fen",     required_argument,  nullptr, 'f' },
         { "pgn",     required_argument,  nullptr, 'p' },
-        { "white",   required_argument,  nullptr, 'w' },
-        { "black",   required_argument,  nullptr, 'b' },
-        { "help",    no_argument,        nullptr, 'h' },
+        { "white",   required_argument,  nullptr, 'W' },
+        { "black",   required_argument,  nullptr, 'B' },
         { nullptr,   no_argument,        nullptr, 0 }
     };
 
-    int opt;
+    int opt = 0;
+    int depth = 0;
     std::string fen;
     std::string pgnfile;
     bool print_help = false;
+    bool perft = false;
 
     std::string config_file_path;
     while ((opt = getopt_long(argc, argv, short_opts, long_opts, nullptr)) != -1) {
         switch (opt) {
+            case 'h':
+                print_help = true;
+                break;
+            case 'b':
+                perft = true;
+                break;
+            case 'd':
+                depth = std::stoi(optarg);
+                break;
+            case 'f':
+                fen = optarg;
+                break;
+            case 'p':
+                pgnfile = optarg;
+                break;
             case 't':
                 cfgmgr.num_threads = std::stoi(optarg);
                 break;
@@ -118,20 +137,11 @@ int main(int argc, char **argv)
             case 'l':
                 cfgmgr.logfile = optarg;
                 break;
-            case 'f':
-                fen = optarg;
-                break;
-            case 'p':
-                pgnfile = optarg;
-                break;
-            case 'w':
+            case 'W':
                 pgn.white_player = optarg;
                 break;
-            case 'b':
+            case 'B':
                 pgn.black_player = optarg;
-                break;
-            case 'h':
-                print_help = true;
                 break;
             default:
                 fmt::print("Error, no such option: '{}'\n", opt);
@@ -175,13 +185,18 @@ int main(int argc, char **argv)
     if (!fen.empty())
         uci(fmt::format("position fen {}", fen));
 
+    if (perft)
+        return uci(fmt::format("go perft {}", depth > 0 ? depth : 1));
+
     uci(fmt::format("setoption name Threads value {}", cfgmgr.num_threads));
     NNUE::Init("");
 
+#if ENYO_USE_SYZYGY
     if (!syzygy::init("./syzygy/wdl")) {
         fmt::print("info string error, failed to initialize tablebases\n");
         return 1;
     }
+#endif
 
     init_search();
 

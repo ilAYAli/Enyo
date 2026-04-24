@@ -429,12 +429,12 @@ std::string move2algebra(Move m, bool check = false)
     bool is_capture = dst_piece != PieceType::no_piece_type;
     //s = fmt::format("({}) ", m);
 
-    if (flags & Move::Flags::Castle) {
+    if (flags & Move::Flags::castle) {
         if (dst == g1) s += "O-O";
         else if (dst == c1) s += "O-O-O";
         else if (dst == g8) s += "O-O";
         else if (dst == c8) s += "O-O-O";
-    } else if (flags & Move::Flags::Promote) {
+    } else if (flags & Move::Flags::promote) {
         const auto promo_piece = m.promo_piece();
         s += sq2str(dst);
         switch (promo_piece) {

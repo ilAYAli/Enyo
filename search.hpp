@@ -133,8 +133,8 @@ Value negamax(
     int depth,
     Worker &,
     Stack *,
-    Value alpha = static_cast<Value>(-Value::INFINITE),
-    Value beta = Value::INFINITE
+    Value alpha = static_cast<Value>(-Value::infinite),
+    Value beta = Value::infinite
 );
 
 template <Color Us, NodeType node>

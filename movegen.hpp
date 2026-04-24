@@ -806,18 +806,18 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
     b.side = Us;
 
     switch (move.flags()) {
-        case Move::Flags::Castle:
+        case Move::Flags::castle:
             if (move.dst_sq() < move.src_sq())
                 apply_castle<Us, CastleSide::Kingside, UpdateZobrist, UpdateNNUE>(b, nnue);
             else
                 apply_castle<Us, CastleSide::Queenside, UpdateZobrist, UpdateNNUE>(b, nnue);
             b.half_moves = 0;
             break;
-        case Move::Flags::Promote:
+        case Move::Flags::promote:
             apply_promotion<Us, UpdateZobrist, UpdateNNUE>(b, move, nnue);
             b.half_moves = 0;
             break;
-        case Move::Flags::Enpassant:
+        case Move::Flags::enpassant:
             apply_enpassant<Us, UpdateZobrist, UpdateNNUE>(b, move, undo.gamestate.enpassant_square, nnue);
             b.half_moves = 0;
             break;
@@ -887,16 +887,16 @@ inline void revert_move(Board & b, [[maybe_unused]] NNUE::Net * nnue = nullptr)
             __func__, Us, b.hash);
 
     switch (undo.move.flags()) {
-        case Move::Flags::Castle:
+        case Move::Flags::castle:
             if (undo.move.dst_sq() < undo.move.src_sq())
                 revert_castle<Us, CastleSide::Kingside, UpdateZobrist, UpdateNNUE>(b, nnue);
             else
                 revert_castle<Us, CastleSide::Queenside, UpdateZobrist, UpdateNNUE>(b, nnue);
             break;
-        case Move::Flags::Promote:
+        case Move::Flags::promote:
             revert_promotion<Us, UpdateZobrist, UpdateNNUE>(b, undo, nnue);
             break;
-        case Move::Flags::Enpassant:
+        case Move::Flags::enpassant:
             revert_enpassant<Us, UpdateZobrist, UpdateNNUE>(b, undo, nnue);
             break;
         default:
@@ -1035,7 +1035,7 @@ bitboard_t generate_pawn_moves(Board & b, Movelist & moves)
                 const auto dst = square_t(src - DownLeft);
                 enpassant_attacks |= 1ULL << dst;
                 Move move{src, Us, pawn, dst, pawn};
-                move.set_flags(static_cast<Move::Flags>(Move::Flags::Enpassant));
+                move.set_flags(static_cast<Move::Flags>(Move::Flags::enpassant));
                 moves.emplace(move);
                 if constexpr (debug_enpassant)
                     fmt::print("empass l: {}\n", move);
@@ -1047,7 +1047,7 @@ bitboard_t generate_pawn_moves(Board & b, Movelist & moves)
                 const auto dst = square_t(src - DownRight);
                 enpassant_attacks |= 1ULL << dst;
                 Move move{src, Us, pawn, dst, pawn};
-                move.set_flags(static_cast<Move::Flags>(Move::Flags::Enpassant));
+                move.set_flags(static_cast<Move::Flags>(Move::Flags::enpassant));
                 moves.emplace(move);
                 if constexpr (debug_enpassant)
                     fmt::print("empass r: {}\n", move);
@@ -1070,7 +1070,7 @@ bitboard_t generate_pawn_moves(Board & b, Movelist & moves)
                 const auto dst = pop_lsb(b1);
                 const auto dst_piece = get_piece_type<Them>(b, dst);
                 Move move{static_cast<square_t>(dst - UpLeft), Us, pawn, dst, dst_piece };
-                move.set_flags(static_cast<Move::Flags>(Move::Flags::Promote));
+                move.set_flags(static_cast<Move::Flags>(Move::Flags::promote));
                 move.set_promo_piece(promotion_piece);
                 moves.emplace(move);
                 if constexpr (debug_promo)
@@ -1080,7 +1080,7 @@ bitboard_t generate_pawn_moves(Board & b, Movelist & moves)
                 const auto dst = pop_lsb(b2);
                 const auto dst_piece = get_piece_type<Them>(b, dst);
                 Move move{static_cast<square_t>(dst - UpRight), Us, pawn, dst, dst_piece };
-                move.set_flags(static_cast<Move::Flags>(Move::Flags::Promote));
+                move.set_flags(static_cast<Move::Flags>(Move::Flags::promote));
                 move.set_promo_piece(promotion_piece);
                 moves.emplace(move);
                 if constexpr (debug_promo)
@@ -1091,7 +1091,7 @@ bitboard_t generate_pawn_moves(Board & b, Movelist & moves)
             while (b3) {
                 const auto dst  = pop_lsb(b3);
                 Move move{static_cast<square_t>(dst - Up), Us, pawn, dst };
-                move.set_flags(static_cast<Move::Flags>(Move::Flags::Promote));
+                move.set_flags(static_cast<Move::Flags>(Move::Flags::promote));
                 move.set_promo_piece(promotion_piece);
                 moves.emplace(move);
                 if constexpr (debug_promo)
@@ -1209,10 +1209,7 @@ Movelist generate_legal_moves(Board & b)
                         bitboard_t const bb = b.between_bb[pinner_sq][king_sq] | pinner_sq_mask;
                         if (bb & src_sq_mask) { // this blocker is pinned by this piece
                             if (mm & pinner_sq_mask) // can move in pin direction:
-                                blocker_move_mask = bb & ~src_sq_mask;
-                            else // pinned in place (orthogonal pinner?)
-                                blocker_move_mask = 0;
-                            break;
+                                blocker_move_mask |= bb & ~src_sq_mask;
                         }
                     }
                     while (blocker_move_mask) {
@@ -1265,13 +1262,11 @@ Movelist generate_legal_moves(Board & b)
                     while (pinners) {
                         square_t const pinner_sq = pop_lsb(pinners);
                         bitboard_t const pinner_sq_mask = 1ULL << pinner_sq;
-                        bitboard_t const bb = b.between_bb[pinner_sq][king_sq] | pinner_sq_mask;
-                        if (bb & src_sq_mask) { // this blocker is pinned by this pinner
-                            if (mm & pinner_sq_mask) // can move in pin direction:
-                                blocker_move_mask = bb & ~src_sq_mask;
-                            else // pinned in place (diagonal pinner?)
-                                blocker_move_mask = 0;
-                            break;
+                        bitboard_t const between = b.between_bb[pinner_sq][king_sq] | pinner_sq_mask;
+                        if (between & src_sq_mask) { // this blocker is pinned by this piece
+                            if (mm & pinner_sq_mask) { // can move in pin direction:
+                                blocker_move_mask |= between & ~src_sq_mask;
+                            }
                         }
                     }
                     while (blocker_move_mask) {
@@ -1329,7 +1324,7 @@ Movelist generate_legal_moves(Board & b)
                         bitboard_t const bb = b.between_bb[pinner_sq][king_sq] | pinner_sq_mask;
                         if (bb & src_sq_mask) { // this blocker is pinned by this pinner
                             if (mm & pinner_sq_mask) // can move in pin direction:
-                                blocker_move_mask = bb & ~src_sq_mask;
+                                blocker_move_mask |= bb & ~src_sq_mask;
                         }
                     }
                     while (blocker_move_mask) {
@@ -1384,12 +1379,12 @@ Movelist generate_legal_moves(Board & b)
             } else { // king@home
                 if (dst_mask & file_g) { // kingside castle:
                     if (can_castle_kingside) {
-                        mv.set_flags(Move::Flags::Castle);
+                        mv.set_flags(Move::Flags::castle);
                         legal_moves.emplace(mv);
                     }
                 } else if (dst_mask & file_c) { // queenside
                     if (can_castle_queenside) {
-                        mv.set_flags(Move::Flags::Castle);
+                        mv.set_flags(Move::Flags::castle);
                         legal_moves.emplace(mv);
                     }
                 } else { // normal move from home square

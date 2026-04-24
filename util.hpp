@@ -101,6 +101,16 @@ static inline constexpr square_t sqconv(square_t sq)
     return h1_to_a1[sq];
 }
 
+static inline constexpr square_t h1a1(square_t sq)
+{
+    return h1_to_a1[sq];
+}
+
+static inline constexpr square_t a1h1(square_t sq)
+{
+    return a1_to_h1[sq];
+}
+
 static inline constexpr uint64_t bbconv(uint64_t bb)
 {
     uint64_t converted_bb = 0;

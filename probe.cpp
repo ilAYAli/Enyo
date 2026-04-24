@@ -110,10 +110,10 @@ std::pair<int, Move> probe_DTZ(Board & board)
 
     int score = 0;
     if (wdl == TB_LOSS) {
-        score = Value::TB_LOSS_IN_MAX_PLY;
+        score = Value::tb_loss_in_max_ply;
     }
     if (wdl == TB_WIN) {
-        score = Value::TB_WIN_IN_MAX_PLY;
+        score = Value::tb_win_in_max_ply;
     }
     if (wdl == TB_BLESSED_LOSS || wdl == TB_DRAW || wdl == TB_CURSED_WIN) {
         score = 0;
@@ -135,12 +135,12 @@ std::pair<int, Move> probe_DTZ(Board & board)
     for (auto move : legalmoves) {
         if (move.src_sq() == sqFrom && move.dst_sq() == sqTo) {
             if (promoTranslation[promo] == no_piece_type) {
-               if (move.flags() != Move::Flags::Promote) {
+               if (move.flags() != Move::Flags::promote) {
                     return {score, move};
                 }
             } else {
                 if (promo < 5) {
-                    if (move.promo_piece() == promoTranslation[promo] && move.flags() == Move::Flags::Promote) {
+                    if (move.promo_piece() == promoTranslation[promo] && move.flags() == Move::Flags::promote) {
                         return {score, move};
                     }
                 }

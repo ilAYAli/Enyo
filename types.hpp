@@ -146,15 +146,15 @@ constexpr bitboard_t shift(bitboard_t b) {
 
 //----[ value ]----------------------------------------------------------------
 enum Value : int {
-    DRAW                  = 0,
-    MATE                  = 30000,
-    MATED                 =-MATE,
-    NONE                  = 32767,
-    INFINITE              = 32766,
-    TB_WIN_IN_MAX_PLY     = MATE - 2 * MAX_PLY,
-    TB_LOSS_IN_MAX_PLY    =-TB_WIN_IN_MAX_PLY,
-    MATE_IN_MAX_PLY       = MATE - MAX_PLY,
-    MATED_IN_MAX_PLY      =-MATE_IN_MAX_PLY,
+    draw                  = 0,
+    mate                  = 30000,
+    mated                 =-mate,
+    none                  = 32767,
+    infinite              = 32766,
+    tb_win_in_max_ply     = mate - 2 * MAX_PLY,
+    tb_loss_in_max_ply    =-tb_win_in_max_ply,
+    mate_in_max_ply       = mate - MAX_PLY,
+    mated_in_max_ply      =-mate_in_max_ply,
 };
 
 constexpr Value operator+(Value v, int val) {
@@ -239,10 +239,10 @@ struct alignas(4) Move {
     static constexpr uint32_t no_move = 0x0000000000000000;
 
     enum Flags : int {
-        Generic = 0,
-        Promote = 1,
-        Enpassant = 2,
-        Castle = 4,
+        generic = 0,
+        promote = 1,
+        enpassant = 2,
+        castle = 4,
     };
 
     /*explicit*/ constexpr Move(uint32_t value)
@@ -416,7 +416,7 @@ struct formatter<enyo::Value> {
 template<>
 struct formatter<enyo::Move> : formatter<const char*> {
     auto format(enyo::Move type, format_context& ctx) const {
-        if (type.flags() != enyo::Move::Flags::Promote) {
+        if (type.flags() != enyo::Move::Flags::promote) {
             return fmt::format_to(ctx.out(), "{}",
                 mvlookup[type.src_sq()][type.dst_sq()]);
         }
