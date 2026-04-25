@@ -387,7 +387,9 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     // todo: ProbCut
 
 moves_loop:
-    auto const lm = generate_legal_moves<Us>(b);
+    auto const lm = (NT == NodeType::Root && !si.searchmoves.empty())
+        ? si.searchmoves
+        : generate_legal_moves<Us>(b);
     if (lm.empty()) {
         if (ss->in_check) {
             auto prev_move = b.history[b.histply-1].move;
@@ -619,6 +621,8 @@ void search_position(Worker & worker)
             break;
     }
     if (worker.id == 0) {
+        if (si.has_searchmoves)
+            ucilog("info string forced score {}\n", value);
         ucilog("bestmove {}\n", shortest_mate.move ? shortest_mate.move : worker.bestmove);
     }
 }

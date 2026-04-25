@@ -95,6 +95,10 @@ public:
     int num_threads         = 1;
     int hash_size           = 64;
     bool use_chess_960      = false;
+    bool use_tt             = true;
+    bool use_tt_exact_cutoff = true;
+    bool use_tt_lower_cutoff = false;
+    bool use_tt_upper_cutoff = false;
     bool use_lmr            = false;
     std::string nnue_file   = "nn-eba324f53044.nnue";
     std::string logfile     = "/tmp/enyo.log";
@@ -120,6 +124,10 @@ public:
         return
             concat("Threads",       "spin", num_threads, int(1), int(64)) +
             concat("Hash",          "spin", hash_size, int(1), int(33554432)) +
+            concat("use_tt",        "check", use_tt) +
+            concat("use_tt_exact_cutoff", "check", use_tt_exact_cutoff) +
+            concat("use_tt_lower_cutoff", "check", use_tt_lower_cutoff) +
+            concat("use_tt_upper_cutoff", "check", use_tt_upper_cutoff) +
             //concat("UCI_Chess960",  "check", use_chess_960) +
             concat("nnue_file",     "string", nnue_file) +
             concat("logfile",       "string", logfile) +
@@ -138,6 +146,14 @@ public:
             hash_size = std::stoi(value);
         else if (lc == "uci_chess960")
             use_chess_960 = true;
+        else if (lc == "use_tt")
+            use_tt = (value == "true");
+        else if (lc == "use_tt_exact_cutoff")
+            use_tt_exact_cutoff = (value == "true");
+        else if (lc == "use_tt_lower_cutoff")
+            use_tt_lower_cutoff = (value == "true");
+        else if (lc == "use_tt_upper_cutoff")
+            use_tt_upper_cutoff = (value == "true");
         else if (lc == "nue_file")
             nnue_file = value;
         else if (lc == "use_lmr")
@@ -153,6 +169,10 @@ private:
         try {
             num_threads     = option["Threads"].get<int>();
             hash_size       = option["Hash"].get<int>();
+            use_tt          = option["Use_tt"];
+            use_tt_exact_cutoff = option["Use_tt_exact_cutoff"];
+            use_tt_lower_cutoff = option["Use_tt_lower_cutoff"];
+            use_tt_upper_cutoff = option["Use_tt_upper_cutoff"];
             nnue_file       = option["Nnue_file"].get<std::string>();
             logfile         = option["Logfile"].get<std::string>();
             use_lmr         = option["Use_lmr"];

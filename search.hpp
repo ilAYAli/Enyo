@@ -57,6 +57,8 @@ struct SearchInfo {
     int binc = -1;
     int movestogo {40};
     int movetime {-1};
+    Movelist searchmoves{};
+    bool has_searchmoves = false;
 
     uint64_t tbhits = 0; //
     uint64_t nodes {};
