@@ -5,6 +5,27 @@ using namespace enyo;
 
 namespace zobrist {
 
+constexpr int ep_file(square_t sq)
+{
+    return 7 - (sq % 8);
+}
+
+bool has_legal_ep(const Board & b)
+{
+    const auto ep = b.gamestate.enpassant_square;
+    if (!ep)
+        return false;
+
+    const auto side = b.side;
+    const auto pawns = b.pt_bb[side][pawn];
+    const auto ep_mask = 1ULL << ep;
+    const auto attackers = side == white
+        ? ((ep_mask >> 7) & ~file_h) | ((ep_mask >> 9) & ~file_a)
+        : ((ep_mask << 7) & ~file_a) | ((ep_mask << 9) & ~file_h);
+
+    return static_cast<bool>(pawns & attackers);
+}
+
 uint64_t generate_hash(Board const & b)
 {
     uint64_t zkey = 0;
@@ -25,7 +46,10 @@ uint64_t generate_hash(Board const & b)
         zkey ^= b.zbrs.enpassant_[file];
     }
 
-    zkey ^= b.zbrs.castling_[b.gamestate.castling_rights];
+    if (b.gamestate.can_castle(CastlingRights::white_oo))  zkey ^= b.zbrs.castling_[0];
+    if (b.gamestate.can_castle(CastlingRights::white_ooo)) zkey ^= b.zbrs.castling_[1];
+    if (b.gamestate.can_castle(CastlingRights::black_oo))  zkey ^= b.zbrs.castling_[2];
+    if (b.gamestate.can_castle(CastlingRights::black_ooo)) zkey ^= b.zbrs.castling_[3];
 
     zkey ^= b.gamestate.white_to_move; // TODO: is this correct?
     return zkey;
