@@ -124,6 +124,7 @@ struct Worker {
     Move killers[2] { 0, 0 };
     Move bestmove{};
     QuadraticPV pvline {};
+    std::array<std::array<std::array<int16_t, square_nb>, square_nb>, color_nb> history{};
     int id { };
 };
 

@@ -25,6 +25,17 @@ using namespace eventlog;
 
 namespace enyo {
 
+namespace {
+
+void update_history_score(int16_t & entry, int bonus)
+{
+    constexpr int max_history = 16384;
+    bonus = std::clamp(bonus, -max_history, max_history);
+    entry += static_cast<int16_t>(bonus - (entry * std::abs(bonus)) / max_history);
+}
+
+}
+
 int lmr_reductions[MAX_PLY][MAX_MOVES];
 
 void init_search() {
@@ -470,6 +481,14 @@ moves_loop:
                     if (is_quiet) {
                         worker.killers[1] = worker.killers[0];
                         worker.killers[0] = move;
+
+                        const int bonus = std::min(1600, depth * depth * 32);
+                        update_history_score(worker.history[Us][move.src_sq()][move.dst_sq()], bonus);
+                        for (int i = 0; i < ss->move_count - 1; ++i) {
+                            const auto prev = mp[static_cast<size_t>(i)];
+                            if (prev.dst_piece() == no_piece_type && prev.flags() != Move::Flags::promote)
+                                update_history_score(worker.history[Us][prev.src_sq()][prev.dst_sq()], -bonus / 2);
+                        }
                     }
 
                     tt::ttable.store(

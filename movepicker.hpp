@@ -93,9 +93,10 @@ static inline std::vector<enyo::Move> prioritize_moves(
             } else if (is_castle(move)) {
                 score = CASTLE_SCORE;
             } else {
+                score = worker.history[Us][move.src_sq()][move.dst_sq()];
                 auto range = board.pv_table | std::views::take(ply);
                 if (auto it = std::ranges::find(range, move); it != range.end()) {
-                    score = PV_SCORE - static_cast<int>(std::distance(range.begin(), it));
+                    score += PV_SCORE - static_cast<int>(std::distance(range.begin(), it));
                 }
             }
         }
