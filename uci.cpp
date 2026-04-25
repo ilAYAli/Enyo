@@ -271,7 +271,9 @@ void Uci::position(std::istringstream& iss)
     }  else if (token == "kiwi") { // perft
         b.set("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
     }  else if (token == "wac2") { // b3b2 (depth 23)
-        b.set("8/7p/5k2/5p2/p1p2P2/Pr1pPK2/1P1R3P/8 b - -");
+        //b.set("8/7p/5k2/5p2/p1p2P2/Pr1pPK2/1P1R3P/8 b - -");
+        //b.set("8/8/5k1p/5p2/p1p2P2/Pr1pPK2/1P1R3P/8 b - - 0 0");
+        b.set("8/7p/5k2/5p2/p1p2P2/Pr1pPK2/1P1R3P/8 b - - 0 1");
     }  else if (token == "lct1") { // endgame: d5d6 (depth 21)
         b.set("r3kb1r/3n1pp1/p6p/2pPp2q/Pp2N3/3B2PP/1PQ2P2/R3K2R w KQkq -");
     }  else if (token == "fine70") { // a1b1 (depth 29)
