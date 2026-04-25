@@ -31,6 +31,7 @@ public:
     Board & b;
     std::string white_player = "?";
     std::string black_player = "?";
+    bool quitting = false;
 
 private:
     void uci();
