@@ -161,6 +161,23 @@ int Uci::operator()(const std::string& command)
             fmt::print("hash {:016X}\n", b.hash);
         } else if (token == "sfhash") {
             fmt::print("hash {:016X}\n", zobrist::generate_stockfish_hash(b));
+        } else if (token == "eval") {
+            std::string side_token;
+            iss >> side_token;
+            SearchInfo si(b, 1);
+            const auto side = side_token == "white"
+                ? white
+                : side_token == "black"
+                    ? black
+                    : b.side;
+            const auto score = static_cast<Value>(si.nnue.Evaluate(side));
+            fmt::print("eval {}\n", score);
+        } else if (token == "nnuecheck") {
+            SearchInfo si(b, 1);
+            const auto inc = static_cast<Value>(si.nnue.Evaluate(b.side));
+            si.nnue.refresh(si.board);
+            const auto full = static_cast<Value>(si.nnue.Evaluate(b.side));
+            fmt::print("nnue inc {} full {}\n", inc, full);
         } else if (token == "pgn") {
             pgn();
         } else if (token == "move") { // non-UCI command
@@ -180,7 +197,6 @@ int Uci::operator()(const std::string& command)
                     return 0;
                 }
                 auto m = resolve_move<Us>(b, piece, src, dst);
-                apply_move<Us>(b, m);
                 if (pp != PieceType::no_piece_type)
                     m.set_promo_piece(pp);
                 apply_move<Us>(b, m);
@@ -324,6 +340,7 @@ void Uci::go(std::istringstream & iss)
 
     enyo::SearchInfo si{};
     std::string token;
+    std::vector<std::string> searchmoves;
 
     if (!(b.color_bb[white] | b.color_bb[black]))
         b.set();
@@ -339,6 +356,10 @@ void Uci::go(std::istringstream & iss)
         } else if (token == "perft" && (iss >> si.depth)) {
             perft<true>(b, si.depth);
             return;
+        } else if (token == "searchmoves") {
+            while (iss >> token)
+                searchmoves.push_back(token);
+            break;
         }
     }
 
@@ -354,6 +375,30 @@ void Uci::go(std::istringstream & iss)
         si.stoptime = std::chrono::high_resolution_clock::time_point::max();
     }
     si.board = b;
+
+    if (!searchmoves.empty()) {
+        Movelist filtered;
+        const auto legal = b.side == white
+            ? generate_legal_moves<white>(b)
+            : generate_legal_moves<black>(b);
+
+        for (const auto& move_str : searchmoves) {
+            auto src = str2sq(move_str.substr(0, 2).c_str());
+            auto dst = str2sq(move_str.substr(2, 2).c_str());
+            auto pp = get_promo_piece(move_str);
+            for (const auto move : legal) {
+                if (move.src_sq() == src && move.dst_sq() == dst) {
+                    if (pp == PieceType::no_piece_type || move.promo_piece() == pp)
+                        filtered.emplace(move);
+                }
+            }
+        }
+
+        if (!filtered.empty()) {
+            si.searchmoves = filtered;
+            si.has_searchmoves = true;
+        }
+    }
 
 #if 1
     fmt::print("info string threads:{},slot:{},movetime:{},wtime:{},btime:{},winc:{},binc:{},movestogo:{},depth:{}\n",
