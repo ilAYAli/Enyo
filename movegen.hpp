@@ -30,24 +30,6 @@ constexpr int ep_file(square_t sq)
     return 7 - (sq % 8);
 }
 
-constexpr int ep_file(square_t sq)
-{
-    return 7 - (sq % 8);
-}
-
-inline void update_castling_hash(Board& b, unsigned old_rights)
-{
-    if (old_rights == b.gamestate.castling_rights)
-        return;
-
-    b.hash ^= b.zbrs.castling_[old_rights];
-    b.hash ^= b.zbrs.castling_[b.gamestate.castling_rights];
-}
-
-inline void refresh_castling_hash(Board& b, unsigned old_rights)
-{
-    update_castling_hash(b, old_rights);
-}
 template <Color Us>
 static constexpr bitboard_t knight_moves(Board const & b, square_t square) {
     auto attacks = knight_attack_table[square] & ~b.color_bb[Us];
@@ -590,8 +572,6 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
     const auto src_piece = mv.src_piece();
     const auto dst_piece = mv.dst_piece();
     constexpr auto Them = ~Us;
-    const auto old_rights = b.gamestate.castling_rights;
-
 #if 0
     if (dst_piece == king) {
         fmt::print("error: king can't be captured, move: {}, fen: {}\n", mv, b.fen());
@@ -608,6 +588,7 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
                 if (src == a1) {
                     if (b.gamestate.can_castle(CastlingRights::white_ooo)) {
                         b.gamestate.set_castle(CastlingRights::white_ooo, false);
+                        b.hash ^= b.zbrs.castling_[0];
                         if constexpr (zobrist::debug)
                             fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                                 __func__, b.hash, b.fen());
@@ -615,6 +596,7 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
                 } else if (src == h1) {
                     if (b.gamestate.can_castle(CastlingRights::white_oo)) {
                         b.gamestate.set_castle(CastlingRights::white_oo, false);
+                        b.hash ^= b.zbrs.castling_[1];
                         if constexpr (zobrist::debug)
                             fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                                 __func__, b.hash, b.fen());
@@ -625,12 +607,14 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
             case king: {
                 if (b.gamestate.can_castle(CastlingRights::white_ooo)) {
                     b.gamestate.set_castle(CastlingRights::white_ooo, false);
+                    b.hash ^= b.zbrs.castling_[0];
                     if constexpr (zobrist::debug)
                         fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                             __func__, b.hash, b.fen());
                 }
                 if (b.gamestate.can_castle(CastlingRights::white_oo)) {
                     b.gamestate.set_castle(CastlingRights::white_oo, false);
+                    b.hash ^= b.zbrs.castling_[1];
                     if constexpr (zobrist::debug)
                         fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                             __func__, b.hash, b.fen());
@@ -654,6 +638,7 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
                 if (src == a8) {
                     if (b.gamestate.can_castle(CastlingRights::black_ooo)) {
                         b.gamestate.set_castle(CastlingRights::black_ooo, false);
+                        b.hash ^= b.zbrs.castling_[2];
                         if constexpr (zobrist::debug)
                             fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                                 __func__, b.hash, b.fen());
@@ -661,6 +646,7 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
                 } else if (src == h8) {
                     if (b.gamestate.can_castle(CastlingRights::black_oo)) {
                         b.gamestate.set_castle(CastlingRights::black_oo, false);
+                        b.hash ^= b.zbrs.castling_[3];
                         if constexpr (zobrist::debug)
                             fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                                 __func__, b.hash, b.fen());
@@ -671,12 +657,14 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
             case king: {
                 if (b.gamestate.can_castle(CastlingRights::black_ooo)) {
                     b.gamestate.set_castle(CastlingRights::black_ooo, false);
+                    b.hash ^= b.zbrs.castling_[2]; // Queenside black
                     if constexpr (zobrist::debug)
                         fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                             __func__, b.hash, b.fen());
                 }
                 if (b.gamestate.can_castle(CastlingRights::black_oo)) {
                     b.gamestate.set_castle(CastlingRights::black_oo, false);
+                    b.hash ^= b.zbrs.castling_[3]; // Kingside black
                     if constexpr (zobrist::debug)
                         fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                             __func__, b.hash, b.fen());
@@ -696,10 +684,6 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
         }
 
     } // black
-
-    if constexpr (UpdateZobrist)
-        refresh_castling_hash(b, old_rights);
-
     const square_t w_ksq = lsb(b.pt_bb[white][king]);
     const square_t b_ksq = lsb(b.pt_bb[black][king]);
     clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, src_piece, src, nnue, w_ksq, b_ksq);
@@ -736,16 +720,17 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
 template<Color Us>
 inline void restore_castling_rights(Board & b, Undo const & undo)
 {
-    const auto old_rights = b.gamestate.castling_rights;
     if constexpr (Us == white) {
         if (b.gamestate.can_castle(CastlingRights::white_oo) != undo.gamestate.can_castle(CastlingRights::white_oo)) {
             b.gamestate.set_castle(CastlingRights::white_oo, undo.gamestate.can_castle(CastlingRights::white_oo));
+            b.hash ^= b.zbrs.castling_[1];
             if constexpr (zobrist::debug)
                 fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                     __func__, b.hash, b.fen());
         }
         if (b.gamestate.can_castle(CastlingRights::white_ooo) != undo.gamestate.can_castle(CastlingRights::white_ooo)) {
             b.gamestate.set_castle(CastlingRights::white_ooo, undo.gamestate.can_castle(CastlingRights::white_ooo));
+            b.hash ^= b.zbrs.castling_[0];
             if constexpr (zobrist::debug)
                 fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                     __func__, b.hash, b.fen());
@@ -753,19 +738,19 @@ inline void restore_castling_rights(Board & b, Undo const & undo)
     } else {
         if (b.gamestate.can_castle(CastlingRights::black_oo) != undo.gamestate.can_castle(CastlingRights::black_oo)) {
             b.gamestate.set_castle(CastlingRights::black_oo, undo.gamestate.can_castle(CastlingRights::black_oo));
+            b.hash ^= b.zbrs.castling_[3];
             if constexpr (zobrist::debug)
                 fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                     __func__, b.hash, b.fen());
         }
         if (b.gamestate.can_castle(CastlingRights::black_ooo) != undo.gamestate.can_castle(CastlingRights::black_ooo)) {
             b.gamestate.set_castle(CastlingRights::black_ooo, undo.gamestate.can_castle(CastlingRights::black_ooo));
+            b.hash ^= b.zbrs.castling_[2];
             if constexpr (zobrist::debug)
                 fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
                     __func__, b.hash, b.fen());
         }
     }
-
-    refresh_castling_hash(b, old_rights);
 }
 
 template<Color Us, bool UpdateZobrist, bool UpdateNNUE>
