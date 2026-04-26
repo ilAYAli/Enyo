@@ -567,6 +567,7 @@ Value aspiration_window(Value prev_eval, int depth, Worker & worker, Stack * ss)
 void search_position(Worker & worker)
 {
     auto & si = worker.si;
+    auto & board = si.board;
     Stack stack[MAX_PLY + 5];
     stack[0].ply = 4;
     stack[1].ply = 3;
@@ -575,6 +576,14 @@ void search_position(Worker & worker)
     for (int i = 0; i < MAX_PLY; i++)
         stack[i + 4].ply = i;
     Stack *ss = stack + 4;
+
+    const auto legal_fallback = board.side == white
+        ? generate_legal_moves<white>(board)
+        : generate_legal_moves<black>(board);
+
+    const auto is_legal_root_move = [&](Move move) {
+        return std::ranges::find(legal_fallback, move) != legal_fallback.end();
+    };
 
     //tt::ttable.prepare();
     worker.pvline.clear();
@@ -642,7 +651,12 @@ void search_position(Worker & worker)
     if (worker.id == 0) {
         if (si.has_searchmoves)
             ucilog("info string forced score {}\n", value);
-        ucilog("bestmove {}\n", shortest_mate.move ? shortest_mate.move : worker.bestmove);
+
+        Move out = is_legal_root_move(shortest_mate.move) ? shortest_mate.move : worker.bestmove;
+        if (!is_legal_root_move(out) && !legal_fallback.empty())
+            out = legal_fallback[0];
+
+        ucilog("bestmove {}\n", out);
     }
 }
 
