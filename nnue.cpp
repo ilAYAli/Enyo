@@ -143,8 +143,8 @@ void Net::updateAccumulator(
                 from_square,
                 side,
                 side == enyo::white
-                ? h1a1(kingSquare_White)
-                : h1a1(kingSquare_Black)
+                ? kingSquare_White
+                : kingSquare_Black
             );
         const int inputAdd =
             index(
@@ -153,8 +153,8 @@ void Net::updateAccumulator(
                 to_square,
                 side,
                 side == enyo::white
-                ? h1a1(kingSquare_White)
-                : h1a1(kingSquare_Black)
+                ? kingSquare_White
+                : kingSquare_Black
             );
 
         const auto weightSub = inputWeights.data() + inputClear * HIDDEN_SIZE;
@@ -164,7 +164,7 @@ void Net::updateAccumulator(
             accumulator[side][i * 4 + 0] += static_cast<int16_t>(-weightSub[i * 4 + 0] + weightAdd[i * 4 + 0]);
             accumulator[side][i * 4 + 1] += static_cast<int16_t>(-weightSub[i * 4 + 1] + weightAdd[i * 4 + 1]);
             accumulator[side][i * 4 + 2] += static_cast<int16_t>(-weightSub[i * 4 + 2] + weightAdd[i * 4 + 2]);
-            accumulator[side][i * 4 + 3] += static_cast<uint16_t>(-weightSub[i * 4 + 3] + weightAdd[i * 4 + 3]);
+            accumulator[side][i * 4 + 3] += static_cast<int16_t>(-weightSub[i * 4 + 3] + weightAdd[i * 4 + 3]);
         }
     }
 #endif
@@ -190,6 +190,54 @@ void Net::refresh(enyo::Board &board) {
         );
     }
 }
+
+// Compute a simple hash of piece positions for cache validation
+static uint64_t compute_pieces_hash(const enyo::Board &board) {
+    uint64_t hash = 0;
+    uint64_t pieces = board.color_bb[enyo::white] | board.color_bb[enyo::black];
+    while (pieces) {
+        enyo::square_t sq = pop_lsb(pieces);
+        enyo::PieceType pt = board.pt_mb[sq];
+        auto color = board.color_bb[enyo::white] & (1ULL << sq) ? enyo::white : enyo::black;
+        hash ^= (static_cast<uint64_t>(pt) << (sq + color * 6));
+    }
+    return hash;
+}
+
+void Net::update_cache(enyo::Board &board, enyo::square_t w_ksq, enyo::square_t b_ksq) {
+    // Update cache for both king positions
+    auto pieces_hash = compute_pieces_hash(board);
+    
+    cache.entries[enyo::white][w_ksq].acc.copy(accumulator_stack[currentAccumulator]);
+    cache.entries[enyo::white][w_ksq].pieces_hash = pieces_hash;
+    cache.entries[enyo::white][w_ksq].valid = true;
+    
+    cache.entries[enyo::black][b_ksq].acc.copy(accumulator_stack[currentAccumulator]);
+    cache.entries[enyo::black][b_ksq].pieces_hash = pieces_hash;
+    cache.entries[enyo::black][b_ksq].valid = true;
+}
+
+void Net::refresh_with_cache(enyo::Board &board) {
+    enyo::square_t w_ksq = lsb(board.pt_bb[enyo::white][enyo::king]);
+    enyo::square_t b_ksq = lsb(board.pt_bb[enyo::black][enyo::king]);
+    auto pieces_hash = compute_pieces_hash(board);
+    
+    // Check if we have a valid cached accumulator for these king positions
+    auto& w_entry = cache.entries[enyo::white][w_ksq];
+    auto& b_entry = cache.entries[enyo::black][b_ksq];
+    
+    if (w_entry.valid && b_entry.valid && 
+        w_entry.pieces_hash == pieces_hash && b_entry.pieces_hash == pieces_hash) {
+        // Cache hit! Copy from cache
+        accumulator_stack[currentAccumulator].copy(w_entry.acc);
+        return;
+    }
+    
+    // Cache miss - do full refresh and update cache
+    refresh(board);
+    update_cache(board, w_ksq, b_ksq);
+}
+
 
 int32_t Net::Evaluate(enyo::Color side) {
     Accumulator &accumulator = accumulator_stack[currentAccumulator];

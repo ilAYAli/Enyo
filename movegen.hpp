@@ -405,7 +405,8 @@ inline void apply_castle(Board & b, NNUE::Net * nnue)
 
     if constexpr (UpdateNNUE) {
         assert(nnue && "apply_castle: nnue is null");
-        nnue->refresh(b);
+        // Castling moves the king - use cache-based refresh
+        nnue->refresh_with_cache(b);
     }
 }
 
@@ -693,22 +694,13 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
 
     if constexpr (UpdateNNUE) {
         assert(nnue && "apply_move_generic: nnue is null");
-        if (true) {
-        //if (src_piece == king
-        //    && (NNUE::KING_BUCKET[src ^ (b.side == white ? 0 : 56)]
-        //     != NNUE::KING_BUCKET[dst ^ (b.side == white ? 0 : 56)]
-        //     || square_file(src) + square_file(dst) == 7)) {
-             nnue->refresh(b);
+        // TODO: Incremental updates don't work correctly with king-bucket networks
+        // because clr_piece/set_piece use king squares captured before the move.
+        // For now, always refresh. Future optimization: use Finny tables cache.
+        if (src_piece == king) {
+            nnue->refresh_with_cache(b);
         } else {
-            nnue->updateAccumulator(
-                src_piece, // PWA: presumably
-                Us,
-                src,
-                dst,
-                lsb(b.pt_bb[white][king]),
-                lsb(b.pt_bb[black][king])
-            );
-
+            nnue->refresh(b);  // TEMP: until incremental is fixed
         }
     }
 
