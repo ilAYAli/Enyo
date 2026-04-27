@@ -19,8 +19,8 @@ Examples:
 
     parser.add_argument('--candidate', default='build/enyo',
                         help='Candidate engine path (default: build/enyo)')
-    parser.add_argument('--reference', default='build/reference',
-                        help='Reference engine path (default: build/reference)')
+    parser.add_argument('--reference', default='../assets/engines/enyo_55b13aa',
+                        help='Reference engine path (default: ../assets/engines/enyo_55b13aa)')
     parser.add_argument('--book', default='../assets/books/AntiDraw_V2.1/NBC_Openings_V2/NBC_V2_4mvs.epd',
                         help='Opening book path')
     parser.add_argument('--games', type=int, default=50000,
