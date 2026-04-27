@@ -16,41 +16,40 @@ set(COLOR_CYAN   "${Esc}[36m")
 set(COLOR_YELLOW "${Esc}[33m")
 
 #---[ binary tagging ]---------------------------------------------------------
-function(git_info GIT_HASH_OUTPUT GIT_DIRTY_OUTPUT)
+# Allow explicit version override via cache variables:
+# cmake -DENYO_GIT_HASH=abc123 -DENYO_GIT_DIRTY=0 ..
+
+if(NOT DEFINED ENYO_GIT_HASH)
     execute_process(
         COMMAND git log -1 --format=%h
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        OUTPUT_VARIABLE GIT_HASH
+        OUTPUT_VARIABLE ENYO_GIT_HASH
         OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
     )
+    if(NOT ENYO_GIT_HASH)
+        set(ENYO_GIT_HASH "unknown")
+    endif()
+endif()
 
+if(NOT DEFINED ENYO_GIT_DIRTY)
     execute_process(
         COMMAND git diff --quiet --ignore-submodules HEAD
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         RESULT_VARIABLE GIT_DIFF_RESULT
+        ERROR_QUIET
     )
-
     if(GIT_DIFF_RESULT EQUAL 0)
-        set(GIT_DIRTY 0)
+        set(ENYO_GIT_DIRTY 0)
     else()
-        set(GIT_DIRTY 1)
+        set(ENYO_GIT_DIRTY 1)
     endif()
+endif()
 
-    set(${GIT_HASH_OUTPUT} ${GIT_HASH} PARENT_SCOPE)
-    set(${GIT_DIRTY_OUTPUT} ${GIT_DIRTY} PARENT_SCOPE)
-endfunction()
-
-git_info(GIT_HASH GIT_DIRTY)
-message(STATUS "Git hash: ${GIT_HASH} dirty: ${GIT_DIRTY}")
+message(STATUS "Git hash: ${ENYO_GIT_HASH} dirty: ${ENYO_GIT_DIRTY}")
 
 # build timestamp
 string(TIMESTAMP BUILD_DATE "%d/%m-%y")
-
-# force update version.cpp to reflect the current git info
-add_custom_target(update_version
-    COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_SOURCE_DIR}/version.cpp
-    COMMENT "Updating version"
-)
 
 #---[ build version ]----------------------------------------------------------
 set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wconversion -Wfatal-errors")
@@ -133,8 +132,12 @@ add_custom_command(
         -DOUTPUT_FILE=${CMAKE_BINARY_DIR}/version_info.hpp
         -DBUILD_DATE_VALUE=${BUILD_DATE}
         -DBUILD_TYPE_VALUE=${CMAKE_BUILD_TYPE}
+        -DENYO_GIT_HASH=${ENYO_GIT_HASH}
+        -DENYO_GIT_DIRTY=${ENYO_GIT_DIRTY}
         -P ${CMAKE_SOURCE_DIR}/cmake/update_version_info.cmake
     DEPENDS ${CMAKE_SOURCE_DIR}/version_info.hpp.in
+            ${CMAKE_SOURCE_DIR}/cmake/update_version_info.cmake
+    BYPRODUCTS ${CMAKE_BINARY_DIR}/version_info.hpp
     COMMENT "Generating version_info.hpp"
 )
 
@@ -147,7 +150,6 @@ add_executable(enyo
     ${ENYO_SOURCES}
 )
 
-add_dependencies(enyo update_version)
 target_compile_definitions(enyo PRIVATE ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>)
 target_link_libraries(enyo PRIVATE version_lib fmt::fmt-header-only nlohmann_json::nlohmann_json)
 
