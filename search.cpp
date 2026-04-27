@@ -169,7 +169,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
             }
         }
     }
-    if (!thread::pool.stop.load(std::memory_order_relaxed))
+    if (!thread::pool.stop.load(std::memory_order_relaxed) && best_move)
         tt::ttable.store(
             b.hash,
             best_move,
@@ -506,7 +506,7 @@ moves_loop:
     }
 
 
-    if (!thread::pool.stop.load(std::memory_order_relaxed)) {
+    if (!thread::pool.stop.load(std::memory_order_relaxed) && best_move) {
         tt::ttable.store(
             b.hash,
             best_move,
