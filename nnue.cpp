@@ -143,8 +143,8 @@ void Net::updateAccumulator(
                 from_square,
                 side,
                 side == enyo::white
-                ? h1a1(kingSquare_White)
-                : h1a1(kingSquare_Black)
+                ? kingSquare_White
+                : kingSquare_Black
             );
         const int inputAdd =
             index(
@@ -153,8 +153,8 @@ void Net::updateAccumulator(
                 to_square,
                 side,
                 side == enyo::white
-                ? h1a1(kingSquare_White)
-                : h1a1(kingSquare_Black)
+                ? kingSquare_White
+                : kingSquare_Black
             );
 
         const auto weightSub = inputWeights.data() + inputClear * HIDDEN_SIZE;
@@ -164,7 +164,7 @@ void Net::updateAccumulator(
             accumulator[side][i * 4 + 0] += static_cast<int16_t>(-weightSub[i * 4 + 0] + weightAdd[i * 4 + 0]);
             accumulator[side][i * 4 + 1] += static_cast<int16_t>(-weightSub[i * 4 + 1] + weightAdd[i * 4 + 1]);
             accumulator[side][i * 4 + 2] += static_cast<int16_t>(-weightSub[i * 4 + 2] + weightAdd[i * 4 + 2]);
-            accumulator[side][i * 4 + 3] += static_cast<uint16_t>(-weightSub[i * 4 + 3] + weightAdd[i * 4 + 3]);
+            accumulator[side][i * 4 + 3] += static_cast<int16_t>(-weightSub[i * 4 + 3] + weightAdd[i * 4 + 3]);
         }
     }
 #endif
