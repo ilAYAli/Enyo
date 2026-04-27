@@ -119,10 +119,36 @@ struct Accumulator {
     }
 };
 
+// Simplified Finny tables cache - stores accumulator state for each king square
+// This cache enables efficient NNUE updates when the king moves by reusing
+// previously computed accumulators for the new king position.
+// The cache uses a simple hash of piece positions to validate entries.
+struct AccumulatorCache {
+    struct Entry {
+        Accumulator acc;
+        uint64_t pieces_hash;  // Hash of piece positions to detect cache validity
+        bool valid;
+        
+        Entry() : pieces_hash(0), valid(false) {}
+    };
+    
+    // Cache entry for each king square combination
+    std::array<std::array<Entry, 64>, 2> entries;  // [color][king_square]
+    
+    void invalidate() {
+        for (auto& color_entries : entries) {
+            for (auto& entry : color_entries) {
+                entry.valid = false;
+            }
+        }
+    }
+};
+
 struct Net {
     size_t currentAccumulator = 0;
 
     std::array<Accumulator, 512> accumulator_stack;
+    AccumulatorCache cache;
 
     Net();
 
@@ -141,6 +167,8 @@ struct Net {
     }
 
     void refresh(enyo::Board &board);
+    void refresh_with_cache(enyo::Board &board);
+    void update_cache(enyo::Board &board, enyo::square_t w_ksq, enyo::square_t b_ksq);
 
     template <bool add>
     void updateAccumulator(
