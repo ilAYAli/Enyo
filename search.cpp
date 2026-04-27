@@ -377,8 +377,9 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         );
         if (have_big_pieces
             && depth >= 3
-            && (ss->eval >= beta)
-            && (ss-1)->move != Move{}) {
+            && ss->eval >= beta
+            && (ss-1)->move != Move{}
+            && std::abs(beta) < Constexpr::mate_value - MAX_PLY) {
 
             int R = 5 + std::min(4, depth / 5) + std::min(Value(3), (ss->eval - beta) / 214);
             apply_null_move<Us>(b);
