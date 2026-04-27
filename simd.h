@@ -1,20 +1,32 @@
 #pragma once
 
+// x86/x64 SIMD (Intel/AMD)
 #if defined(__AVX__) || defined(__AVX2__) || defined(__AVX512F__)
 #include <immintrin.h>
 #define USE_SIMD
+#define USE_AVX
+#endif
+
+// ARM NEON SIMD (Apple Silicon, ARM64)
+#if defined(__ARM_NEON) || defined(__aarch64__)
+#include <arm_neon.h>
+#define USE_SIMD
+#define USE_NEON
 #endif
 
 #if defined(__AVX512F__)
 #define BIT_ALIGNMENT  (512)
 #elif defined(__AVX2__) || defined(__AVX__)
 #define BIT_ALIGNMENT  (256)
+#elif defined(USE_NEON)
+#define BIT_ALIGNMENT  (128)
 #endif
 
 #define STRIDE_16_BIT (BIT_ALIGNMENT / 16)
 #define ALIGNMENT     (BIT_ALIGNMENT / 8)
 #define REG_COUNT (16)
 
+// x86 AVX512
 #if defined(__AVX512F__)
 using register_type16 = __m512i;
 using register_type32 = __m512i;
@@ -26,6 +38,8 @@ using register_type32 = __m512i;
 #define register_max_epi16  _mm512_max_epi16
 #define register_load   _mm512_load_si512
 #define register_store  _mm512_store_si512
+
+// x86 AVX/AVX2
 #elif defined(__AVX2__) || defined(__AVX__)
 using register_type16 = __m256i;
 using register_type32 = __m256i;
@@ -38,6 +52,58 @@ using register_type32 = __m256i;
 #define register_sub_epi16  _mm256_sub_epi16
 #define register_max_epi16  _mm256_max_epi16
 #define avx_zero _mm256_setzero_si256
+
+// ARM NEON
+#elif defined(USE_NEON)
+using register_type16 = int16x8_t;
+using register_type32 = int32x4_t;
+
+// NEON intrinsics wrappers to match AVX naming
+inline int16x8_t register_add_epi16(int16x8_t a, int16x8_t b) {
+    return vaddq_s16(a, b);
+}
+
+inline int16x8_t register_sub_epi16(int16x8_t a, int16x8_t b) {
+    return vsubq_s16(a, b);
+}
+
+inline int32x4_t register_add_epi32(int32x4_t a, int32x4_t b) {
+    return vaddq_s32(a, b);
+}
+
+inline int32x4_t register_sub_epi32(int32x4_t a, int32x4_t b) {
+    return vsubq_s32(a, b);
+}
+
+inline int16x8_t register_max_epi16(int16x8_t a, int16x8_t b) {
+    return vmaxq_s16(a, b);
+}
+
+inline int16x8_t register_load(const int16_t* p) {
+    return vld1q_s16(p);
+}
+
+inline void register_store(int16_t* p, int16x8_t v) {
+    vst1q_s16(p, v);
+}
+
+// NEON doesn't have a direct madd (multiply-add) for int16->int32
+// We need to implement it manually
+inline int32x4_t register_madd_epi16(int16x8_t a, int16x8_t b) {
+    // Split into low and high parts
+    int16x4_t a_lo = vget_low_s16(a);
+    int16x4_t a_hi = vget_high_s16(a);
+    int16x4_t b_lo = vget_low_s16(b);
+    int16x4_t b_hi = vget_high_s16(b);
+    
+    // Multiply and widen to 32-bit
+    int32x4_t prod_lo = vmull_s16(a_lo, b_lo);
+    int32x4_t prod_hi = vmull_s16(a_hi, b_hi);
+    
+    // Add pairs: (a[0]*b[0] + a[1]*b[1]), (a[2]*b[2] + a[3]*b[3]), ...
+    return vpaddq_s32(prod_lo, prod_hi);
+}
+
 #endif
 
 
@@ -50,6 +116,7 @@ inline int32_t sumRegisterEpi32(register_type32& reg) {
     const __m256i reduced_8 = reg;
 #endif
 
+#if defined(USE_AVX)
     const __m128i reduced_4 =
         _mm_add_epi32(_mm256_castsi256_si128(reduced_8), _mm256_extractf128_si256(reduced_8, 1));
 
@@ -57,5 +124,11 @@ inline int32_t sumRegisterEpi32(register_type32& reg) {
     vsum         = _mm_add_epi32(vsum, _mm_srli_si128(vsum, 4));
     int32_t sums = _mm_cvtsi128_si32(vsum);
     return sums;
+#elif defined(USE_NEON)
+    // NEON: horizontal sum of 4 int32 values
+    int32x2_t sum_pair = vpadd_s32(vget_low_s32(reg), vget_high_s32(reg));
+    sum_pair = vpadd_s32(sum_pair, sum_pair);
+    return vget_lane_s32(sum_pair, 0);
+#endif
 }
 #endif
