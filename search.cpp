@@ -625,6 +625,8 @@ void search_position(Worker & worker)
             if (mate_distance > 0 && mate_distance < shortest_mate.moves)
                 shortest_mate = {mate_distance, pvbm};
             worker.bestmove = pvbm;
+        } else {
+            eventlog::log<eventlog::Log::error>("ERROR: pvbm is empty at depth {} but PV string is: {}\n", depth, worker.pvline.str());
         }
 
         const std::string score_info = mate_distance
@@ -646,18 +648,33 @@ void search_position(Worker & worker)
         if (prev_nodes == thread::pool.get_nodes())
             break;
 
-        if (shortest_mate.moves == 1)
+        if (shortest_mate.moves == 1) {
+            eventlog::log<eventlog::Log::info>("Breaking search loop: found mate in 1, shortest_mate.move={}, worker.bestmove={}\n", 
+                shortest_mate.move, worker.bestmove);
             break;
+        }
     }
+    
+    eventlog::log<eventlog::Log::info>("After search loop: worker.id={}, shortest_mate.move={}, worker.bestmove={}\n",
+        worker.id, shortest_mate.move, worker.bestmove);
+    
     if (worker.id == 0) {
         if (si.has_searchmoves)
             ucilog("info string forced score {}\n", value);
 
         Move out = is_legal_root_move(shortest_mate.move) ? shortest_mate.move : worker.bestmove;
+        
+        eventlog::log<eventlog::Log::info>("Before bestmove output: out={}, is_legal={}\n", 
+            out, is_legal_root_move(out));
+        
         if (!is_legal_root_move(out) && !legal_fallback.empty())
             out = legal_fallback[0];
 
+        eventlog::log<eventlog::Log::info>("Outputting bestmove: {}\n", out);
         ucilog("bestmove {}\n", out);
+        eventlog::log<eventlog::Log::info>("Successfully output bestmove\n");
+    } else {
+        eventlog::log<eventlog::Log::error>("ERROR: worker.id={} is not 0, not outputting bestmove!\n", worker.id);
     }
 }
 
