@@ -13,7 +13,7 @@ using namespace enyo;
     if (id != 0)
         return false;
 
-    if (si.time_expired()) {
+    if (si.time_expired() && bestmove) {
         thread::pool.stop = true;
         return true;
     }
