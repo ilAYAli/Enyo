@@ -407,9 +407,8 @@ void Uci::go(std::istringstream & iss)
 
     thread::pool.init_threads(std::move(si), cfgmgr.num_threads);
 
-    std::jthread watchdog;
-    if (time_slot.count() >= 0) {
-        watchdog = std::jthread([deadline = std::chrono::high_resolution_clock::now() + time_slot](std::stop_token st) {
+    auto watchdog = time_slot.count() >= 0
+        ? std::optional<std::jthread>(std::in_place, [deadline = std::chrono::high_resolution_clock::now() + time_slot](std::stop_token st) {
             while (!st.stop_requested()) {
                 if (std::chrono::high_resolution_clock::now() >= deadline) {
                     thread::pool.stop = true;
@@ -417,8 +416,8 @@ void Uci::go(std::istringstream & iss)
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
-        });
-    }
+        })
+        : std::nullopt;
 
     // Always wait for search threads to complete before returning from 'go' command.
     // This ensures bestmove is always printed before we start reading the next command.
