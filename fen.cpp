@@ -64,11 +64,16 @@ inline void set_half_move_clock(Board & b, const std::vector<std::string> & toke
     }
 }
 
-inline void set_full_moves(Board & /* b */, const std::vector<std::string> & tokens) {
+inline void set_full_moves(Board & b, const std::vector<std::string> & tokens) {
     if (tokens.size() > 4) {
         auto const str = tokens[4];
         uint16_t num = 0;
         std::from_chars(str.data(), str.data() + str.size(), num);
+        if (num == 0)
+            num = 1;
+        b.gamestate.full_moves = num;
+    } else {
+        b.gamestate.full_moves = 1;
     }
 }
 
@@ -157,7 +162,7 @@ std::string get_fen(Board const & b) {
     fmt::format_to(out, "{} ", b.half_moves + b.gamestate.half_moves);
 
     // "The number of the full move. It starts at 1, and is incremented after black's move."
-    fmt::format_to(out, "{}", (b.histply + 1) / 2);
+    fmt::format_to(out, "{}", b.gamestate.full_moves + b.histply / 2);
 
     //fmt::print("* {} {}\n", __func__, fmt::to_string(tmp));
     return fmt::to_string(tmp);

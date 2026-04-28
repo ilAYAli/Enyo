@@ -304,6 +304,10 @@ void Uci::position(std::istringstream& iss)
             fen += token + " ";
         if (!fen.empty()) {
             fen.pop_back();
+            if (!fen.empty() && fen.front() == '"')
+                fen.erase(fen.begin());
+            if (!fen.empty() && fen.back() == '"')
+                fen.pop_back();
             b.set(fen);
         }
     } else {
