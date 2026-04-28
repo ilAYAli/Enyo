@@ -407,12 +407,13 @@ void Uci::go(std::istringstream & iss)
 
     thread::pool.init_threads(std::move(si), cfgmgr.num_threads);
 
-    // Batch stdin commonly closes immediately after 'go depth ...'. For fixed-depth
-    // analysis without time controls, wait for the workers here so the main thread
-    // does not tear the process down while search threads are still running.
-    if (isatty(STDIN_FILENO) == 0 && si.movetime == -1 && si.wtime == -1 && si.btime == -1) {
-        thread::pool.wait();
-    }
+    // Always wait for search threads to complete before returning from 'go' command.
+    // This ensures bestmove is always printed before we start reading the next command.
+    // The original logic only waited for non-interactive (piped) stdin without time controls,
+    // but this caused the engine to not wait for bestmove output when time controls were set,
+    // leading to race conditions where the main thread could process new commands or exit
+    // before the search thread finished outputting the bestmove.
+    thread::pool.wait();
 }
 
 // bench 0 0 5 current perft
