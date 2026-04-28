@@ -374,6 +374,7 @@ struct Gamestate {
     square_t enpassant_square{};
     unsigned castling_rights{};
     unsigned half_moves {};
+    unsigned full_moves {1};
 
     //bool has_castled[2] {};
     inline bool can_castle(CastlingRights cr) const {

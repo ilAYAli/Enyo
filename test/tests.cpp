@@ -144,6 +144,12 @@ TEST(hash, castling_rights_mask_hash_matches_recompute) {
     revert_move<white>(b);
     EXPECT_EQ(b.hash, zobrist::generate_hash(b));
 }
+
+TEST(fen, round_trips_fullmove_counter) {
+    Board b{"1r3rk1/p1q1pp1p/1np1b1p1/2Q5/8/1PNB1P2/P1P3PP/2KR3R b - - 0 17"};
+
+    EXPECT_EQ(b.fen(), "1r3rk1/p1q1pp1p/1np1b1p1/2Q5/8/1PNB1P2/P1P3PP/2KR3R b - - 0 17");
+}
 #endif
 
 int main(int argc, char **argv) {
