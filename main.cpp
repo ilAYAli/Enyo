@@ -125,15 +125,18 @@ int main(int argc, char **argv)
     }
 
     if (print_help) {
-        fmt::print("Usage: program_name [OPTIONS]\n");
+        fmt::print("Usage: {} [OPTIONS]\n\n", argv[0]);
         fmt::print("Options:\n");
-        for (const option * param = long_opts; param->name != nullptr; ++param) {
-            fmt::print("  -{}, --{}={}    {}\n",
-                       static_cast<char>(param->val),
-                       param->name,
-                       (param->has_arg == required_argument ? "VALUE" : ""),
-                       "Specify description here");
-        }
+        fmt::print("  -h, --help            Show this help message\n");
+        fmt::print("  -b, --perft           Run perft test\n");
+        fmt::print("  -d, --depth=VALUE     Set search/perft depth\n");
+        fmt::print("  -f, --fen=VALUE       Set position from FEN string\n");
+        fmt::print("  -t, --threads=VALUE   Set number of threads\n");
+        fmt::print("  -c, --config=VALUE    Path to settings.json config file\n");
+        fmt::print("  -l, --logfile=VALUE   Set log file path\n");
+        fmt::print("  -p, --pgn=VALUE       Load game from PGN file\n");
+        fmt::print("  -W, --white=VALUE     Set white player name\n");
+        fmt::print("  -B, --black=VALUE     Set black player name\n");
         return 0;
     }
 
