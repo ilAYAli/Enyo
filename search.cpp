@@ -95,8 +95,9 @@ Value evaluate(Board & b, NNUE::Net * nnue)
 template <Color Us, NodeType Node>
 Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int beta)
 {
-    if (worker.time_expired())
+    if (worker.time_expired()) {
         return Value::draw;
+    }
 
     constexpr bool pv_node = Node == NodeType::PV;
     constexpr Color Them = ~Us;
@@ -147,6 +148,9 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     auto const mp = prioritize_moves<Us, QSEARCH>(worker, lm, tt_move, depth);
     Move best_move {};
     for (auto move : mp) {
+        if ((si.nodes & 1023U) == 0 && worker.time_expired())
+            return Value::draw;
+
         si.nodes++;
 
         apply_move<Us, true, true>(b, move, &si.nnue);
@@ -186,8 +190,9 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
 template <Color Us, NodeType NT>
 Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
 {
-    if (worker.time_expired())
+    if (worker.time_expired()) {
         return Value::draw;
+    }
 
     constexpr Color Them = ~Us;
     constexpr bool pv_node = NT != NodeType::NonPV;
@@ -369,6 +374,9 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
 
     // null move search
     if (Constexpr::use_nullmove) {
+        if ((si.nodes & 1023U) == 0 && worker.time_expired())
+            return Value::draw;
+
         const bool have_big_pieces = static_cast<bool>(
             b.pt_bb[Us][knight]
           | b.pt_bb[Us][bishop]
@@ -423,6 +431,10 @@ moves_loop:
     ss->move_count = 0;
     for (const auto move : mp) {
     //while (const auto move = mp.next()) {
+        if ((si.nodes & 1023U) == 0 && worker.time_expired()) {
+            return Value::draw;
+        }
+
         si.nodes++;
         ss->move = move;
         ss->move_count++;
@@ -448,6 +460,11 @@ moves_loop:
             R -= is_capture;
             R = std::clamp(new_depth - R, 1, new_depth + 1);
 
+            if (worker.time_expired()) {
+                revert_move<Us, true, true>(b, &worker.si.nnue);
+                return Value::draw;
+            }
+
             value = -negamax<Them, NodeType::NonPV>(R, worker, ss + 1, -alpha -1, -alpha);
 
             do_fullsearch = value > alpha && R < new_depth;
@@ -456,11 +473,21 @@ moves_loop:
         }
 
         if (do_fullsearch) {
+            if (worker.time_expired()) {
+                revert_move<Us, true, true>(b, &worker.si.nnue);
+                return Value::draw;
+            }
+
             value = -negamax<Them, NodeType::NonPV>(new_depth, worker, ss + 1, -alpha -1, -alpha);
         }
 
         // PVS: Principal Variation Search
         if (NT != NodeType::NonPV && ((value > alpha && value < beta) || ss->move_count == 1)) {
+            if (worker.time_expired()) {
+                revert_move<Us, true, true>(b, &worker.si.nnue);
+                return Value::draw;
+            }
+
             value = -negamax<Them, NodeType::PV>(new_depth, worker, ss + 1, -beta, -alpha);
         }
 
@@ -598,6 +625,9 @@ void search_position(Worker & worker)
     uint64_t prev_nodes {};
     auto const max_depth = std::min(si.depth, MAX_PLY);
     for (auto depth = 1; depth <= max_depth; ++depth) {
+        if (worker.time_expired())
+            break;
+
         prev_nodes = thread::pool.get_nodes();
         si.nodes = 0;
         si.depth = depth;
