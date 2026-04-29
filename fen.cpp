@@ -46,7 +46,7 @@ inline void set_castling_rights(Board &b, const std::vector<std::string> & token
 
 inline void set_enpassant(Board & b, const std::vector<std::string> & tokens)
 {
-    if (tokens.size() > 2) {
+    if (tokens.size() > 2 && tokens[2].size() == 2 && tokens[2] != "-") {
         b.gamestate.enpassant_square = str2sq(tokens[2].c_str());
     } else {
         b.gamestate.enpassant_square = 0;
