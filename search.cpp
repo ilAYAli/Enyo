@@ -450,8 +450,19 @@ moves_loop:
        const bool is_quiet = move.dst_piece() == no_piece_type && move.flags() != Move::Flags::promote;
        const bool is_capture = move.dst_piece() != no_piece_type;
 
+        // Futility pruning: skip quiet moves at shallow depth when static
+        // eval plus a depth-scaled margin is still below alpha.
+        if (!pv_node
+            && !ss->in_check
+            && is_quiet
+            && depth <= 6
+            && ss->move_count > 1
+            && ss->eval != Value::none
+            && ss->eval + 120 * depth <= alpha
+            && std::abs(alpha) < Constexpr::mate_value - MAX_PLY) {
+            continue;
+        }
 
-        // todo: Pruning at shallow depth
         // todo: Extensions
         int extension = 0;
         int new_depth = depth -1 + extension;
