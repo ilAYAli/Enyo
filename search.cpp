@@ -478,6 +478,10 @@ moves_loop:
             R += !improving;
             R -= NT != NodeType::NonPV;
             R -= is_capture;
+            if (is_quiet) {
+                const int h = worker.history[Us][move.src_sq()][move.dst_sq()];
+                R -= std::clamp(h / 8192, -2, 2);
+            }
             R = std::clamp(new_depth - R, 1, new_depth + 1);
 
             if (worker.time_expired()) {
