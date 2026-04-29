@@ -159,8 +159,6 @@ int Uci::operator()(const std::string& command)
             fmt::print("{}\n", b.str());
         } else if (token == "hash") {
             fmt::print("hash {:016X}\n", b.hash);
-        } else if (token == "sfhash") {
-            fmt::print("hash {:016X}\n", zobrist::generate_stockfish_hash(b));
         } else if (token == "eval") {
             std::string side_token;
             iss >> side_token;
