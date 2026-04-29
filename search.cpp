@@ -428,7 +428,9 @@ moves_loop:
         return Value::draw;
     }
 #if 1
-    auto const mp = prioritize_moves<Us, ABSEARCH>(worker, lm, tt_move, depth, ss->killers);
+    const Move prev_move = (ss-1)->move;
+    const Move cm = prev_move ? worker.countermove[Us][prev_move.src_sq()][prev_move.dst_sq()] : Move{};
+    auto const mp = prioritize_moves<Us, ABSEARCH>(worker, lm, tt_move, depth, ss->killers, cm);
 #else
     auto mp = MovePicker2<Us>(worker, lm, tt_move);
 #endif
@@ -516,6 +518,10 @@ moves_loop:
                         if (move != ss->killers[0]) {
                             ss->killers[1] = ss->killers[0];
                             ss->killers[0] = move;
+                        }
+
+                        if (prev_move != Move{}) {
+                            worker.countermove[Us][prev_move.src_sq()][prev_move.dst_sq()] = move;
                         }
 
                         const int bonus = std::min(1600, depth * depth * 32);

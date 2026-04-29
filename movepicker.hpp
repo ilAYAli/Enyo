@@ -38,8 +38,8 @@ enum MoveScores : int {
     CAPTURE_SCORE       = 7'000'000,
     KILLER1_SCORE       = 6'000'000,
     KILLER2_SCORE       = 5'000'000,
-    CASTLE_SCORE        = 4'500'000,
-    COUNTER_SCORE       = 4'000'000,
+    COUNTER_SCORE       = 4'500'000,
+    CASTLE_SCORE        = 4'000'000,
     DRAW_SCORE          = 0,
     NEGATIVE_SCORE      = -10'000'000
 };
@@ -60,7 +60,8 @@ static inline std::vector<enyo::Move> prioritize_moves(
     const Movelist& moves,
     Move tt_move = 0,
     int ply = MAX_PLY,
-    const Move * killers = nullptr)
+    const Move * killers = nullptr,
+    Move countermove = Move{})
 {
     constexpr bool debug = false;
     auto & board = worker.si.board;
@@ -84,6 +85,8 @@ static inline std::vector<enyo::Move> prioritize_moves(
                 score = KILLER1_SCORE;
             } else if (killers && move == killers[1]) {
                 score = KILLER2_SCORE;
+            } else if (countermove && move == countermove) {
+                score = COUNTER_SCORE;
             } else if (is_castle(move)) {
                 score = CASTLE_SCORE;
             } else {
