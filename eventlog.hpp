@@ -79,15 +79,20 @@ inline std::string getLogFilename(const std::string& baseFilename) {
     return oss.str();
 }
 
-inline std::string logFilename = getLogFilename(enyo::cfgmgr.logfile);
+inline std::string getDefaultLogFilename()
+{
+    return getLogFilename(enyo::cfgmgr.logfile);
+}
+
+inline std::string logFilename = getDefaultLogFilename();
 inline std::ofstream logFile(logFilename, std::ios::app);
 inline std::mutex logMutex;
 
-inline void reopen_logfile(const std::string& baseFilename)
+inline void reopen_logfile(const std::string& filename, bool exact_path = false)
 {
     std::lock_guard lock(logMutex);
     logFile.close();
-    logFilename = getLogFilename(baseFilename);
+    logFilename = exact_path ? filename : getLogFilename(filename);
     logFile.open(logFilename, std::ios::app);
 }
 
