@@ -383,10 +383,16 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
           | b.pt_bb[Us][rook]
           | b.pt_bb[Us][queen]
         );
+        const bool tt_rules_out_nmp = ss->tthit
+            && tt_value != Value::none
+            && (tte->flag & tt::type::UpperBound)
+            && tt_value < beta;
+
         if (have_big_pieces
             && depth >= 3
             && ss->eval >= beta
             && (ss-1)->move != Move{}
+            && !tt_rules_out_nmp
             && std::abs(beta) < Constexpr::mate_value - MAX_PLY) {
 
             int R = 5 + std::min(4, depth / 5) + std::min(Value(3), (ss->eval - beta) / 214);
