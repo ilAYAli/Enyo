@@ -233,21 +233,25 @@ void Uci::uci()
 // setoption name Debug Log File value /tmp/foo
 void Uci::setoption(std::istringstream& iss)
 {
-    std::string token;
-    std::string name;
-    std::string value;
-
-    iss >> token;
-    std::transform(std::begin(token), std::end(token), token.begin(), ::tolower);
-    if (token != "name")
+    std::string rest;
+    std::getline(iss >> std::ws, rest);
+    if (rest.empty())
         return;
-    iss >> name;
 
-    iss >> token;
-    std::transform(std::begin(token), std::end(token), std::begin(token), ::tolower);
-    if (token != "value")
+    auto lower = rest;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+    constexpr std::string_view name_prefix = "name ";
+    if (!lower.starts_with(name_prefix))
         return;
-    iss >> value;
+
+    const auto value_pos = lower.find(" value ", name_prefix.size());
+    const auto name_end = value_pos == std::string::npos ? rest.size() : value_pos;
+    auto name = rest.substr(name_prefix.size(), name_end - name_prefix.size());
+    auto value = value_pos == std::string::npos ? std::string{} : rest.substr(value_pos + 7);
+
+    if (name.empty())
+        return;
 
     cfgmgr.setopt(name, value);
 }
