@@ -428,7 +428,7 @@ moves_loop:
         return Value::draw;
     }
 #if 1
-    auto const mp = prioritize_moves<Us, ABSEARCH>(worker, lm, tt_move, depth);
+    auto const mp = prioritize_moves<Us, ABSEARCH>(worker, lm, tt_move, depth, ss->killers);
 #else
     auto mp = MovePicker2<Us>(worker, lm, tt_move);
 #endif
@@ -513,8 +513,10 @@ moves_loop:
 
                 if (value >= beta) {
                     if (is_quiet) {
-                        worker.killers[1] = worker.killers[0];
-                        worker.killers[0] = move;
+                        if (move != ss->killers[0]) {
+                            ss->killers[1] = ss->killers[0];
+                            ss->killers[0] = move;
+                        }
 
                         const int bonus = std::min(1600, depth * depth * 32);
                         update_history_score(worker.history[Us][move.src_sq()][move.dst_sq()], bonus);

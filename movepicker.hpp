@@ -59,7 +59,8 @@ static inline std::vector<enyo::Move> prioritize_moves(
     Worker& worker,
     const Movelist& moves,
     Move tt_move = 0,
-    int ply = MAX_PLY)
+    int ply = MAX_PLY,
+    const Move * killers = nullptr)
 {
     constexpr bool debug = false;
     auto & board = worker.si.board;
@@ -72,23 +73,16 @@ static inline std::vector<enyo::Move> prioritize_moves(
         if (move == tt_move) {
             score = TT_SCORE;
         } else if (move.dst_piece() != no_piece_type) {
-#if 0
-            auto tmp = see<Us>(board, move, 0);
-            score = CAPTURE_SCORE + tmp;
-            if (tmp < 0)
-                score *= -1;
-#else
             score = CAPTURE_SCORE + mvvlva(move);
-#endif
         } else if (move.flags() & Move::Flags::promote) {
             score = (move.promo_piece() == queen) ? PROMOTE_SCORE : DRAW_SCORE;
         } else if constexpr (ST == QSEARCH) {
             // Skip non-capturing, non-promoting moves in QSEARCH
             continue;
         } else {
-            if (move == worker.killers[0]) {
+            if (killers && move == killers[0]) {
                 score = KILLER1_SCORE;
-            } else if (move == worker.killers[1]) {
+            } else if (killers && move == killers[1]) {
                 score = KILLER2_SCORE;
             } else if (is_castle(move)) {
                 score = CASTLE_SCORE;
