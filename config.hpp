@@ -154,7 +154,7 @@ public:
             use_tt_lower_cutoff = (value == "true");
         else if (lc == "use_tt_upper_cutoff")
             use_tt_upper_cutoff = (value == "true");
-        else if (lc == "nue_file")
+        else if (lc == "nnue_file")
             nnue_file = value;
         else if (lc == "logfile")
             logfile = value;
