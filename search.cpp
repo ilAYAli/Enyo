@@ -613,7 +613,7 @@ void search_position(Worker & worker)
         return std::ranges::find(legal_fallback, move) != legal_fallback.end();
     };
 
-    //tt::ttable.prepare();
+    tt::ttable.prepare();
     worker.pvline.clear();
 
     struct Mate {
