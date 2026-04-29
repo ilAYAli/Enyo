@@ -257,7 +257,7 @@ void Uci::setoption(std::istringstream& iss)
     auto lower_name = name;
     std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
     if (lower_name == "logfile")
-        eventlog::reopen_logfile(cfgmgr.logfile);
+        eventlog::reopen_logfile(cfgmgr.logfile, true);
 }
 
 void Uci::debug(std::istringstream& iss)
