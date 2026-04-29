@@ -156,11 +156,7 @@ static constexpr bool apply_enpassant(Board & b, enyo::Move move, unsigned enpas
     clr_piece<Them, UpdateZobrist, UpdateNNUE>(b, pawn, target, nnue, w_ksq, b_ksq);
     set_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, dst, nnue, w_ksq, b_ksq);
 
-    b.hash ^= b.zbrs.enpassant_[enpassant_square % 8];
-    if constexpr (zobrist::debug)
-        fmt::print("<{}> zobrist: apply_enpassant hash: {:016X}\n",
-            __func__, b.hash);
-
+    (void)enpassant_square;
     return true;
 }
 
@@ -182,11 +178,6 @@ static constexpr bool revert_enpassant(Board & b, Undo const & undo, NNUE::Net *
     clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, dst, nnue, w_ksq, b_ksq);
     set_piece<Them, UpdateZobrist, UpdateNNUE>(b, pawn, target, nnue, w_ksq, b_ksq);
     set_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, src, nnue, w_ksq, b_ksq);
-
-    if constexpr (zobrist::debug)
-        fmt::print("<{}> zobrist: apply_enpassant for square: {}\n",
-        __func__, undo.gamestate.enpassant_square);
-    b.hash ^= b.zbrs.enpassant_[undo.gamestate.enpassant_square % 8];
 
     return true;
 }
@@ -797,6 +788,10 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
         .gamestate = b.gamestate,
         .half_moves = b.half_moves
     };
+    if constexpr (UpdateZobrist) {
+        if (b.gamestate.enpassant_square)
+            b.hash ^= b.zbrs.enpassant_[b.gamestate.enpassant_square % 8];
+    }
     b.gamestate.enpassant_square = 0;
     b.side = Us;
 
@@ -826,6 +821,11 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
                 else
                     b.half_moves++;
             }
+    }
+
+    if constexpr (UpdateZobrist) {
+        if (b.gamestate.enpassant_square)
+            b.hash ^= b.zbrs.enpassant_[b.gamestate.enpassant_square % 8];
     }
 
     b.hash ^= b.zbrs.side_;
@@ -874,6 +874,13 @@ inline void revert_move(Board & b, [[maybe_unused]] NNUE::Net * nnue = nullptr)
     if constexpr (Constexpr::debug_move) {
         fmt::print("[{}] {}<{}>: {} fen: {} side: {}, hash: {:016X}\n",
             b.histply, __func__, Us, undo.move, b.fen(), b.side, b.hash);
+    }
+
+    if constexpr (UpdateZobrist) {
+        if (b.gamestate.enpassant_square)
+            b.hash ^= b.zbrs.enpassant_[b.gamestate.enpassant_square % 8];
+        if (undo.gamestate.enpassant_square)
+            b.hash ^= b.zbrs.enpassant_[undo.gamestate.enpassant_square % 8];
     }
 
     b.hash ^= b.zbrs.side_;
