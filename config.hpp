@@ -156,6 +156,8 @@ public:
             use_tt_upper_cutoff = (value == "true");
         else if (lc == "nue_file")
             nnue_file = value;
+        else if (lc == "logfile")
+            logfile = value;
         else if (lc == "use_lmr")
             use_lmr = (value == "true");
         else
