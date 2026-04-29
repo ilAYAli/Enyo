@@ -106,7 +106,10 @@ public:
         auto index = poskey % buckets;
         auto & entry = hash_table[index];
 
-        if (entry.occupied && entry.age >= current_age && entry.entry.depth > depth) {
+        if (entry.occupied
+            && entry.age == current_age
+            && entry.entry.depth > depth
+            && flag != ExactBound) {
             return;
         }
 
