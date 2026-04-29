@@ -81,10 +81,20 @@ inline std::string getLogFilename(const std::string& baseFilename) {
 
 inline std::string logFilename = getLogFilename(enyo::cfgmgr.logfile);
 inline std::ofstream logFile(logFilename, std::ios::app);
+inline std::mutex logMutex;
+
+inline void reopen_logfile(const std::string& baseFilename)
+{
+    std::lock_guard lock(logMutex);
+    logFile.close();
+    logFilename = getLogFilename(baseFilename);
+    logFile.open(logFilename, std::ios::app);
+}
 
 template <Log level = Log::info, typename... T>
 inline void log(fmt::format_string<T...> fmtStr, T&&... args) {
     if constexpr (level <= defaultLogLevel) {
+        std::lock_guard lock(logMutex);
         if (logFile.is_open()) {
             constexpr std::size_t average_log_size = 64000;
             static thread_local std::vector<char> buffer(average_log_size);

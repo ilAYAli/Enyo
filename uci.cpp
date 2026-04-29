@@ -253,7 +253,13 @@ void Uci::setoption(std::istringstream& iss)
     if (name.empty())
         return;
 
-    cfgmgr.setopt(name, value);
+    if (!cfgmgr.setopt(name, value))
+        return;
+
+    auto lower_name = name;
+    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+    if (lower_name == "logfile")
+        eventlog::reopen_logfile(cfgmgr.logfile);
 }
 
 void Uci::debug(std::istringstream& iss)
