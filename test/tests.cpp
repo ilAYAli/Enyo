@@ -46,45 +46,44 @@ constexpr Color get_side_to_move(std::string_view fen) {
 }
 
 #if 1
-TEST(check, static_exchange_evaluation) {
+TEST(check, see_pawn_takes_pawn_defended) {
+    // Pxe5: e5 defended by {Qc7, Bf6, Re6}; attacked by {Pf4, Rf5, Nd3}.
+    // LVA capture sequence yields cumulative (white POV): +100,-100,+330,-320,+500,-500 = +10.
+    // Minimax via backward induction settles on +10.
     std::string fen = "8/2q2k2/4rb2/4pR2/5P2/3N4/Q7/4K3 w - - 0 1";
     Board b(fen);
 
     auto move = resolve_move<white>(b, pawn, f4, e5);
-    //constexpr auto score = piece_value(pawn) - piece_value(queen) + piece_value(pawn) - piece_value(bishop);
-    fmt::print("SEE: {}\n", see<white>(b, move, 0));
-    //fmt::print("result: {}\n", see<white>(b, move, 0));
+    ASSERT_EQ(10, see<white>(b, move, 0));
 }
-TEST(check, static_exchange_evaluation1) {
+TEST(check, see_queen_takes_defended_pawn) {
+    // Qxb6: b6 is defended by a7 pawn only (d8 bishop blocked by c7 knight;
+    // c7 knight does not attack b6). Exchange: Qxp, axQ, Bxp = p - q + p.
     std::string fen = "3b3k/p1n5/1p6/8/8/1Q2B3/8/7K w - - 0 1";
     Board b(fen);
 
     auto move = resolve_move<white>(b, queen, b3, b6);
-    constexpr auto score = piece_value(pawn) - piece_value(queen) + piece_value(pawn) - piece_value(bishop);
+    constexpr auto score = piece_value(pawn) - piece_value(queen) + piece_value(pawn);
     ASSERT_EQ(score, see<white>(b, move, 0));
-    fmt::print("result: {}\n", see<white>(b, move, 0));
 }
-TEST(check, static_exchange_evaluation2) {
+TEST(check, see_knight_takes_defended_pawn) {
+    // Nxd5: d5 defended by f6 knight; attackers N, B. Score = p - n + n.
     std::string fen = "k7/8/5n2/3p4/8/2N2B2/8/K7 w - - 0 1";
     Board b(fen);
 
     auto move = resolve_move<white>(b, knight, c3, d5);
     constexpr auto score = piece_value(pawn) - piece_value(knight) + piece_value(knight);
-    fmt::print("expected score: {}\n", score);
     ASSERT_EQ(score, see<white>(b, move, 0));
-    fmt::print("result: {}\n", see<white>(b, move, 0));
 }
-TEST(check, static_exchange_evaluation3) {
+TEST(check, see_rook_battery_xray) {
+    // Rxd4: rank-4 battery "3pRrRr" → d4=p, e4=R, f4=r, g4=R, h4=r.
+    // Exchange (with X-ray): Rxp, Rxr, Rxr, Rxr = p - r + r - r.
     std::string fen = "2K5/8/8/8/3pRrRr/8/8/2k5 w - - 0 1";
     Board b(fen);
 
-    fmt::print("{}\n", b);
-    auto move = resolve_move<white>(b, rook, e5, d5);
-    fmt::print("move.dst_piece: {}\n", move.dst_piece());
+    auto move = resolve_move<white>(b, rook, e4, d4);
     constexpr auto score = piece_value(pawn) - piece_value(rook) + piece_value(rook) - piece_value(rook);
-    fmt::print("expected score: {}\n", score);
     ASSERT_EQ(score, see<white>(b, move, 0));
-    fmt::print("result: {}\n", see<white>(b, move, 0));
 }
 TEST(hash, recompute_matches_initial_position) {
     Board b{"startpos"};
