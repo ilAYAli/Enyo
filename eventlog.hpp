@@ -24,7 +24,7 @@ enum class Log {
 };
 
 
-constexpr inline auto defaultLogLevel = Log::info;
+constexpr inline auto defaultLogLevel = Log::warning;
 constexpr inline auto logfilesToKeep = 20;
 
 namespace fs = std::filesystem;
