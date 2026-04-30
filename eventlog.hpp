@@ -12,6 +12,8 @@
 
 namespace eventlog {
 
+// Severity ordering: lower = noisier tracing, higher = more critical.
+// A message logs iff its level >= defaultLogLevel.
 enum class Log {
     none = 0,
     debug,
@@ -24,7 +26,7 @@ enum class Log {
 };
 
 
-constexpr inline auto defaultLogLevel = Log::warning;
+constexpr inline auto defaultLogLevel = Log::uci;
 constexpr inline auto logfilesToKeep = 20;
 
 namespace fs = std::filesystem;
@@ -98,17 +100,13 @@ inline void reopen_logfile(const std::string& filename, bool exact_path = false)
 
 template <Log level = Log::info, typename... T>
 inline void log(fmt::format_string<T...> fmtStr, T&&... args) {
-    if constexpr (level <= defaultLogLevel) {
+    if constexpr (level >= defaultLogLevel) {
         std::lock_guard lock(logMutex);
         if (logFile.is_open()) {
-            constexpr std::size_t average_log_size = 64000;
-            static thread_local std::vector<char> buffer(average_log_size);
-            auto it = fmt::format_to(buffer.begin(), fmtStr, std::forward<T>(args)...);
-            if (it > buffer.end()) {
-                buffer.resize(it - buffer.begin());
-                it = fmt::format_to(buffer.begin(), fmtStr, std::forward<T>(args)...);
-            }
-            logFile.write(buffer.data(), it - buffer.begin());
+            auto s = fmt::format(fmtStr, std::forward<T>(args)...);
+            logFile.write(s.data(), static_cast<std::streamsize>(s.size()));
+            if constexpr (level >= Log::warning)
+                logFile.flush();
         }
     }
 }
