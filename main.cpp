@@ -6,6 +6,7 @@
 #include "getopt.h"
 #include "thread.hpp"
 #include "version.hpp"
+#include "eventlog.hpp"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -158,6 +159,7 @@ int main(int argc, char **argv)
     }
 
     eventlog::init();
+    eventlog::log<eventlog::Log::warning>("id {}\n", g_version);
 
     if (!fen.empty())
         uci(fmt::format("position fen {}", fen));
