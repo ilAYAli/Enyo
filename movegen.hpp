@@ -685,13 +685,13 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
 
     if constexpr (UpdateNNUE) {
         assert(nnue && "apply_move_generic: nnue is null");
-        // TODO: Incremental updates don't work correctly with king-bucket networks
-        // because clr_piece/set_piece use king squares captured before the move.
-        // For now, always refresh. Future optimization: use Finny tables cache.
+        // King moves change the king-bucket index, so the incremental
+        // deltas just applied (using the pre-move king square) become
+        // wrong — refresh through the Finny cache for the new bucket.
+        // Non-king moves keep both king squares stable, so the
+        // incremental updates are authoritative and no refresh is needed.
         if (src_piece == king) {
             nnue->refresh_with_cache(b);
-        } else {
-            nnue->refresh(b);  // TEMP: until incremental is fixed
         }
     }
 
@@ -888,21 +888,26 @@ inline void revert_move(Board & b, [[maybe_unused]] NNUE::Net * nnue = nullptr)
         fmt::print("<{}> zobrist: {} move, hash: {:016X}\n",
             __func__, Us, b.hash);
 
+    // The NNUE accumulator is already rolled back by pop() above; the
+    // inner revert_* helpers must roll back board/zobrist state only.
+    // Passing UpdateNNUE=true here would let their clr_piece/set_piece
+    // calls mutate slot N (which already holds the correct pre-move
+    // state), silently corrupting it for the next sibling's search.
     switch (undo.move.flags()) {
         case Move::Flags::castle:
             if (undo.move.dst_sq() < undo.move.src_sq())
-                revert_castle<Us, CastleSide::Kingside, UpdateZobrist, UpdateNNUE>(b, nnue);
+                revert_castle<Us, CastleSide::Kingside, UpdateZobrist, false>(b, nnue);
             else
-                revert_castle<Us, CastleSide::Queenside, UpdateZobrist, UpdateNNUE>(b, nnue);
+                revert_castle<Us, CastleSide::Queenside, UpdateZobrist, false>(b, nnue);
             break;
         case Move::Flags::promote:
-            revert_promotion<Us, UpdateZobrist, UpdateNNUE>(b, undo, nnue);
+            revert_promotion<Us, UpdateZobrist, false>(b, undo, nnue);
             break;
         case Move::Flags::enpassant:
-            revert_enpassant<Us, UpdateZobrist, UpdateNNUE>(b, undo, nnue);
+            revert_enpassant<Us, UpdateZobrist, false>(b, undo, nnue);
             break;
         default:
-            revert_move_generic<Us, UpdateZobrist, UpdateNNUE>(b, undo, nnue);
+            revert_move_generic<Us, UpdateZobrist, false>(b, undo, nnue);
     }
 
     // only for move (not castling, promotion, ...)
