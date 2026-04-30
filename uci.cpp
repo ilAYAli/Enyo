@@ -387,6 +387,7 @@ void Uci::go(std::istringstream & iss)
         si.stoptime = std::chrono::high_resolution_clock::time_point::max();
     }
     si.board = b;
+    si.nnue.refresh(si.board);
 
     if (!searchmoves.empty()) {
         Movelist filtered;
