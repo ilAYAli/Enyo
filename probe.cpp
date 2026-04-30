@@ -90,17 +90,18 @@ Status WDL_probe(Board &board)
 #endif
 }
 
-std::pair<int, Move> probe_DTZ(Board & board)
+std::pair<int, Move> DTZ_probe(Board & board, Status & status)
 {
+    status = Status::Error;
 #if !ENYO_USE_SYZYGY
     (void)board;
     return {0, Move{}};
 #else
-    if (!initialized) {
-        return {TB_RESULT_FAILED, Move{}};
-    }
+    if (!initialized)
+        return {0, Move{}};
 
     auto pos = board2pos(board);
+    pos.rule50 = static_cast<uint8_t>(board.gamestate.half_moves);
 
     unsigned TBresult =
         tb_probe_root(
@@ -113,28 +114,29 @@ std::pair<int, Move> probe_DTZ(Board & board)
             nullptr // results
         );
 
-    if (TBresult == TB_RESULT_FAILED || TBresult == TB_RESULT_CHECKMATE ||
-        TBresult == TB_RESULT_STALEMATE)
-        return {TB_RESULT_FAILED, Move{}};
+    if (TBresult == TB_RESULT_FAILED
+     || TBresult == TB_RESULT_CHECKMATE
+     || TBresult == TB_RESULT_STALEMATE)
+        return {0, Move{}};
 
     const int wdl = TB_GET_WDL(TBresult);
-
     int score = 0;
-    if (wdl == TB_LOSS) {
-        score = Value::tb_loss_in_max_ply;
-    }
-    if (wdl == TB_WIN) {
-        score = Value::tb_win_in_max_ply;
-    }
-    if (wdl == TB_BLESSED_LOSS || wdl == TB_DRAW || wdl == TB_CURSED_WIN) {
-        score = 0;
+    switch (wdl) {
+        case TB_WIN:          score = Value::tb_win_in_max_ply;  status = Status::Win;  break;
+        case TB_LOSS:         score = Value::tb_loss_in_max_ply; status = Status::Loss; break;
+        case TB_CURSED_WIN:
+        case TB_DRAW:
+        case TB_BLESSED_LOSS: score = 0;                         status = Status::Draw; break;
+        default:              return {0, Move{}};
     }
 
     const int promo = TB_GET_PROMOTES(TBresult);
-    const PieceType promoTranslation[] = {no_piece_type, queen, rook, bishop, knight };
+    const PieceType promoTranslation[] = {no_piece_type, queen, rook, bishop, knight};
 
-    const auto sqFrom = square_t(TB_GET_FROM(TBresult));
-    const auto sqTo = square_t(TB_GET_TO(TBresult));
+    // Fathom hands back A1=0 squares; compare against legal moves in Enyo's
+    // native H1=0 layout by translating the legal move into A1=0.
+    const auto fathom_from = unsigned(TB_GET_FROM(TBresult));
+    const auto fathom_to   = unsigned(TB_GET_TO(TBresult));
 
     Movelist legalmoves;
     if (board.side == white)
@@ -142,23 +144,19 @@ std::pair<int, Move> probe_DTZ(Board & board)
     else
         legalmoves = generate_legal_moves<black>(board);
 
-    // no piece
     for (auto move : legalmoves) {
-        if (move.src_sq() == sqFrom && move.dst_sq() == sqTo) {
-            if (promoTranslation[promo] == no_piece_type) {
-               if (move.flags() != Move::Flags::promote) {
-                    return {score, move};
-                }
-            } else {
-                if (promo < 5) {
-                    if (move.promo_piece() == promoTranslation[promo] && move.flags() == Move::Flags::promote) {
-                        return {score, move};
-                    }
-                }
-            }
+        if (sqconv(move.src_sq()) != fathom_from) continue;
+        if (sqconv(move.dst_sq()) != fathom_to)   continue;
+        if (promoTranslation[promo] == no_piece_type) {
+            if (move.flags() != Move::Flags::promote)
+                return {score, move};
+        } else if (promo < 5) {
+            if (move.flags() == Move::Flags::promote
+             && move.promo_piece() == promoTranslation[promo])
+                return {score, move};
         }
     }
-    return {TB_RESULT_FAILED, Move{}};
+    return {0, Move{}};
 #endif
 }
 
