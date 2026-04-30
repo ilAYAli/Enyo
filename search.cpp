@@ -454,6 +454,16 @@ moves_loop:
             continue;
         }
 
+        // LMP: Late Move Pruning
+        if (!pv_node
+            && !ss->in_check
+            && is_quiet
+            && depth <= 5
+            && best_value > -Constexpr::mate_value + MAX_PLY
+            && ss->move_count > (improving ? 5 + depth * depth : 3 + depth * depth)) {
+            continue;
+        }
+
         // todo: Extensions
         int extension = 0;
         int new_depth = depth -1 + extension;
