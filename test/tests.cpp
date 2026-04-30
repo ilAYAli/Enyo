@@ -286,6 +286,30 @@ TEST(nnue_audit, king_move_non_castle) {
     expect_incremental_matches_refresh<white>("king_move_non_castle", b, move);
 }
 
+// Apply A, revert A, apply B — verify slot N (after revert) still matches
+// a from-scratch refresh on the reverted board. Catches bugs where
+// revert_move corrupts the popped slot.
+TEST(nnue_audit, revert_restores_slot) {
+    Board start{"startpos"};
+    NNUE::Net live;
+    live.refresh(start);
+
+    const NNUE::Accumulator before = live.accumulator_stack[live.currentAccumulator];
+
+    auto a = resolve_move<white>(start, pawn, e2, e4);
+    apply_move<white, true, true>(start, a, &live);
+    revert_move<white, true, true>(start, &live);
+
+    const NNUE::Accumulator after_revert = live.accumulator_stack[live.currentAccumulator];
+    EXPECT_TRUE(accumulators_match(before, after_revert))
+        << "revert corrupted slot; fen: " << start.fen();
+
+    NNUE::Net fresh;
+    fresh.refresh(start);
+    EXPECT_TRUE(accumulators_match(after_revert, fresh.accumulator_stack[fresh.currentAccumulator]))
+        << "post-revert slot != fresh refresh; fen: " << start.fen();
+}
+
 // Deep-sequence audit: apply eight moves, each time verifying the live
 // accumulator matches a full refresh. Flushes out any delta-stacking bug
 // that a single-move test would miss.
