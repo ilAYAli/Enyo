@@ -9,6 +9,7 @@
 namespace syzygy {
 
 extern bool init(const std::string & tb_path);
+extern unsigned largest(); // max piece count of any loaded tablebase, 0 if none
 
 enum Status {
     Error = -1,

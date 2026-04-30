@@ -18,6 +18,7 @@
 #include "tt.hpp"
 #include "version.hpp"
 #include "eventlog.hpp"
+#include "probe.hpp"
 
 using namespace enyo;
 using namespace eventlog;
@@ -288,6 +289,16 @@ void Uci::setoption(std::istringstream& iss)
     std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
     if (lower_name == "logfile" || lower_name == "debug log file")
         eventlog::reopen_logfile(cfgmgr.logfile, true);
+#if ENYO_USE_SYZYGY
+    if (lower_name == "syzygypath" && !cfgmgr.syzygy_path.empty()) {
+        if (syzygy::init(cfgmgr.syzygy_path))
+            ucilog("info string Syzygy tablebases loaded from '{}' (up to {}-man)\n",
+                cfgmgr.syzygy_path, syzygy::largest());
+        else
+            ucilog("info string warning: no Syzygy tablebases found at '{}'\n",
+                cfgmgr.syzygy_path);
+    }
+#endif
 }
 
 void Uci::debug(std::istringstream& iss)

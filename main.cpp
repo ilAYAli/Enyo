@@ -171,9 +171,12 @@ int main(int argc, char **argv)
     NNUE::Init("");
 
 #if ENYO_USE_SYZYGY
-    if (!syzygy::init("./syzygy/wdl")) {
-        fmt::print("info string error, failed to initialize tablebases\n");
-        return 1;
+    if (!cfgmgr.syzygy_path.empty()) {
+        if (!syzygy::init(cfgmgr.syzygy_path)) {
+            eventlog::log<eventlog::Log::warning>(
+                "info string warning: failed to initialize tablebases at '{}'\n",
+                cfgmgr.syzygy_path);
+        }
     }
 #endif
 

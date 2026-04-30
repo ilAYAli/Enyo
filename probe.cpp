@@ -18,12 +18,23 @@ namespace syzygy {
 bool init(const std::string & tb_path)
 {
 #if ENYO_USE_SYZYGY
-    initialized = tb_init(tb_path.c_str());
+    // tb_init returns true even when no tables were found; the real signal
+    // is TB_LARGEST (max piece count of any loaded table).
+    initialized = tb_init(tb_path.c_str()) && TB_LARGEST > 0;
     return initialized;
 #else
     (void)tb_path;
     initialized = false;
     return false;
+#endif
+}
+
+unsigned largest()
+{
+#if ENYO_USE_SYZYGY
+    return TB_LARGEST;
+#else
+    return 0;
 #endif
 }
 
