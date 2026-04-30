@@ -286,6 +286,146 @@ TEST(nnue_audit, king_move_non_castle) {
     expect_incremental_matches_refresh<white>("king_move_non_castle", b, move);
 }
 
+// Apply A, revert A, apply B (sibling) — verify sibling's accumulator
+// matches a fresh refresh. This is the exact pattern a move loop uses.
+TEST(nnue_audit, apply_revert_apply_sibling) {
+    Board b{"startpos"};
+    NNUE::Net live;
+    live.refresh(b);
+
+    auto a = resolve_move<white>(b, pawn, e2, e4);
+    apply_move<white, true, true>(b, a, &live);
+    revert_move<white, true, true>(b, &live);
+
+    auto c = resolve_move<white>(b, pawn, d2, d4);
+    apply_move<white, true, true>(b, c, &live);
+    NNUE::Accumulator after_c_live = live.accumulator_stack[live.currentAccumulator];
+
+    NNUE::Net fresh;
+    fresh.refresh(b);
+    EXPECT_TRUE(accumulators_match(after_c_live, fresh.accumulator_stack[fresh.currentAccumulator]))
+        << "sibling apply after revert diverged; fen: " << b.fen();
+}
+
+// Deeper mimic of search: apply A, apply B, revert B, apply C — then
+// unwind. Verify accumulators are correct at every visible step.
+TEST(nnue_audit, nested_apply_revert_sibling) {
+    Board b{"startpos"};
+    NNUE::Net live;
+    live.refresh(b);
+
+    auto a = resolve_move<white>(b, pawn, e2, e4);
+    apply_move<white, true, true>(b, a, &live);
+
+    auto b1 = resolve_move<black>(b, pawn, e7, e5);
+    apply_move<black, true, true>(b, b1, &live);
+    revert_move<black, true, true>(b, &live);
+
+    auto b2 = resolve_move<black>(b, pawn, c7, c5);
+    apply_move<black, true, true>(b, b2, &live);
+    NNUE::Accumulator live_b2 = live.accumulator_stack[live.currentAccumulator];
+
+    NNUE::Net fresh;
+    fresh.refresh(b);
+    EXPECT_TRUE(accumulators_match(live_b2, fresh.accumulator_stack[fresh.currentAccumulator]))
+        << "nested sibling diverged at ply 2; fen: " << b.fen();
+
+    revert_move<black, true, true>(b, &live);
+    revert_move<white, true, true>(b, &live);
+    NNUE::Net root_fresh;
+    root_fresh.refresh(b);
+    EXPECT_TRUE(accumulators_match(live.accumulator_stack[live.currentAccumulator],
+                                   root_fresh.accumulator_stack[root_fresh.currentAccumulator]))
+        << "full unwind diverged; fen: " << b.fen();
+}
+
+// Deep recursion mimicking real search: at each ply, verify the live
+// accumulator matches a fresh refresh. Tries several siblings per ply.
+TEST(nnue_audit, deep_recursion_slots_consistent) {
+    Board b{"r3k2r/pppqppbp/2np1np1/8/8/2NP1NP1/PPPQPPBP/R3K2R w KQkq - 0 1"};
+    NNUE::Net live;
+    live.refresh(b);
+
+    auto verify_slot = [&](const char * tag) {
+        NNUE::Net fresh;
+        fresh.refresh(b);
+        ASSERT_TRUE(accumulators_match(live.accumulator_stack[live.currentAccumulator],
+                                       fresh.accumulator_stack[fresh.currentAccumulator]))
+            << tag << " slot diverged; fen: " << b.fen()
+            << " currentAccumulator=" << live.currentAccumulator;
+    };
+
+    // ply 0 (root): white
+    auto w1 = resolve_move<white>(b, knight, c3, e4);
+    apply_move<white, true, true>(b, w1, &live); verify_slot("w1");
+
+    // ply 1 (black), try sibling B1
+    auto b1 = resolve_move<black>(b, knight, f6, e4);
+    apply_move<black, true, true>(b, b1, &live); verify_slot("b1");
+
+    // ply 2 (white)
+    auto w2 = resolve_move<white>(b, knight, f3, e5);
+    apply_move<white, true, true>(b, w2, &live); verify_slot("w2");
+    revert_move<white, true, true>(b, &live); verify_slot("revert w2");
+
+    // sibling w2'
+    auto w2b = resolve_move<white>(b, pawn, d3, e4);
+    apply_move<white, true, true>(b, w2b, &live); verify_slot("w2'");
+
+    // unwind all
+    revert_move<white, true, true>(b, &live); verify_slot("revert w2'");
+    revert_move<black, true, true>(b, &live); verify_slot("revert b1");
+
+    // ply 1 sibling b1'
+    auto b1b = resolve_move<black>(b, pawn, d6, d5);
+    apply_move<black, true, true>(b, b1b, &live); verify_slot("b1'");
+    revert_move<black, true, true>(b, &live); verify_slot("revert b1'");
+
+    revert_move<white, true, true>(b, &live); verify_slot("revert w1");
+}
+
+// Mixed move types in a nested tree: capture → promotion → king-move →
+// castle. Each of these hits a different apply/revert path.
+TEST(nnue_audit, mixed_move_types_nested) {
+    // Position set up so white can: (a) capture b4 with pawn a3xb4,
+    // and also has castling rights for later.
+    Board b{"r3k2r/pppqppbp/2np1np1/8/1p6/P1NP1NP1/1PPQPPBP/R3K2R w KQkq - 0 1"};
+    NNUE::Net live;
+    live.refresh(b);
+
+    auto verify = [&](const char * tag) {
+        NNUE::Net fresh;
+        fresh.refresh(b);
+        ASSERT_TRUE(accumulators_match(live.accumulator_stack[live.currentAccumulator],
+                                       fresh.accumulator_stack[fresh.currentAccumulator]))
+            << tag << "; fen: " << b.fen() << " cur=" << live.currentAccumulator;
+    };
+
+    // capture
+    auto cap = resolve_move<white>(b, pawn, a3, b4);
+    apply_move<white, true, true>(b, cap, &live); verify("capture");
+
+    // black quiet
+    auto bq = resolve_move<black>(b, pawn, e7, e6);
+    apply_move<black, true, true>(b, bq, &live); verify("black quiet");
+
+    // white castle kingside
+    auto moves = generate_legal_moves<white>(b);
+    Move castle{};
+    for (auto m : moves) {
+        if (m.flags() == Move::Flags::castle && m.dst_sq() < m.src_sq()) {
+            castle = m; break;
+        }
+    }
+    ASSERT_TRUE(castle);
+    apply_move<white, true, true>(b, castle, &live); verify("castle");
+
+    // unwind
+    revert_move<white, true, true>(b, &live); verify("revert castle");
+    revert_move<black, true, true>(b, &live); verify("revert black quiet");
+    revert_move<white, true, true>(b, &live); verify("revert capture");
+}
+
 // Apply A, revert A, apply B — verify slot N (after revert) still matches
 // a from-scratch refresh on the reverted board. Catches bugs where
 // revert_move corrupts the popped slot.
