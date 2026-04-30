@@ -12,6 +12,8 @@
 
 namespace eventlog {
 
+// Severity ordering: lower = noisier tracing, higher = more critical.
+// A message logs iff its level >= defaultLogLevel.
 enum class Log {
     none = 0,
     debug,
@@ -24,7 +26,7 @@ enum class Log {
 };
 
 
-constexpr inline auto defaultLogLevel = Log::warning;
+constexpr inline auto defaultLogLevel = Log::uci;
 constexpr inline auto logfilesToKeep = 20;
 
 namespace fs = std::filesystem;
@@ -98,7 +100,7 @@ inline void reopen_logfile(const std::string& filename, bool exact_path = false)
 
 template <Log level = Log::info, typename... T>
 inline void log(fmt::format_string<T...> fmtStr, T&&... args) {
-    if constexpr (level <= defaultLogLevel) {
+    if constexpr (level >= defaultLogLevel) {
         std::lock_guard lock(logMutex);
         if (logFile.is_open()) {
             constexpr std::size_t average_log_size = 64000;
