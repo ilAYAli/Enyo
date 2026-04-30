@@ -418,7 +418,10 @@ moves_loop:
 #if 1
     const Move prev_move = (ss-1)->move;
     const Move cm = prev_move ? worker.countermove[Us][prev_move.src_sq()][prev_move.dst_sq()] : Move{};
-    auto const mp = prioritize_moves<Us, ABSEARCH>(worker, lm, tt_move, depth, ss->killers, cm);
+    const Worker::CmhPieceTable * cmh_slice = prev_move
+        ? &worker.cmh[Us][static_cast<size_t>(prev_move.src_piece())][prev_move.dst_sq()]
+        : nullptr;
+    auto const mp = prioritize_moves<Us, ABSEARCH>(worker, lm, tt_move, depth, ss->killers, cm, cmh_slice);
 #else
     auto mp = MovePicker2<Us>(worker, lm, tt_move);
 #endif
@@ -539,10 +542,26 @@ moves_loop:
 
                         const int bonus = std::min(1600, depth * depth * 32);
                         update_history_score(worker.history[Us][move.src_sq()][move.dst_sq()], bonus);
+
+                        Worker::CmhPieceTable * cmh_update = prev_move
+                            ? &worker.cmh[Us][static_cast<size_t>(prev_move.src_piece())][prev_move.dst_sq()]
+                            : nullptr;
+                        if (cmh_update) {
+                            update_history_score(
+                                (*cmh_update)[static_cast<size_t>(move.src_piece())][move.dst_sq()],
+                                bonus);
+                        }
+
                         for (int i = 0; i < ss->move_count - 1; ++i) {
                             const auto prev = mp[static_cast<size_t>(i)];
-                            if (prev.dst_piece() == no_piece_type && prev.flags() != Move::Flags::promote)
+                            if (prev.dst_piece() == no_piece_type && prev.flags() != Move::Flags::promote) {
                                 update_history_score(worker.history[Us][prev.src_sq()][prev.dst_sq()], -bonus / 2);
+                                if (cmh_update) {
+                                    update_history_score(
+                                        (*cmh_update)[static_cast<size_t>(prev.src_piece())][prev.dst_sq()],
+                                        -bonus / 2);
+                                }
+                            }
                         }
                     }
 
