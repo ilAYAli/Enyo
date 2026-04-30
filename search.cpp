@@ -202,6 +202,13 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     Move best_move {};
     Value best_value = -Value::infinite;
 
+    if (ss->ply >= MAX_PLY) {
+        ss->in_check = is_check<Us>(b);
+        return !ss->in_check
+            ? evaluate<Us, true>(b, &si.nnue)
+            : Value::draw;
+    }
+
     worker.pvline.setlen(ss->ply);
 
     ss->in_check = is_check<Us>(b);
@@ -216,12 +223,6 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     if (NT != NodeType::Root) {
         if (is_repetition(b, 1 + pv_node)) {
             return Value::draw;
-        }
-
-        if (ss->ply >= MAX_PLY) {
-            return !ss->in_check
-                ? evaluate<Us, true>(b, &si.nnue)
-                : Value::draw;
         }
 
         alpha = std::max(alpha, mated_in(ss->ply));
@@ -524,6 +525,20 @@ moves_loop:
 
                 worker.pvline.setmove(move, ss->ply);
 
+                if constexpr (NT == NodeType::Root) {
+                    eventlog::log<eventlog::Log::error>(
+                        "ROOT setmove: depth={} move={} value={} alpha={} beta={} move_count={} table[0][0]={} len[0]={} pv='{}'\n",
+                        depth,
+                        move,
+                        value,
+                        alpha,
+                        beta,
+                        ss->move_count,
+                        worker.pvline.table[0][0],
+                        static_cast<int>(worker.pvline.len[0]),
+                        worker.pvline.str());
+                }
+
                 if (value >= beta) {
                     if (is_quiet) {
                         if (move != ss->killers[0]) {
@@ -626,7 +641,7 @@ void search_position(Worker & worker)
     stack[1].ply = 3;
     stack[2].ply = 2;
     stack[3].ply = 1;
-    for (int i = 0; i < MAX_PLY; i++)
+    for (int i = 0; i <= MAX_PLY; i++)
         stack[i + 4].ply = i;
     Stack *ss = stack + 4;
 
@@ -641,6 +656,14 @@ void search_position(Worker & worker)
     tt::ttable.prepare();
     worker.pvline.clear();
 
+    if (worker.id == 0) {
+        eventlog::log<eventlog::Log::error>(
+            "search_position start: fen={}, legal_moves={}, legal[0]={}\n",
+            board.fen(),
+            legal_fallback.size(),
+            legal_fallback.empty() ? Move{} : legal_fallback[0]);
+    }
+
     struct Mate {
         int moves { MAX_PLY };
         Move move {};
@@ -653,12 +676,32 @@ void search_position(Worker & worker)
         if (worker.time_expired())
             break;
 
+        // Soft limit: stop starting new iterations once the optimum budget is
+        // used. The current-best move is already committed, so this gives us
+        // cheap, principled "stop between iterations" behavior. The hard
+        // limit (watchdog + time_expired) still aborts mid-iteration if we
+        // blow through the emergency budget.
+        if (worker.id == 0 && depth > 1 && si.soft_time_expired()) {
+            thread::pool.stop = true;
+            break;
+        }
+
         prev_nodes = thread::pool.get_nodes();
         si.nodes = 0;
         si.depth = depth;
 
         if constexpr (Constexpr::debug_threads)
             fmt::print("<{}> thread: {}, depth: {}\n", __func__, worker.id, depth);
+
+        if (worker.id == 0) {
+            eventlog::log<eventlog::Log::error>(
+                "ITER begin: depth={} table[0][0]={} len[0]={} worker.bestmove={} pv='{}'\n",
+                depth,
+                worker.pvline.table[0][0],
+                static_cast<int>(worker.pvline.len[0]),
+                worker.bestmove,
+                worker.pvline.str());
+        }
 
         value = Constexpr::use_aspiration_window
             ? (si.board.side == white
@@ -668,6 +711,16 @@ void search_position(Worker & worker)
                 ? negamax<white, NodeType::Root>(depth, worker, ss)
                 : negamax<black, NodeType::Root>(depth, worker, ss));
 
+        if (worker.id == 0) {
+            eventlog::log<eventlog::Log::error>(
+                "ITER end: depth={} value={} table[0][0]={} len[0]={} pv='{}'\n",
+                depth,
+                value,
+                worker.pvline.table[0][0],
+                static_cast<int>(worker.pvline.len[0]),
+                worker.pvline.str());
+        }
+
         if (worker.time_expired())
             break;
 
@@ -676,12 +729,33 @@ void search_position(Worker & worker)
 
         const auto pvbm = worker.pvline.bestmove();
         auto mate_distance = mate_in_moves(value);
+        const auto prev_bestmove = worker.bestmove;
         if (pvbm) {
             if (mate_distance > 0 && mate_distance < shortest_mate.moves)
                 shortest_mate = {mate_distance, pvbm};
             worker.bestmove = pvbm;
         } else {
-            eventlog::log<eventlog::Log::error>("ERROR: pvbm is empty at depth {} but PV string is: {}\n", depth, worker.pvline.str());
+            eventlog::log<eventlog::Log::error>(
+                "ERROR: pvbm empty at depth {}. pv_str='{}' len[0]={} table[0][0]={} prev_bestmove={} score={} fen={}\n",
+                depth,
+                worker.pvline.str(),
+                static_cast<int>(worker.pvline.len[0]),
+                worker.pvline.table[0][0],
+                prev_bestmove,
+                value,
+                board.fen());
+        }
+
+        if (!is_legal_root_move(worker.bestmove)) {
+            eventlog::log<eventlog::Log::error>(
+                "ERROR: worker.bestmove={} is NOT legal at root, depth={}. pvbm={} prev_bestmove={} pv_str='{}' len[0]={} fen={}\n",
+                worker.bestmove,
+                depth,
+                pvbm,
+                prev_bestmove,
+                worker.pvline.str(),
+                static_cast<int>(worker.pvline.len[0]),
+                board.fen());
         }
 
         const std::string score_info = mate_distance
@@ -718,12 +792,25 @@ void search_position(Worker & worker)
             ucilog("info string forced score {}\n", value);
 
         Move out = is_legal_root_move(shortest_mate.move) ? shortest_mate.move : worker.bestmove;
-        
-        eventlog::log<eventlog::Log::info>("Before bestmove output: out={}, is_legal={}\n", 
+        const Move pre_fallback_out = out;
+
+        eventlog::log<eventlog::Log::info>("Before bestmove output: out={}, is_legal={}\n",
             out, is_legal_root_move(out));
-        
-        if (!is_legal_root_move(out) && !legal_fallback.empty())
+
+        if (!is_legal_root_move(out) && !legal_fallback.empty()) {
+            eventlog::log<eventlog::Log::error>(
+                "ERROR: bestmove fallback fired. pre_fallback_out={} worker.bestmove={} shortest_mate.move={} "
+                "pvline.bestmove()={} pv_str='{}' len[0]={} legal_fallback[0]={} fen={}\n",
+                pre_fallback_out,
+                worker.bestmove,
+                shortest_mate.move,
+                worker.pvline.bestmove(),
+                worker.pvline.str(),
+                static_cast<int>(worker.pvline.len[0]),
+                legal_fallback[0],
+                board.fen());
             out = legal_fallback[0];
+        }
 
         eventlog::log<eventlog::Log::info>("Outputting bestmove: {}\n", out);
         ucilog("bestmove {}\n", out);

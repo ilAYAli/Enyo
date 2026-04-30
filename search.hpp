@@ -44,18 +44,26 @@ struct SearchInfo {
         return (starttime != stoptime) && now > stoptime;
     }
 
+    // Soft limit: checked only between root iterations. Once crossed, the
+    // current iteration is the last one we'll start — we don't abort it.
+    bool soft_time_expired() {
+        using namespace std::chrono;
+        return (starttime != soft_stoptime) && high_resolution_clock::now() > soft_stoptime;
+    }
+
     Board board{};
     NNUE::Net nnue = NNUE::Net{};
 
     std::chrono::high_resolution_clock::time_point starttime;
-    std::chrono::high_resolution_clock::time_point stoptime;
+    std::chrono::high_resolution_clock::time_point stoptime;      // hard limit
+    std::chrono::high_resolution_clock::time_point soft_stoptime; // optimum
     std::chrono::milliseconds elapsed_time{};
     int depth = MAX_PLY;
     int wtime = -1;
     int btime = -1;
     int winc = -1;
     int binc = -1;
-    int movestogo {40};
+    int movestogo {0};  // 0 = sudden-death (no movestogo sent by GUI)
     int movetime {-1};
     Movelist searchmoves{};
     bool has_searchmoves = false;
