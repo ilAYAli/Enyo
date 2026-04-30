@@ -37,6 +37,8 @@ struct pos {
     uint16_t move {};
 };
 
+pos board2pos(enyo::Board & b);
+
 }  // syzygy ns.
 
 template <>
