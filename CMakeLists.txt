@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(enyo LANGUAGES CXX)
+project(enyo LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(ENYO_USE_SYZYGY "Enable Syzygy tablebase probing via Fathom" OFF)
+option(ENYO_USE_SYZYGY "Enable Syzygy tablebase probing via Fathom" ON)
 
 #---[ git versioning/output ]--------------------------------------------------
 string(ASCII 27 Esc)

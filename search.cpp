@@ -255,53 +255,40 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     if constexpr (Constexpr::use_syzygy) {
         auto & board = worker.si.board;
         const auto num_pieces = count_bits(board.color_bb[Us] | board.color_bb[Them]);
-        constexpr auto cardinality = 6; // Todo:
+        const auto tb_max = static_cast<int>(syzygy::largest());
         if (NT != NodeType::Root
-            && num_pieces <= cardinality
+            && tb_max > 0
+            && num_pieces <= tb_max
             && !board.gamestate.can_castle(CastlingRights::any_castling)) {
 
-            using namespace syzygy;
-            Value tb_value = Value::draw;
-            auto tb_flag = tt::type::NoneBound;
-            if (auto status = WDL_probe(si.board) != syzygy::Status::Error) {
-                switch (WDL_probe(si.board)) {
-                    case Status::Win:
-                        tb_value = mate_in(ss->ply);
+            const auto status = syzygy::WDL_probe(board);
+            if (status != syzygy::Status::Error) {
+                Value tb_value = Value::draw;
+                auto tb_flag = tt::type::ExactBound;
+                switch (status) {
+                    case syzygy::Status::Win:
+                        tb_value = Value::tb_win_in_max_ply;
                         tb_flag = tt::type::LowerBound;
                         break;
-                    case Status::Loss:
-                        tb_value = mated_in(ss->ply);
+                    case syzygy::Status::Loss:
+                        tb_value = Value::tb_loss_in_max_ply;
                         tb_flag = tt::type::UpperBound;
                         break;
-                    default:
-                        tb_value = Value::draw;
-                        tb_flag = tt::type::ExactBound;
+                    default: // Draw
                         break;
                 }
-                value = tb_value;
 
                 if (tb_flag == tt::type::ExactBound
-                || (tb_flag == tt::type::LowerBound && value >= beta)
-                || (tb_flag == tt::type::UpperBound && value <= alpha)) {
+                || (tb_flag == tt::type::LowerBound && tb_value >= beta)
+                || (tb_flag == tt::type::UpperBound && tb_value <= alpha)) {
                     tt::ttable.store(
                         b.hash,
                         Move{},
-                        tt::value_to(tt_value, ss->ply),
-                        best_value >= beta
-                            ? tt::type::LowerBound
-                            : tt::type::UpperBound,
-                        std::min(depth + cardinality, MAX_PLY)
+                        tt::value_to(tb_value, ss->ply),
+                        tb_flag,
+                        std::min(depth + tb_max, MAX_PLY)
                     );
-                    return value;
-                }
-
-                if (NT != NodeType::NonPV) {
-                    if (tte->flag == tt::type::LowerBound) {
-                        best_value = value;
-                        alpha = std::max(alpha, best_value);
-                    } else {
-                        best_value = value;
-                    }
+                    return tb_value;
                 }
             }
         }
@@ -662,6 +649,33 @@ void search_position(Worker & worker)
             board.fen(),
             legal_fallback.size(),
             legal_fallback.empty() ? Move{} : legal_fallback[0]);
+    }
+
+    // Root DTZ probe: if the position is fully covered by a loaded tablebase,
+    // skip search entirely and emit the tablebase's guaranteed-progress move.
+    // This is what prevents the engine from blundering in "obviously drawn"
+    // or "obviously won" endgames — Fathom knows the DTZ-optimal move; the
+    // NNUE-driven search is blind to it once the horizon passes.
+    if (worker.id == 0 && Constexpr::use_syzygy) {
+        const auto num_pieces = count_bits(board.color_bb[white] | board.color_bb[black]);
+        const auto tb_max = static_cast<int>(syzygy::largest());
+        if (tb_max > 0
+         && num_pieces <= tb_max
+         && !board.gamestate.can_castle(CastlingRights::any_castling)) {
+            syzygy::Status tb_status = syzygy::Status::Error;
+            auto [tb_score, tb_move] = syzygy::DTZ_probe(board, tb_status);
+            if (tb_status != syzygy::Status::Error
+             && tb_move
+             && is_legal_root_move(tb_move)) {
+                const char* verdict =
+                    tb_status == syzygy::Status::Win  ? "win"
+                  : tb_status == syzygy::Status::Loss ? "loss"
+                                                      : "draw";
+                ucilog("info depth 1 score cp {} string tbhit {}\n", tb_score, verdict);
+                ucilog("bestmove {}\n", tb_move);
+                return;
+            }
+        }
     }
 
     struct Mate {

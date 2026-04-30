@@ -102,6 +102,7 @@ public:
     bool use_lmr            = false;
     std::string nnue_file   = "nn-eba324f53044.nnue";
     std::string logfile     = "/tmp/enyo.log";
+    std::string syzygy_path = "";
 
     static ConfigManager& instance() {
         static ConfigManager instance;
@@ -131,6 +132,7 @@ public:
             //concat("UCI_Chess960",  "check", use_chess_960) +
             concat("nnue_file",     "string", nnue_file) +
             concat("logfile",       "string", logfile) +
+            concat("SyzygyPath",    "string", syzygy_path) +
             concat("use_lmr",       "check", use_lmr);
     }
 
@@ -158,6 +160,8 @@ public:
             nnue_file = value;
         else if (lc == "logfile" || lc == "debug log file")
             logfile = value;
+        else if (lc == "syzygypath")
+            syzygy_path = value;
         else if (lc == "use_lmr")
             use_lmr = (value == "true");
         else

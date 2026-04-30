@@ -9,6 +9,7 @@
 namespace syzygy {
 
 extern bool init(const std::string & tb_path);
+extern unsigned largest(); // max piece count of any loaded tablebase, 0 if none
 
 enum Status {
     Error = -1,
@@ -36,6 +37,8 @@ struct pos {
     bool turn {};
     uint16_t move {};
 };
+
+pos board2pos(enyo::Board & b);
 
 }  // syzygy ns.
 
