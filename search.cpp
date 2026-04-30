@@ -529,6 +529,7 @@ moves_loop:
 
                 worker.pvline.setmove(move, ss->ply);
 
+#if 0
                 if constexpr (NT == NodeType::Root) {
                     eventlog::log<eventlog::Log::error>(
                         "ROOT setmove: depth={} move={} value={} alpha={} beta={} move_count={} table[0][0]={} len[0]={} pv='{}'\n",
@@ -542,6 +543,7 @@ moves_loop:
                         static_cast<int>(worker.pvline.len[0]),
                         worker.pvline.str());
                 }
+#endif
 
                 if (value >= beta) {
                     if (is_quiet) {
@@ -740,6 +742,7 @@ void search_position(Worker & worker)
         if constexpr (Constexpr::debug_threads)
             fmt::print("<{}> thread: {}, depth: {}\n", __func__, worker.id, depth);
 
+#if 0
         if (worker.id == 0) {
             eventlog::log<eventlog::Log::error>(
                 "ITER begin: depth={} table[0][0]={} len[0]={} worker.bestmove={} pv='{}'\n",
@@ -749,6 +752,7 @@ void search_position(Worker & worker)
                 worker.bestmove,
                 worker.pvline.str());
         }
+#endif
 
         value = Constexpr::use_aspiration_window
             ? (si.board.side == white
@@ -758,6 +762,7 @@ void search_position(Worker & worker)
                 ? negamax<white, NodeType::Root>(depth, worker, ss)
                 : negamax<black, NodeType::Root>(depth, worker, ss));
 
+#if 0
         if (worker.id == 0) {
             eventlog::log<eventlog::Log::error>(
                 "ITER end: depth={} value={} table[0][0]={} len[0]={} pv='{}'\n",
@@ -767,6 +772,7 @@ void search_position(Worker & worker)
                 static_cast<int>(worker.pvline.len[0]),
                 worker.pvline.str());
         }
+#endif
 
         if (worker.time_expired())
             break;
