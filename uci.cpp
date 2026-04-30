@@ -39,37 +39,66 @@ namespace {
 }
 
 
-std::chrono::milliseconds calculate_time_slot(const SearchInfo & si, int uci_time, int uci_inc)
+struct TimeAllocation {
+    std::chrono::milliseconds soft{-1};  // optimum — between-iteration stop
+    std::chrono::milliseconds hard{-1};  // maximum — emergency stop
+};
+
+// Compute soft/hard time budgets for one move.
+//
+// Sudden-death (no movestogo): allocate ~1/30 of remaining time as the soft
+//   budget, capped at 1/5 as the hard budget. Increment is spent generously
+//   since it's replenished next move.
+// Classical (movestogo): divide remaining time across the mandated moves plus
+//   a small buffer; the hard budget is 4x soft, capped at time/4.
+// Both branches reserve a 50ms lag margin and clamp to a 100ms floor so the
+// engine never tries to move instantly on critically low time.
+TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, int uci_inc)
 {
     using namespace std::chrono;
 
     constexpr milliseconds lag(50);
     constexpr milliseconds min_time(100);
 
-    milliseconds time_slot = min_time;
     if (si.movetime != -1) {
-        time_slot = milliseconds(si.movetime) - lag;
-    } else if (uci_time == -1) {
-        time_slot = milliseconds(-1);
-    } else if (uci_time < min_time.count()) { // critically low on time
-        time_slot = milliseconds(uci_time);
-    } else {
-        uci_time -= static_cast<int>(lag.count());
-        if (si.movestogo > 0) {
-            time_slot = std::max(min_time, milliseconds(uci_time / si.movestogo + uci_inc) - lag);
-        } else {
-            time_slot = std::max(min_time, milliseconds(uci_time) - lag);
-        }
+        auto t = std::max(min_time, milliseconds(si.movetime) - lag);
+        return { t, t };
     }
-    return time_slot;
+    if (uci_time == -1) {
+        return { milliseconds(-1), milliseconds(-1) };
+    }
+    if (uci_time < min_time.count()) { // critically low on time
+        return { milliseconds(uci_time), milliseconds(uci_time) };
+    }
+
+    const int time_budget = std::max(0, uci_time - static_cast<int>(lag.count()));
+
+    milliseconds soft;
+    milliseconds hard;
+    if (si.movestogo > 0) {
+        // Classical: spread the clock across the mandated moves, plus a small
+        // buffer so we don't exactly hit zero on the last move.
+        const int per_move = time_budget / (si.movestogo + 2) + uci_inc;
+        soft = milliseconds(per_move);
+        hard = std::min(milliseconds(time_budget / 4), soft * 4);
+    } else {
+        // Sudden-death: budget ~1/30 of the clock, hard cap at 1/5.
+        soft = milliseconds(time_budget / 30 + uci_inc * 3 / 4);
+        hard = std::min(milliseconds(time_budget / 5), soft * 5);
+    }
+
+    soft = std::max(min_time, soft);
+    hard = std::max(soft, hard);
+    return { soft, hard };
 }
 
-std::chrono::milliseconds handle_time_management(const Board& b, SearchInfo & si)
+TimeAllocation handle_time_management(const Board& b, SearchInfo & si)
 {
-    bool have_time_limit = si.wtime != -1 || si.btime != -1 || si.movestogo != -1;
+    bool have_time_limit = si.wtime != -1 || si.btime != -1 || si.movetime != -1;
     if (!have_time_limit) {
-        si.stoptime = std::chrono::high_resolution_clock::time_point::max();
-        return std::chrono::milliseconds(-1);
+        si.stoptime      = std::chrono::high_resolution_clock::time_point::max();
+        si.soft_stoptime = std::chrono::high_resolution_clock::time_point::max();
+        return { std::chrono::milliseconds(-1), std::chrono::milliseconds(-1) };
     }
 
     int uci_time = si.wtime;
@@ -78,15 +107,16 @@ std::chrono::milliseconds handle_time_management(const Board& b, SearchInfo & si
         uci_time = si.btime;
         uci_inc = si.binc != -1 ? si.binc : 0;
     }
-    std::chrono::milliseconds time_slot = calculate_time_slot(si, uci_time, uci_inc);
-    if (time_slot.count() == -1) {
-        si.stoptime = std::chrono::high_resolution_clock::time_point::max();
+    const auto alloc = calculate_time_allocation(si, uci_time, uci_inc);
+    if (alloc.hard.count() == -1) {
+        si.stoptime      = std::chrono::high_resolution_clock::time_point::max();
+        si.soft_stoptime = std::chrono::high_resolution_clock::time_point::max();
     } else {
-        std::chrono::milliseconds duration(time_slot);
-        si.stoptime = si.starttime + duration;
+        si.stoptime      = si.starttime + alloc.hard;
+        si.soft_stoptime = si.starttime + alloc.soft;
     }
 
-    return time_slot;
+    return alloc;
 }
 
 PieceType get_promo_piece(std::string const & token)
@@ -376,16 +406,7 @@ void Uci::go(std::istringstream & iss)
     }
 
     si.starttime = std::chrono::high_resolution_clock::now();
-    auto time_slot = handle_time_management(b, si);
-    if (b.histply < 25) // hack:
-        time_slot = std::min(time_slot, std::chrono::milliseconds(3000));
-
-    if (time_slot.count() != -1) {
-        std::chrono::milliseconds duration(time_slot);
-        si.stoptime = si.starttime + duration;
-    } else {
-        si.stoptime = std::chrono::high_resolution_clock::time_point::max();
-    }
+    const auto alloc = handle_time_management(b, si);
     si.board = b;
     si.nnue.refresh(si.board);
 
@@ -414,14 +435,14 @@ void Uci::go(std::istringstream & iss)
     }
 
 #if 1
-    fmt::print("info string threads:{},slot:{},movetime:{},wtime:{},btime:{},winc:{},binc:{},movestogo:{},depth:{}\n",
-        cfgmgr.num_threads,time_slot.count(), si.movetime, si.wtime, si.btime, si.winc, si.binc, si.movestogo, si.depth);
+    fmt::print("info string threads:{},soft:{},hard:{},movetime:{},wtime:{},btime:{},winc:{},binc:{},movestogo:{},depth:{}\n",
+        cfgmgr.num_threads, alloc.soft.count(), alloc.hard.count(), si.movetime, si.wtime, si.btime, si.winc, si.binc, si.movestogo, si.depth);
 #endif
 
     thread::pool.init_threads(std::move(si), cfgmgr.num_threads);
 
-    auto watchdog = time_slot.count() >= 0
-        ? std::optional<std::jthread>(std::in_place, [deadline = std::chrono::high_resolution_clock::now() + time_slot](std::stop_token st) {
+    auto watchdog = alloc.hard.count() >= 0
+        ? std::optional<std::jthread>(std::in_place, [deadline = std::chrono::high_resolution_clock::now() + alloc.hard](std::stop_token st) {
             while (!st.stop_requested()) {
                 if (std::chrono::high_resolution_clock::now() >= deadline) {
                     thread::pool.stop = true;
