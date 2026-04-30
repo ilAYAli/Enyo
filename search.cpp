@@ -653,6 +653,16 @@ void search_position(Worker & worker)
         if (worker.time_expired())
             break;
 
+        // Soft limit: stop starting new iterations once the optimum budget is
+        // used. The current-best move is already committed, so this gives us
+        // cheap, principled "stop between iterations" behavior. The hard
+        // limit (watchdog + time_expired) still aborts mid-iteration if we
+        // blow through the emergency budget.
+        if (worker.id == 0 && depth > 1 && si.soft_time_expired()) {
+            thread::pool.stop = true;
+            break;
+        }
+
         prev_nodes = thread::pool.get_nodes();
         si.nodes = 0;
         si.depth = depth;
