@@ -202,6 +202,13 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     Move best_move {};
     Value best_value = -Value::infinite;
 
+    if (ss->ply >= MAX_PLY) {
+        ss->in_check = is_check<Us>(b);
+        return !ss->in_check
+            ? evaluate<Us, true>(b, &si.nnue)
+            : Value::draw;
+    }
+
     worker.pvline.setlen(ss->ply);
 
     ss->in_check = is_check<Us>(b);
@@ -216,12 +223,6 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     if (NT != NodeType::Root) {
         if (is_repetition(b, 1 + pv_node)) {
             return Value::draw;
-        }
-
-        if (ss->ply >= MAX_PLY) {
-            return !ss->in_check
-                ? evaluate<Us, true>(b, &si.nnue)
-                : Value::draw;
         }
 
         alpha = std::max(alpha, mated_in(ss->ply));
@@ -640,7 +641,7 @@ void search_position(Worker & worker)
     stack[1].ply = 3;
     stack[2].ply = 2;
     stack[3].ply = 1;
-    for (int i = 0; i < MAX_PLY; i++)
+    for (int i = 0; i <= MAX_PLY; i++)
         stack[i + 4].ply = i;
     Stack *ss = stack + 4;
 
