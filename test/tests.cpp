@@ -10,6 +10,7 @@
 #include "perft.hpp"
 #include "zobrist.hpp"
 #include "see.hpp"
+#include "nnue.hpp"
 
 #include <ranges>
 #include <nlohmann/json.hpp>
@@ -149,9 +150,185 @@ TEST(fen, round_trips_fullmove_counter) {
 
     EXPECT_EQ(b.fen(), "1r3rk1/p1q1pp1p/1np1b1p1/2Q5/8/1PNB1P2/P1P3PP/2KR3R b - - 0 17");
 }
+
+// --- NNUE incremental audit -----------------------------------------------
+// For each move type (quiet / capture / promotion / en-passant / castle),
+// apply the move with UpdateNNUE=true (the live incremental/refresh path),
+// snapshot the resulting accumulator, then do a full refresh() on the same
+// post-move board and compare every element. Matching means the live path
+// computed the correct accumulator; the whole HIDDEN_SIZE * 2 vector must
+// agree.
+
+namespace {
+
+bool accumulators_match(const NNUE::Accumulator & a, const NNUE::Accumulator & b) {
+    for (size_t i = 0; i < a.white_acc.size(); ++i)
+        if (a.white_acc[i] != b.white_acc[i]) return false;
+    for (size_t i = 0; i < a.black_acc.size(); ++i)
+        if (a.black_acc[i] != b.black_acc[i]) return false;
+    return true;
+}
+
+template <Color Us>
+void expect_incremental_matches_refresh(const char * label, Board & b, Move move) {
+    NNUE::Net live;
+    live.refresh(b);
+
+    apply_move<Us, true, true>(b, move, &live);
+
+    NNUE::Accumulator after_live = live.accumulator_stack[live.currentAccumulator];
+
+    NNUE::Net fresh;
+    fresh.refresh(b);
+    NNUE::Accumulator after_fresh = fresh.accumulator_stack[fresh.currentAccumulator];
+
+    EXPECT_TRUE(accumulators_match(after_live, after_fresh))
+        << label << ": incremental accumulator diverged from full refresh after "
+        << fmt::format("{}", move) << " (fen after: " << b.fen() << ")";
+}
+
+} // anon ns
+
+TEST(nnue_audit, quiet_pawn_push) {
+    Board b{"startpos"};
+    auto move = resolve_move<white>(b, pawn, e2, e4);
+    expect_incremental_matches_refresh<white>("quiet_pawn_push", b, move);
+}
+
+TEST(nnue_audit, quiet_knight_move) {
+    Board b{"startpos"};
+    auto move = resolve_move<white>(b, knight, g1, f3);
+    expect_incremental_matches_refresh<white>("quiet_knight_move", b, move);
+}
+
+TEST(nnue_audit, capture) {
+    // Scandinavian: 1.e4 d5 2.exd5 — white pawn captures black pawn
+    Board b{"rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2"};
+    auto move = resolve_move<white>(b, pawn, e4, d5);
+    expect_incremental_matches_refresh<white>("capture", b, move);
+}
+
+TEST(nnue_audit, promotion_no_capture) {
+    // White pawn on a7 promotes to queen on a8; no capture.
+    Board b{"4k3/P7/8/8/8/8/8/4K3 w - - 0 1"};
+    auto moves = generate_legal_moves<white>(b);
+    Move promo{};
+    for (auto m : moves) {
+        if (m.flags() == Move::Flags::promote
+         && m.src_sq() == a7 && m.dst_sq() == a8
+         && m.promo_piece() == queen) {
+            promo = m; break;
+        }
+    }
+    ASSERT_TRUE(promo) << "could not find promotion move";
+    expect_incremental_matches_refresh<white>("promotion_no_capture", b, promo);
+}
+
+TEST(nnue_audit, promotion_with_capture) {
+    // White pawn on a7 captures on b8 and promotes to queen.
+    Board b{"1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1"};
+    auto moves = generate_legal_moves<white>(b);
+    Move promo{};
+    for (auto m : moves) {
+        if (m.flags() == Move::Flags::promote
+         && m.src_sq() == a7 && m.dst_sq() == b8
+         && m.promo_piece() == queen) {
+            promo = m; break;
+        }
+    }
+    ASSERT_TRUE(promo) << "could not find capture-promotion move";
+    expect_incremental_matches_refresh<white>("promotion_with_capture", b, promo);
+}
+
+TEST(nnue_audit, enpassant) {
+    // After 1.e4 d5 2.e5 f5 — white can ep-capture on f6.
+    Board b{"rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3"};
+    auto moves = generate_legal_moves<white>(b);
+    Move ep{};
+    for (auto m : moves) {
+        if (m.flags() == Move::Flags::enpassant) { ep = m; break; }
+    }
+    ASSERT_TRUE(ep) << "could not find en-passant move";
+    expect_incremental_matches_refresh<white>("enpassant", b, ep);
+}
+
+TEST(nnue_audit, castle_kingside) {
+    Board b{"r3k2r/pppqppbp/2np1np1/8/8/2NP1NP1/PPPQPPBP/R3K2R w KQkq - 0 1"};
+    auto moves = generate_legal_moves<white>(b);
+    Move castle{};
+    for (auto m : moves) {
+        if (m.flags() == Move::Flags::castle && m.dst_sq() < m.src_sq()) {
+            castle = m; break;
+        }
+    }
+    ASSERT_TRUE(castle) << "could not find kingside castle move";
+    expect_incremental_matches_refresh<white>("castle_kingside", b, castle);
+}
+
+TEST(nnue_audit, castle_queenside) {
+    Board b{"r3k2r/pppqppbp/2np1np1/8/8/2NP1NP1/PPPQPPBP/R3K2R w KQkq - 0 1"};
+    auto moves = generate_legal_moves<white>(b);
+    Move castle{};
+    for (auto m : moves) {
+        if (m.flags() == Move::Flags::castle && m.dst_sq() > m.src_sq()) {
+            castle = m; break;
+        }
+    }
+    ASSERT_TRUE(castle) << "could not find queenside castle move";
+    expect_incremental_matches_refresh<white>("castle_queenside", b, castle);
+}
+
+TEST(nnue_audit, king_move_non_castle) {
+    // Plain king move: the king-bucket index changes, so the live path
+    // triggers refresh_with_cache. This test locks in correct behavior.
+    Board b{"4k3/8/8/8/8/8/8/R3K3 w Q - 0 1"};
+    auto move = resolve_move<white>(b, king, e1, e2);
+    expect_incremental_matches_refresh<white>("king_move_non_castle", b, move);
+}
+
+// Deep-sequence audit: apply eight moves, each time verifying the live
+// accumulator matches a full refresh. Flushes out any delta-stacking bug
+// that a single-move test would miss.
+TEST(nnue_audit, opening_sequence) {
+    Board b{"startpos"};
+    NNUE::Net live;
+    live.refresh(b);
+
+    struct Step { Color us; PieceType pt; square_t from; square_t to; };
+    const Step seq[] = {
+        { white, pawn,   e2, e4 },
+        { black, pawn,   e7, e5 },
+        { white, knight, g1, f3 },
+        { black, knight, b8, c6 },
+        { white, bishop, f1, b5 },
+        { black, pawn,   a7, a6 },
+        { white, bishop, b5, a4 },
+        { black, knight, g8, f6 },
+    };
+
+    int step_idx = 0;
+    for (auto const & s : seq) {
+        Move m = (s.us == white)
+            ? resolve_move<white>(b, s.pt, s.from, s.to)
+            : resolve_move<black>(b, s.pt, s.from, s.to);
+
+        if (s.us == white) apply_move<white, true, true>(b, m, &live);
+        else               apply_move<black, true, true>(b, m, &live);
+
+        NNUE::Accumulator after_live = live.accumulator_stack[live.currentAccumulator];
+        NNUE::Net fresh;
+        fresh.refresh(b);
+        NNUE::Accumulator after_fresh = fresh.accumulator_stack[fresh.currentAccumulator];
+        EXPECT_TRUE(accumulators_match(after_live, after_fresh))
+            << "opening_sequence step " << step_idx << " ("
+            << fmt::format("{}", m) << ") diverged; fen after: " << b.fen();
+        ++step_idx;
+    }
+}
 #endif
 
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
+    NNUE::Init("");
     return RUN_ALL_TESTS();
 }
