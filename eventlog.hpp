@@ -103,14 +103,10 @@ inline void log(fmt::format_string<T...> fmtStr, T&&... args) {
     if constexpr (level >= defaultLogLevel) {
         std::lock_guard lock(logMutex);
         if (logFile.is_open()) {
-            constexpr std::size_t average_log_size = 64000;
-            static thread_local std::vector<char> buffer(average_log_size);
-            auto it = fmt::format_to(buffer.begin(), fmtStr, std::forward<T>(args)...);
-            if (it > buffer.end()) {
-                buffer.resize(it - buffer.begin());
-                it = fmt::format_to(buffer.begin(), fmtStr, std::forward<T>(args)...);
-            }
-            logFile.write(buffer.data(), it - buffer.begin());
+            auto s = fmt::format(fmtStr, std::forward<T>(args)...);
+            logFile.write(s.data(), static_cast<std::streamsize>(s.size()));
+            if constexpr (level >= Log::warning)
+                logFile.flush();
         }
     }
 }
