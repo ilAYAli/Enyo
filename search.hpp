@@ -134,6 +134,8 @@ struct Worker {
     QuadraticPV pvline {};
     std::array<std::array<std::array<int16_t, square_nb>, square_nb>, color_nb> history{};
     std::array<std::array<std::array<Move, square_nb>, square_nb>, color_nb> countermove{};
+    using CmhPieceTable = std::array<std::array<int16_t, square_nb>, piece_type_nb>;
+    std::array<std::array<std::array<CmhPieceTable, square_nb>, piece_type_nb>, color_nb> cmh{};
     int id { };
 };
 
