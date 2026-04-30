@@ -719,7 +719,6 @@ void search_position(Worker & worker)
     } shortest_mate;
 
     Value value = Value::draw;
-    uint64_t prev_nodes {};
     auto const max_depth = std::min(si.depth, MAX_PLY);
     for (auto depth = 1; depth <= max_depth; ++depth) {
         if (worker.time_expired())
@@ -735,7 +734,6 @@ void search_position(Worker & worker)
             break;
         }
 
-        prev_nodes = thread::pool.get_nodes();
         si.nodes = 0;
         si.depth = depth;
 
@@ -825,10 +823,6 @@ void search_position(Worker & worker)
             worker.pvline.str());
 
         ucilog("{}\n", info_string);
-
-        // not making progress:
-        if (prev_nodes == thread::pool.get_nodes())
-            break;
 
         if (shortest_mate.moves == 1) {
             eventlog::log<eventlog::Log::info>("Breaking search loop: found mate in 1, shortest_mate.move={}, worker.bestmove={}\n", 
