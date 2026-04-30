@@ -74,6 +74,10 @@ static inline std::vector<enyo::Move> prioritize_moves(
         if (move == tt_move) {
             score = TT_SCORE;
         } else if (move.dst_piece() != no_piece_type) {
+            if constexpr (ST == QSEARCH) {
+                if (see<Us>(board, move) < 0)
+                    continue;
+            }
             score = CAPTURE_SCORE + mvvlva(move);
         } else if (move.flags() & Move::Flags::promote) {
             score = (move.promo_piece() == queen) ? PROMOTE_SCORE : DRAW_SCORE;
