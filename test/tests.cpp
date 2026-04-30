@@ -11,6 +11,7 @@
 #include "zobrist.hpp"
 #include "see.hpp"
 #include "nnue.hpp"
+#include "probe.hpp"
 
 #include <ranges>
 #include <nlohmann/json.hpp>
@@ -490,6 +491,80 @@ TEST(nnue_audit, opening_sequence) {
     }
 }
 #endif
+
+// Fathom/Syzygy expects bitboards in A1=0 layout: a1=bit0, h1=bit7, a8=bit56.
+// Enyo internally uses H1=0. board2pos() applies bbconv()/sqconv() to bridge
+// the two. These tests pin down that conversion against hand-computed
+// expected values for a handful of asymmetry-sensitive positions.
+TEST(syzygy_bbconv, startpos_bitboards) {
+    Board b{"startpos"};
+    auto p = syzygy::board2pos(b);
+
+    // Ranks 1 and 2 are all white, ranks 7 and 8 all black.
+    EXPECT_EQ(p.white,   0x000000000000FFFFULL);
+    EXPECT_EQ(p.black,   0xFFFF000000000000ULL);
+    // Kings on e1, e8 → bits 4 and 60.
+    EXPECT_EQ(p.kings,   (1ULL << 4) | (1ULL << 60));
+    // Queens on d1, d8 → bits 3 and 59.
+    EXPECT_EQ(p.queens,  (1ULL << 3) | (1ULL << 59));
+    // Rooks on a1, h1, a8, h8.
+    EXPECT_EQ(p.rooks,   (1ULL << 0) | (1ULL << 7) | (1ULL << 56) | (1ULL << 63));
+    // Bishops on c1, f1, c8, f8.
+    EXPECT_EQ(p.bishops, (1ULL << 2) | (1ULL << 5) | (1ULL << 58) | (1ULL << 61));
+    // Knights on b1, g1, b8, g8.
+    EXPECT_EQ(p.knights, (1ULL << 1) | (1ULL << 6) | (1ULL << 57) | (1ULL << 62));
+    // Pawns span ranks 2 and 7.
+    EXPECT_EQ(p.pawns,   0x00FF00000000FF00ULL);
+    EXPECT_TRUE(p.turn);
+}
+
+TEST(syzygy_bbconv, asymmetric_a1_bishop) {
+    // Only a white bishop on a1. If bbconv mirrored files incorrectly (a1↔h1)
+    // this would come out as bit 7 instead of bit 0.
+    Board b{"8/8/8/8/8/8/8/B6k w - - 0 1"};
+    auto p = syzygy::board2pos(b);
+
+    EXPECT_EQ(p.white,   1ULL << 0);
+    EXPECT_EQ(p.bishops, 1ULL << 0);
+    EXPECT_EQ(p.pawns, 0ULL);
+}
+
+TEST(syzygy_bbconv, asymmetric_h8_bishop) {
+    // Black bishop on h8 (plus kings on a1, h1 to keep the FEN legal).
+    Board b{"7b/8/8/8/8/8/8/K6k w - - 0 1"};
+    auto p = syzygy::board2pos(b);
+
+    // Black set: bishop on h8 (bit 63) + black king on h1 (bit 7).
+    EXPECT_EQ(p.black,   (1ULL << 63) | (1ULL << 7));
+    EXPECT_EQ(p.bishops, 1ULL << 63);
+    // Kings: white on a1 (bit 0), black on h1 (bit 7).
+    EXPECT_EQ(p.kings,   (1ULL << 0) | (1ULL << 7));
+}
+
+TEST(syzygy_bbconv, krvk_winning_position) {
+    // Standard KR vs K sanity position: White K on e1, R on h1, black K on e8.
+    Board b{"4k3/8/8/8/8/8/8/4K2R w - - 0 1"};
+    auto p = syzygy::board2pos(b);
+
+    EXPECT_EQ(p.white,   (1ULL << 4) | (1ULL << 7));   // e1 | h1
+    EXPECT_EQ(p.black,   1ULL << 60);                  // e8
+    EXPECT_EQ(p.kings,   (1ULL << 4) | (1ULL << 60));
+    EXPECT_EQ(p.rooks,   1ULL << 7);
+    EXPECT_EQ(p.queens,  0ULL);
+    EXPECT_EQ(p.pawns,   0ULL);
+    EXPECT_TRUE(p.turn);
+}
+
+TEST(syzygy_bbconv, ep_square_conversion) {
+    // After 1.e4, the en-passant square is e3 (file e, rank 3) = A1-layout index
+    // 4*8? No — rank 3 means rank_index=2, so bit = 2*8 + 4 = 20.
+    Board b{"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"};
+    auto p = syzygy::board2pos(b);
+
+    // sqconv() maps the board's H1=0 square index to Fathom's A1=0 index.
+    // We don't compare the raw square_t here — just the probe-ready uint8_t.
+    EXPECT_EQ(p.ep, 20u);  // e3 in A1=0 layout
+}
 
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
