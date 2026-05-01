@@ -209,16 +209,31 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
             }
         }
     }
-    if (!thread::pool.stop.load(std::memory_order_relaxed) && best_move)
+    // qsearch's move list is captures-only (plus legal evasions when in
+    // check). A fail-high (best_value >= beta) is a genuine lower bound
+    // on the true score — a capture that beats beta refutes the position
+    // regardless of what quiet moves would have done. But a fail-low is
+    // an upper bound only *over the captures-only subset*; a quiet move
+    // we never generated could still beat alpha. Storing it as
+    // UpperBound with full depth is unsound — a later negamax probe at
+    // `tte->depth >= depth` would cut on a value that didn't see the
+    // quiet moves. Same class of bug as the qsearch-ExactBound attempt
+    // we already reverted (see exactbound stash tags).
+    //
+    // Fix: only store the fail-high LowerBound from qsearch. Drop the
+    // fail-low UpperBound path entirely. Loses some move-ordering hint
+    // via tt_move but removes the unsoundness.
+    if (!thread::pool.stop.load(std::memory_order_relaxed)
+        && best_move
+        && best_value >= beta) {
         tt::ttable.store(
             b.hash,
             best_move,
             tt::value_to(best_value, ss->ply),
-            best_value >= beta
-                ? tt::type::LowerBound
-                : tt::type::UpperBound,
+            tt::type::LowerBound,
             depth
         );
+    }
 
     return best_value;
 }
