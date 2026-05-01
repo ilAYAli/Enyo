@@ -100,6 +100,43 @@ static constexpr bitboard_t king_moves(Board const & b, square_t square) {
     return valid_moves;
 }
 
+// Forward declaration: defined alongside revert_move_generic and reused from
+// revert_promotion, which lives earlier in the file.
+template<Color Us>
+inline void restore_castling_rights(Board & b, Undo const & undo);
+
+// Shared across apply_move_generic and apply_promotion: capturing a rook on
+// its home square must clear the opponent's castling right on that side.
+// Keyed on (captured piece type, destination square). See the bug #2 commit
+// for the TT-fragmentation rationale.
+template <Color Them, bool UpdateZobrist>
+static inline void clear_captured_home_rook_right(Board & b, PieceType dst_piece, square_t dst)
+{
+    if (dst_piece != rook)
+        return;
+    if constexpr (Them == black) {
+        if (dst == a8 && b.gamestate.can_castle(CastlingRights::black_ooo)) {
+            b.gamestate.set_castle(CastlingRights::black_ooo, false);
+            if constexpr (UpdateZobrist)
+                b.hash ^= b.zbrs.castling_[2];
+        } else if (dst == h8 && b.gamestate.can_castle(CastlingRights::black_oo)) {
+            b.gamestate.set_castle(CastlingRights::black_oo, false);
+            if constexpr (UpdateZobrist)
+                b.hash ^= b.zbrs.castling_[3];
+        }
+    } else {
+        if (dst == a1 && b.gamestate.can_castle(CastlingRights::white_ooo)) {
+            b.gamestate.set_castle(CastlingRights::white_ooo, false);
+            if constexpr (UpdateZobrist)
+                b.hash ^= b.zbrs.castling_[0];
+        } else if (dst == h1 && b.gamestate.can_castle(CastlingRights::white_oo)) {
+            b.gamestate.set_castle(CastlingRights::white_oo, false);
+            if constexpr (UpdateZobrist)
+                b.hash ^= b.zbrs.castling_[1];
+        }
+    }
+}
+
 template <Color Us, bool UpdateZobrist, bool UpdateNNUE>
 static inline constexpr void apply_promotion(Board & b, enyo::Move move, NNUE::Net * nnue)
 {
@@ -110,6 +147,8 @@ static inline constexpr void apply_promotion(Board & b, enyo::Move move, NNUE::N
     const auto src_sq = move.src_sq();
     const auto dst_piece = move.dst_piece();
     const auto dst_sq = move.dst_sq();
+
+    clear_captured_home_rook_right<Them, UpdateZobrist>(b, dst_piece, dst_sq);
 
     const square_t w_ksq = lsb(b.pt_bb[white][king]);
     const square_t b_ksq = lsb(b.pt_bb[black][king]);
@@ -137,6 +176,13 @@ static inline constexpr void revert_promotion(Board & b, Undo const& undo, NNUE:
     if (dst_piece != no_piece_type)
         set_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst_sq, nnue, w_ksq, b_ksq);
     set_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, src_sq, nnue, w_ksq, b_ksq);
+
+    // Promotion capture of a rook on its home square cleared the opponent's
+    // castling right during apply_promotion; restore it here by diffing
+    // against undo.gamestate for the opponent. Symmetric with the rook-
+    // capture branch in revert_move_generic.
+    if (dst_piece == rook)
+        restore_castling_rights<Them>(b, undo);
 }
 
 template <Color Us, bool UpdateZobrist, bool UpdateNNUE>
@@ -602,6 +648,9 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
         }
 
     } // black
+
+    clear_captured_home_rook_right<Them, UpdateZobrist>(b, dst_piece, dst);
+
     const square_t w_ksq = lsb(b.pt_bb[white][king]);
     const square_t b_ksq = lsb(b.pt_bb[black][king]);
     clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, src_piece, src, nnue, w_ksq, b_ksq);
@@ -664,6 +713,7 @@ inline void restore_castling_rights(Board & b, Undo const & undo)
 
 template<Color Us, bool UpdateZobrist, bool UpdateNNUE>
 inline void revert_move_generic(Board & b, Undo const & undo, NNUE::Net * nnue) {
+    constexpr auto Them = ~Us;
     const auto src_piece = undo.move.src_piece();
     const auto dst_piece = undo.move.dst_piece();
     const auto src = undo.move.src_sq();
@@ -673,11 +723,17 @@ inline void revert_move_generic(Board & b, Undo const & undo, NNUE::Net * nnue) 
     const square_t b_ksq = lsb(b.pt_bb[black][king]);
     clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, src_piece, dst, nnue, w_ksq, b_ksq);
     if (dst_piece != no_piece_type)
-        set_piece<~Us, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst, nnue, w_ksq, b_ksq);
+        set_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst, nnue, w_ksq, b_ksq);
     set_piece<Us, UpdateZobrist, UpdateNNUE>(b, src_piece, src, nnue, w_ksq, b_ksq);
 
     if (src_piece == king || src_piece == rook) {
         restore_castling_rights<Us>(b, undo);
+    }
+    // Capturing a rook on its home square cleared the opponent's castling
+    // right on that side during apply; restore it here by diffing against
+    // undo.gamestate for the opponent.
+    if (dst_piece == rook) {
+        restore_castling_rights<Them>(b, undo);
     }
 }
 
