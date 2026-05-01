@@ -54,8 +54,29 @@ static inline bool is_castle(Move move) {
         && ((src_file & file_e) && (dst_file & (file_c | file_g))));
 }
 
+// Fixed-size buffer for the prioritize_moves result. 256 = max legal
+// moves in any position (Movelist::max_size). Avoids two heap
+// allocations per call (the old code returned a std::vector<Move>
+// built from a separate std::vector<ScoredMove>).
+struct PrioritizedMoves {
+    std::array<Move, 256> moves{};
+    std::size_t           size = 0;
+
+    using iterator       = Move *;
+    using const_iterator = const Move *;
+
+    iterator       begin()        { return moves.data(); }
+    iterator       end()          { return moves.data() + size; }
+    const_iterator begin() const  { return moves.data(); }
+    const_iterator end()   const  { return moves.data() + size; }
+
+    Move operator[](std::size_t i) const { return moves[i]; }
+    Move & operator[](std::size_t i)     { return moves[i]; }
+};
+
 template <Color Us, SearchType ST>
-static inline std::vector<enyo::Move> prioritize_moves(
+static inline void prioritize_moves(
+    PrioritizedMoves & out,
     Worker& worker,
     const Movelist& moves,
     Move tt_move = 0,
@@ -67,8 +88,10 @@ static inline std::vector<enyo::Move> prioritize_moves(
     constexpr bool debug = false;
     auto & board = worker.si.board;
 
-    std::vector<ScoredMove> scored_moves;
-    scored_moves.reserve(moves.size());
+    // Stack-allocated scratch. Same capacity as before but no heap
+    // traffic. Previously two std::vector allocations per call.
+    std::array<ScoredMove, 256> scored;
+    std::size_t n = 0;
 
     for (const auto move : moves) {
         int score = DRAW_SCORE;
@@ -83,7 +106,6 @@ static inline std::vector<enyo::Move> prioritize_moves(
         } else if (move.flags() & Move::Flags::promote) {
             score = (move.promo_piece() == queen) ? PROMOTE_SCORE : DRAW_SCORE;
         } else if constexpr (ST == QSEARCH) {
-            // Skip non-capturing, non-promoting moves in QSEARCH
             continue;
         } else {
             if (killers && move == killers[0]) {
@@ -106,29 +128,23 @@ static inline std::vector<enyo::Move> prioritize_moves(
             }
         }
 
-        scored_moves.emplace_back(ScoredMove{score, move});
+        scored[n++] = ScoredMove{score, move};
     }
 
-    std::ranges::sort(scored_moves, [](const auto & a, const auto & b) {
-        return a.score > b.score;
-    });
+    std::ranges::sort(
+        scored.begin(), scored.begin() + static_cast<std::ptrdiff_t>(n),
+        [](const auto & a, const auto & b) { return a.score > b.score; });
 
     if constexpr (debug) {
         fmt::print("{} moves:{}\n", ST == QSEARCH ? "QS" : "AB", moves.size());
-        for (const auto& [score, move] : scored_moves) {
-            if (score) fmt::print("  {}: {}\n", move, score);
+        for (std::size_t i = 0; i < n; ++i) {
+            if (scored[i].score) fmt::print("  {}: {}\n", scored[i].move, scored[i].score);
         }
     }
 
-    std::vector<Move> prioritized_moves;
-    prioritized_moves.reserve(scored_moves.size());
-    std::ranges::transform(scored_moves,
-        std::back_inserter(prioritized_moves), [](const ScoredMove& scored_move) {
-            return scored_move.move;
-        }
-    );
-
-    return prioritized_moves;
+    out.size = n;
+    for (std::size_t i = 0; i < n; ++i)
+        out.moves[i] = scored[i].move;
 }
 
 
