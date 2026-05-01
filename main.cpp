@@ -168,6 +168,11 @@ int main(int argc, char **argv)
         return uci(fmt::format("go perft {}", depth > 0 ? depth : 1));
 
     uci(fmt::format("setoption name Threads value {}", cfgmgr.num_threads));
+    // Route Hash through the UCI handler so the TT is actually resized
+    // (Uci::setoption invokes tt::ttable.set_size). Previously the
+    // config only mutated cfgmgr.hash_size and the TT stayed at the
+    // 64 MB default allocated at singleton construction.
+    uci(fmt::format("setoption name Hash value {}", cfgmgr.hash_size));
     NNUE::Init("");
 
 #if ENYO_USE_SYZYGY

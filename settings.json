@@ -4,6 +4,7 @@
   },
   "constants": {
     "threads":                  4,
+    "Hash":                     256,
     "opening_file":             "book.txt",
     "nnue_file":                "default.net",
     "logfile":                  "/tmp/enyo.log"
