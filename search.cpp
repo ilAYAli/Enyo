@@ -395,13 +395,20 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     improving = (ss - 2)->eval != Value::none
              && (ss - 2)->eval < ss->eval;
 
-    if constexpr (true) { // Todo: check Elo
-        if (NT == NodeType::NonPV && !ss->tthit)
-            depth--;
+    // NonPV + TT-miss unconditional depth reduction. Looks like a
+    // "shortcut to qsearch at depth 1/2" hack but is load-bearing:
+    // instrumentation at startpos d12 showed ~12k fires at d0-2 and
+    // ~1.5k at d3+. Two variants SPRT'd in May 2026 on top of 8306e70:
+    //   A — remove entirely:  -9.0 ±21 Elo over 500 games, LLR -1.23.
+    //   B — gate depth >= 4: -54.4 ±38 Elo at n=175, LLR -1.67, killed.
+    // B confirms the shallow fires are providing real selectivity; the
+    // deeper fires on their own are harmful. Don't "simplify" this
+    // without fresh instrumentation finding a concrete bug.
+    if (NT == NodeType::NonPV && !ss->tthit)
+        depth--;
 
-        if (depth <= 0)
-            return qsearch<Us, NodeType::PV>(b, worker, ss, depth, alpha, beta);
-    }
+    if (depth <= 0)
+        return qsearch<Us, NodeType::PV>(b, worker, ss, depth, alpha, beta);
 
     // IIR: Internal Iterative Reductions
     if constexpr (Constexpr::use_iir) {
