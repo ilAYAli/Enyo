@@ -339,25 +339,42 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         goto moves_loop;
     }
 
-    // static eval:
-    if (ss->tthit) {
-        ss->eval = tt_value;
-        if (ss->eval == Value::none)
-            ss->eval =  evaluate<Us, true>(b, &si.nnue);
-
-        if (tt_value != Value::none
-            && (tte->flag != tt::type::NoneBound)
-            & (tt_value > ss->eval ? tt::type::LowerBound : tt::type::UpperBound))
+    // Static eval for this node. Downstream heuristics — improving,
+    // razoring, reverse-futility, null-move threshold — all assume
+    // ss->eval is a static positional evaluation. Previously the
+    // tthit branch set ss->eval = tt_value directly, then a bitwise-
+    // broken refinement fell through without correcting:
+    //
+    //   ss->eval = tt_value;
+    //   if (ss->eval == Value::none) ss->eval = evaluate(...);
+    //   if (tt_value != Value::none
+    //       && (tte->flag != NoneBound)
+    //       & (tt_value > ss->eval ? LowerBound : UpperBound))
+    //       ss->eval = tt_value;
+    //
+    // The `&` was a bitwise AND between a bool and a bound enum
+    // value; with LowerBound=1 / UpperBound=2 it was truthy only
+    // when tt_value > ss->eval, so the refinement was a noop and
+    // ss->eval kept the raw tt_value. Under instrumentation (see
+    // search/instrumentation branch), ~15% of ss->eval values on
+    // a startpos depth-8 search were Lower/Upper bounds feeding
+    // pruning — a search bound, often a mate score or far out-of-
+    // window value, passed as a static eval.
+    //
+    // Fix (Stockfish-style): compute raw static eval as the
+    // baseline; TT-correct it only when the stored bound strictly
+    // tightens the raw eval in the same direction.
+    //   - ExactBound: always more informed than raw eval.
+    //   - UpperBound with tt_value < raw: tighter upper bound.
+    //   - LowerBound with tt_value > raw: tighter lower bound.
+    // Other combinations would widen, not tighten, so raw wins.
+    ss->eval = evaluate<Us, true>(b, &si.nnue);
+    if (ss->tthit && tt_value != Value::none) {
+        if (tte->flag == tt::type::ExactBound
+        || (tte->flag == tt::type::UpperBound && tt_value < ss->eval)
+        || (tte->flag == tt::type::LowerBound && tt_value > ss->eval)) {
             ss->eval = tt_value;
-    } else {
-        ss->eval = evaluate<Us, true>(b, &si.nnue);
-        tt::ttable.store(
-            b.hash,
-            Move{},
-            ss->eval,
-            tt::type::NoneBound,
-            0
-        );
+        }
     }
 
     improving = (ss - 2)->eval != Value::none
