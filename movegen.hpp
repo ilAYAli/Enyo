@@ -756,6 +756,16 @@ inline static bool is_check(const Board & b) {
     return is_square_attacked<Us>(b, ksq);
 }
 
+// Reset the FIDE halfmove clock. Two counters need to stay in sync: the
+// live session-local b.half_moves (used by is_repetition's lookback) and
+// the FEN-parsed base b.gamestate.half_moves (needed for FEN emission and
+// Syzygy rule50). Both are captured into Undo before apply mutates them,
+// so revert_move rolls them back automatically.
+inline void reset_halfmove_clock(Board & b) {
+    b.half_moves = 0;
+    b.gamestate.half_moves = 0;
+}
+
 template <Color Us, bool UpdateZobrist = true, bool UpdateNNUE = false>
 inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue = nullptr)
 {
@@ -800,19 +810,19 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
             break;
         case Move::Flags::promote:
             apply_promotion<Us, UpdateZobrist, UpdateNNUE>(b, move, nnue);
-            b.half_moves = 0;
+            reset_halfmove_clock(b);
             break;
         case Move::Flags::enpassant:
             apply_enpassant<Us, UpdateZobrist, UpdateNNUE>(b, move, undo.gamestate.enpassant_square, nnue);
-            b.half_moves = 0;
+            reset_halfmove_clock(b);
             break;
         default:
             apply_move_generic<Us, UpdateZobrist, UpdateNNUE>(b, move, nnue);
             if (dst_piece != no_piece_type) {
-                b.half_moves = 0;
+                reset_halfmove_clock(b);
             } else {
                 if (src_piece == pawn)
-                    b.half_moves = 0;
+                    reset_halfmove_clock(b);
                 else
                     b.half_moves++;
             }

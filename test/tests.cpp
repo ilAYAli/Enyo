@@ -181,6 +181,59 @@ TEST(fen, fullmove_counter_advances_correctly_from_black_to_move_start) {
     }
 }
 
+// get_fen() emits `b.half_moves + b.gamestate.half_moves`, treating
+// b.half_moves as a delta from the FEN-parsed base. When a reset event
+// (capture, pawn move, en-passant, promotion) zeroed b.half_moves but
+// left b.gamestate.half_moves at the parsed base, the emitted FEN still
+// showed the stale base instead of 0. Syzygy rule50 (which reads the
+// same sum via board2pos) then fed Fathom an inflated counter and its
+// WDL wrapper rejected legal probes under "nonzero rule50."
+//
+// Fix: reset_halfmove_clock() clears both fields together; Undo captures
+// gamestate before apply mutates it, so revert rolls both back.
+TEST(fen, halfmove_clock_resets_to_zero_with_nonzero_fen_base) {
+    struct Case {
+        const char * fen;
+        square_t     src;
+        square_t     dst;
+        PieceType    src_piece;
+        PieceType    promo;       // no_piece_type for non-promotion
+        const char * post_fen;
+        const char * label;
+    };
+    const Case cases[] = {
+        {"4k3/8/8/8/8/8/4P3/4K3 w - - 7 12", e2, e4, pawn, no_piece_type,
+         "4k3/8/8/8/4P3/8/8/4K3 b - - 0 12", "pawn double-push"},
+        {"4k3/8/8/3p4/4P3/8/8/4K3 w - - 7 12", e4, d5, pawn, no_piece_type,
+         "4k3/8/8/3P4/8/8/8/4K3 b - - 0 12", "pawn capture"},
+        {"4k3/8/8/3pP3/8/8/8/4K3 w - d6 7 12", e5, d6, pawn, no_piece_type,
+         "4k3/8/3P4/8/8/8/8/4K3 b - - 0 12", "en-passant"},
+        {"4k3/P7/8/8/8/8/8/4K3 w - - 7 12", a7, a8, pawn, queen,
+         "Q3k3/8/8/8/8/8/8/4K3 b - - 0 12", "promotion without capture"},
+    };
+    for (const auto & c : cases) {
+        Board b{c.fen};
+        auto m = resolve_move<white>(b, c.src_piece, c.src, c.dst);
+        if (c.promo != no_piece_type)
+            m.set_promo_piece(c.promo);
+        apply_move<white>(b, m);
+        EXPECT_EQ(b.fen(), c.post_fen) << c.label;
+    }
+
+    // Counter-check: castle and quiet king moves must still carry the
+    // FEN base forward, incrementing rather than resetting.
+    {
+        Board b{"r3k2r/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/R3K2R w KQkq - 7 12"};
+        apply_move<white>(b, resolve_move<white>(b, king, e1, g1));
+        EXPECT_EQ(b.fen(), "r3k2r/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/R4RK1 b kq - 8 12");
+    }
+    {
+        Board b{"4k3/8/8/8/8/5N2/8/4K3 w - - 7 12"};
+        apply_move<white>(b, resolve_move<white>(b, knight, f3, e5));
+        EXPECT_EQ(b.fen(), "4k3/8/8/4N3/8/8/8/4K3 b - - 8 12");
+    }
+}
+
 TEST(movegen, lichess_fjmp5yck_endgame_sequence_preserves_position) {
     Board b{"1r6/2K5/R6p/1P5P/3b2k1/8/8/8 w - - 0 118"};
     const auto initial_hash = b.hash;
