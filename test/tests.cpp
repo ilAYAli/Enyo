@@ -406,6 +406,58 @@ TEST(movegen, promotion_capture_home_rook_clears_castling_rights) {
     }
 }
 
+// Pawn double-push probes the two diagonal neighbours on the landing rank
+// for an enemy pawn that would make en-passant possible. The neighbour
+// lookup used (1ULL << (dst+1)) | (1ULL << (dst-1)) without masking to the
+// landing rank, so a-file and h-file double-pushes wrapped onto the
+// adjacent rank: e.g. white a2a4 (dst=a4=bit31) set dst+1=32=h5, and a
+// black pawn sitting on h5 was then read as a "b4 neighbour" that armed
+// en-passant. Result: bogus ep square in the post-move state, wrong FEN,
+// and a poisoned zobrist (the ep term gets XOR'd in). Legal moves generated
+// from the poisoned state can include an illegal en-passant capture.
+TEST(movegen, double_push_does_not_wrap_ep_to_opposite_file) {
+    struct Case {
+        const char * fen;
+        square_t     src;
+        square_t     dst;
+        const char * post_fen;   // expected FEN after the double push (no ep)
+        Color        mover;
+    };
+    const Case cases[] = {
+        // White a2-a4 with a black pawn on h5: pre-fix, (a4+1)=h5 hit the
+        // black pawn and spuriously set ep_square=a3.
+        {"4k3/8/8/7p/8/8/P7/4K3 w - - 0 1", a2, a4,
+         "4k3/8/8/7p/P7/8/8/4K3 b - - 0 1", white},
+        // White h2-h4 with a black pawn on a3: pre-fix, (h4-1)=a3 hit it.
+        {"4k3/8/8/8/8/p7/7P/4K3 w - - 0 1", h2, h4,
+         "4k3/8/8/8/7P/p7/8/4K3 b - - 0 1", white},
+        // Black a7-a5 with a white pawn on h6: pre-fix, (a5+1)=h6 hit it.
+        // (Fullmove counter "0 1" intentional — fen-emission bug tracked
+        // separately.)
+        {"4k3/p7/7P/8/8/8/8/4K3 b - - 0 1", a7, a5,
+         "4k3/8/7P/p7/8/8/8/4K3 w - - 0 1", black},
+        // Black h7-h5 with a white pawn on a4: pre-fix, (h5-1)=a4 hit it.
+        {"4k3/7p/8/8/P7/8/8/4K3 b - - 0 1", h7, h5,
+         "4k3/8/8/7p/P7/8/8/4K3 w - - 0 1", black},
+    };
+    for (const auto & c : cases) {
+        Board b{c.fen};
+        const auto before_hash = b.hash;
+        ASSERT_EQ(b.hash, zobrist::generate_hash(b)) << c.fen;
+        if (c.mover == white) {
+            apply_move<white>(b, resolve_move<white>(b, pawn, c.src, c.dst));
+        } else {
+            apply_move<black>(b, resolve_move<black>(b, pawn, c.src, c.dst));
+        }
+        EXPECT_EQ(b.fen(), c.post_fen) << "apply: " << c.fen;
+        EXPECT_EQ(b.hash, zobrist::generate_hash(b)) << "apply: " << c.fen;
+        EXPECT_EQ(b.gamestate.enpassant_square, 0) << "apply: " << c.fen;
+        if (c.mover == white) revert_move<white>(b); else revert_move<black>(b);
+        EXPECT_EQ(b.fen(), c.fen) << "revert: " << c.fen;
+        EXPECT_EQ(b.hash, before_hash) << "revert: " << c.fen;
+    }
+}
+
 // --- NNUE incremental audit -----------------------------------------------
 // For each move type (quiet / capture / promotion / en-passant / castle),
 // apply the move with UpdateNNUE=true (the live incremental/refresh path),

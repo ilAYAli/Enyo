@@ -586,8 +586,13 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
                 break;
             }
             case pawn: {
-                const auto enpassant_attack_mask = (1ULL << (dst +1)) | (1ULL << (dst -1));
                 if ((frtab[src][1] == rank_2) && (frtab[dst][1] == rank_4)) {
+                    // Mask to dst's rank so the file-a/file-h neighbour
+                    // lookup can't wrap onto the adjacent rank (e.g. a2a4
+                    // with an enemy pawn on h5 would otherwise look like
+                    // a "b4" neighbour and spuriously set the ep square).
+                    const auto enpassant_attack_mask =
+                        ((1ULL << (dst + 1)) | (1ULL << (dst - 1))) & rank_4;
                     if (b.pt_bb[Them][pawn] & enpassant_attack_mask) {
                         b.gamestate.enpassant_square = dst - 8;
                     }
@@ -636,8 +641,10 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
                 break;
             }
             case pawn: {
-                const auto enpassant_attack_mask = (1ULL << (dst +1)) | (1ULL << (dst -1));
                 if ((frtab[src][1] == rank_7) && (frtab[dst][1] == rank_5)) {
+                    // Mask to dst's rank — see the white branch for why.
+                    const auto enpassant_attack_mask =
+                        ((1ULL << (dst + 1)) | (1ULL << (dst - 1))) & rank_5;
                     if (b.pt_bb[Them][pawn] & enpassant_attack_mask) {
                         b.gamestate.enpassant_square = dst + 8;
                     }
