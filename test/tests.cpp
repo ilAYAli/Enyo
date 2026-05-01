@@ -152,6 +152,40 @@ TEST(fen, round_trips_fullmove_counter) {
     EXPECT_EQ(b.fen(), "1r3rk1/p1q1pp1p/1np1b1p1/2Q5/8/1PNB1P2/P1P3PP/2KR3R b - - 0 17");
 }
 
+TEST(movegen, lichess_fjmp5yck_endgame_sequence_preserves_position) {
+    Board b{"1r6/2K5/R6p/1P5P/3b2k1/8/8/8 w - - 0 118"};
+    const auto initial_hash = b.hash;
+    const auto initial_fen = b.fen();
+
+    apply_move<white>(b, resolve_move<white>(b, king, c7, b8));
+    EXPECT_EQ(b.fen(), "1K6/8/R6p/1P5P/3b2k1/8/8/8 b - - 0 118");
+
+    apply_move<black>(b, resolve_move<black>(b, king, g4, h5));
+    EXPECT_EQ(b.fen(), "1K6/8/R6p/1P5k/3b4/8/8/8 w - - 0 119");
+
+    apply_move<white>(b, resolve_move<white>(b, rook, a6, d6));
+    EXPECT_EQ(b.fen(), "1K6/8/3R3p/1P5k/3b4/8/8/8 b - - 1 119");
+
+    apply_move<black>(b, resolve_move<black>(b, bishop, d4, e3));
+    EXPECT_EQ(b.fen(), "1K6/8/3R3p/1P5k/8/4b3/8/8 w - - 2 120");
+
+    apply_move<white>(b, resolve_move<white>(b, rook, d6, d5));
+    EXPECT_EQ(b.fen(), "1K6/8/7p/1P1R3k/8/4b3/8/8 b - - 3 120");
+
+    apply_move<black>(b, resolve_move<black>(b, king, h5, g4));
+    EXPECT_EQ(b.fen(), "1K6/8/7p/1P1R4/6k1/4b3/8/8 w - - 4 121");
+
+    revert_move<black>(b);
+    revert_move<white>(b);
+    revert_move<black>(b);
+    revert_move<white>(b);
+    revert_move<black>(b);
+    revert_move<white>(b);
+
+    EXPECT_EQ(b.fen(), initial_fen);
+    EXPECT_EQ(b.hash, initial_hash);
+}
+
 // --- NNUE incremental audit -----------------------------------------------
 // For each move type (quiet / capture / promotion / en-passant / castle),
 // apply the move with UpdateNNUE=true (the live incremental/refresh path),
