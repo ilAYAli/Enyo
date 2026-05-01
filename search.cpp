@@ -103,8 +103,18 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     constexpr Color Them = ~Us;
 
     auto & si = worker.si;
+
+    // negamax sets ss->in_check for the frame it hands us, but recursive
+    // qsearch->qsearch calls use ss+1, which was never touched by negamax.
+    // Compute it here so the in-check path below is reliable at every ply.
+    // Mirrors negamax's MAX_PLY handling — returning a raw static eval
+    // while in check would be as wrong here as it was in the stand-pat
+    // branch below.
+    ss->in_check = is_check<Us>(b);
     if (ss->ply >= MAX_PLY) {
-        return evaluate<Us, true>(b, &si.nnue);
+        return ss->in_check
+            ? Value::draw
+            : evaluate<Us, true>(b, &si.nnue);
     }
 
     if (is_repetition(b, 1 + pv_node)) {
@@ -127,25 +137,51 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         }
     }
 
-    auto best_value = ss->eval = evaluate<Us, true>(b, &si.nnue);
-    if (best_value >= beta) {
-        if (!ss->tthit) {
-            tt::ttable.store(
-                b.hash,
-                Move{},
-                tt::value_to(best_value, ss->ply),
-                tt::type::UpperBound,
-                depth
-            );
+    // In-check qsearch must not stand-pat (the position is forcing, so the
+    // static eval is not a valid lower bound), and the move iteration must
+    // consider every legal evasion — including quiets — not just captures.
+    // The QSEARCH movepicker path skips non-capturing / non-promoting moves
+    // (movepicker.hpp:85), which would filter out legal king moves and
+    // blocks. Use ABSEARCH prioritization on the in-check branch so all
+    // legal evasions are searched.
+    Value best_value;
+    Movelist lm;
+    if (ss->in_check) {
+        ss->eval = Value::none;
+        best_value = -Value::infinite;
+        lm = generate_legal_moves<Us>(b);
+        if (lm.empty())
+            return mated_in(ss->ply);
+    } else {
+        best_value = ss->eval = evaluate<Us, true>(b, &si.nnue);
+        if (best_value >= beta) {
+            if (!ss->tthit) {
+                tt::ttable.store(
+                    b.hash,
+                    Move{},
+                    tt::value_to(best_value, ss->ply),
+                    // Stand-pat >= beta means the static eval already
+                    // established a lower bound on the true value (we
+                    // just proved "score >= best_value >= beta"). Pre-
+                    // viously stored as UpperBound; that's the wrong
+                    // polarity and would only have been usable in
+                    // probes expecting an upper-bound cutoff.
+                    tt::type::LowerBound,
+                    depth
+                );
+            }
+            return best_value;
         }
-        return best_value;
+
+        if (best_value > alpha)
+            alpha = best_value;
+
+        lm = generate_legal_moves<Us>(b);
     }
 
-    if (best_value > alpha)
-        alpha = best_value;
-
-    auto const lm = generate_legal_moves<Us>(b);
-    auto const mp = prioritize_moves<Us, QSEARCH>(worker, lm, tt_move, depth);
+    auto const mp = ss->in_check
+        ? prioritize_moves<Us, ABSEARCH>(worker, lm, tt_move, depth)
+        : prioritize_moves<Us, QSEARCH>(worker, lm, tt_move, depth);
     Move best_move {};
     for (auto move : mp) {
         if ((si.nodes & 1023U) == 0 && worker.time_expired())
