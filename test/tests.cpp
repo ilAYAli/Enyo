@@ -152,6 +152,35 @@ TEST(fen, round_trips_fullmove_counter) {
     EXPECT_EQ(b.fen(), "1r3rk1/p1q1pp1p/1np1b1p1/2Q5/8/1PNB1P2/P1P3PP/2KR3R b - - 0 17");
 }
 
+// get_fen computes the fullmove counter as full_moves + histply/2, which is
+// only correct when the starting FEN was white-to-move. After parsing a
+// black-to-move FEN, black's first reply (histply=1) already completes a
+// full move and must tick the counter — histply/2 is still 0 and the FEN
+// emits the wrong number, which poisons any downstream consumer that
+// trusts the FEN (GUI display, PGN export, external reference engines).
+TEST(fen, fullmove_counter_advances_correctly_from_black_to_move_start) {
+    // White-to-move baseline: counter ticks after each black move (even ply).
+    {
+        Board b{"4k3/8/8/8/8/8/8/4K3 w - - 0 5"};
+        EXPECT_EQ(b.fen(), "4k3/8/8/8/8/8/8/4K3 w - - 0 5");
+        apply_move<white>(b, resolve_move<white>(b, king, e1, e2));
+        EXPECT_EQ(b.fen(), "4k3/8/8/8/8/8/4K3/8 b - - 1 5");  // white moved; still move 5
+        apply_move<black>(b, resolve_move<black>(b, king, e8, e7));
+        EXPECT_EQ(b.fen(), "8/4k3/8/8/8/8/4K3/8 w - - 2 6");  // black completed move 5; now 6
+    }
+    // Black-to-move start: counter must tick after black's first move.
+    {
+        Board b{"4k3/8/8/8/8/8/8/4K3 b - - 0 5"};
+        EXPECT_EQ(b.fen(), "4k3/8/8/8/8/8/8/4K3 b - - 0 5");
+        apply_move<black>(b, resolve_move<black>(b, king, e8, e7));
+        EXPECT_EQ(b.fen(), "8/4k3/8/8/8/8/8/4K3 w - - 1 6");  // black completed move 5; now 6
+        apply_move<white>(b, resolve_move<white>(b, king, e1, e2));
+        EXPECT_EQ(b.fen(), "8/4k3/8/8/8/8/4K3/8 b - - 2 6");  // white moved; still 6
+        apply_move<black>(b, resolve_move<black>(b, king, e7, e8));
+        EXPECT_EQ(b.fen(), "4k3/8/8/8/8/8/4K3/8 w - - 3 7");  // black completed move 6; now 7
+    }
+}
+
 TEST(movegen, lichess_fjmp5yck_endgame_sequence_preserves_position) {
     Board b{"1r6/2K5/R6p/1P5P/3b2k1/8/8/8 w - - 0 118"};
     const auto initial_hash = b.hash;
@@ -281,9 +310,9 @@ TEST(movegen, castle_does_not_touch_cleared_opposite_side_rights) {
         {"4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/R3K2R w Q - 0 1",
          "4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/2KR3R b - - 1 1"},  // W OOO, W-OO already cleared
         {"r3k2r/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 b k - 0 1",
-         "r4rk1/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 w - - 1 1"},  // B OO, B-OOO already cleared
+         "r4rk1/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 w - - 1 2"},  // B OO, B-OOO already cleared
         {"r3k2r/pppqbppp/2np1n2/4p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 b q - 0 1",
-         "2kr3r/pppqbppp/2np1n2/4p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 w - - 1 1"},    // B OOO, B-OO already cleared
+         "2kr3r/pppqbppp/2np1n2/4p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 w - - 1 2"},    // B OOO, B-OO already cleared
     };
     for (const auto & c : cases) {
         Board b{c.fen};
@@ -330,13 +359,11 @@ TEST(movegen, captured_home_rook_clears_castling_rights) {
         {"r3k2r/ppp2pp1/3p1nNp/4p3/8/2N5/PPPQ1PPP/R3K2R w KQkq - 0 1", g6, h8,
          "r3k2N/ppp2pp1/3p1n1p/4p3/8/2N5/PPPQ1PPP/R3K2R b KQq - 0 1", white},
         // Black queen a2 captures white rook on a1 — white queenside right clears.
-        // (Fullmove counter in post_fen intentionally says "1" not "2": the
-        // black-to-move fullmove-increment bug is tracked separately.)
         {"r3k2r/pppq1ppp/2np1n2/4p3/8/2N5/qPPQ1PPP/R3K2R b KQkq - 0 1", a2, a1,
-         "r3k2r/pppq1ppp/2np1n2/4p3/8/2N5/1PPQ1PPP/q3K2R w Kkq - 0 1", black},
+         "r3k2r/pppq1ppp/2np1n2/4p3/8/2N5/1PPQ1PPP/q3K2R w Kkq - 0 2", black},
         // Black queen h5 captures white rook on h1 — white kingside right clears.
         {"r3k2r/pppq1pp1/2np1n2/4p2q/8/2N5/PPPQ1PP1/R3K2R b KQkq - 0 1", h5, h1,
-         "r3k2r/pppq1pp1/2np1n2/4p3/8/2N5/PPPQ1PP1/R3K2q w Qkq - 0 1", black},
+         "r3k2r/pppq1pp1/2np1n2/4p3/8/2N5/PPPQ1PP1/R3K2q w Qkq - 0 2", black},
     };
     for (const auto & c : cases) {
         Board b{c.fen};
@@ -377,13 +404,11 @@ TEST(movegen, promotion_capture_home_rook_clears_castling_rights) {
         {"r3k2r/6P1/8/8/8/8/8/4K3 w kq - 0 1", g7, h8,
          "r3k2Q/8/8/8/8/8/8/4K3 b q - 0 1", white},
         // Black pawn b2 captures white rook on a1, promoting to queen — white queenside right clears.
-        // (Fullmove counter in post_fen intentionally says "1" not "2": the
-        // black-to-move fullmove-increment bug is tracked separately.)
         {"4k3/8/8/8/8/8/1p6/R3K2R b KQ - 0 1", b2, a1,
-         "4k3/8/8/8/8/8/8/q3K2R w K - 0 1", black},
+         "4k3/8/8/8/8/8/8/q3K2R w K - 0 2", black},
         // Black pawn g2 captures white rook on h1, promoting to queen — white kingside right clears.
         {"4k3/8/8/8/8/8/6p1/R3K2R b KQ - 0 1", g2, h1,
-         "4k3/8/8/8/8/8/8/R3K2q w Q - 0 1", black},
+         "4k3/8/8/8/8/8/8/R3K2q w Q - 0 2", black},
     };
     for (const auto & c : cases) {
         Board b{c.fen};
@@ -432,13 +457,11 @@ TEST(movegen, double_push_does_not_wrap_ep_to_opposite_file) {
         {"4k3/8/8/8/8/p7/7P/4K3 w - - 0 1", h2, h4,
          "4k3/8/8/8/7P/p7/8/4K3 b - - 0 1", white},
         // Black a7-a5 with a white pawn on h6: pre-fix, (a5+1)=h6 hit it.
-        // (Fullmove counter "0 1" intentional — fen-emission bug tracked
-        // separately.)
         {"4k3/p7/7P/8/8/8/8/4K3 b - - 0 1", a7, a5,
-         "4k3/8/7P/p7/8/8/8/4K3 w - - 0 1", black},
+         "4k3/8/7P/p7/8/8/8/4K3 w - - 0 2", black},
         // Black h7-h5 with a white pawn on a4: pre-fix, (h5-1)=a4 hit it.
         {"4k3/7p/8/8/P7/8/8/4K3 b - - 0 1", h7, h5,
-         "4k3/8/8/7p/P7/8/8/4K3 w - - 0 1", black},
+         "4k3/8/8/7p/P7/8/8/4K3 w - - 0 2", black},
     };
     for (const auto & c : cases) {
         Board b{c.fen};

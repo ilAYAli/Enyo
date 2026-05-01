@@ -161,8 +161,14 @@ std::string get_fen(Board const & b) {
     // Note: position fen fenstr can specify halfmoves != 0, so this needs to be added to the fen:
     fmt::format_to(out, "{} ", b.half_moves + b.gamestate.half_moves);
 
-    // "The number of the full move. It starts at 1, and is incremented after black's move."
-    fmt::format_to(out, "{}", b.gamestate.full_moves + b.histply / 2);
+    // "The number of the full move. It starts at 1, and is incremented after
+    // black's move." When the starting FEN was white-to-move, the counter
+    // advances on every even ply (0, 2, 4 ...) — histply/2 is correct. When
+    // the starting FEN was black-to-move, black moves first, so the very
+    // first ply (histply=1) already completes a full move and the counter
+    // must tick then; offset histply by 1 before the /2 in that case.
+    const int ply_offset = b.gamestate.white_to_move ? 0 : 1;
+    fmt::format_to(out, "{}", b.gamestate.full_moves + (b.histply + ply_offset) / 2);
 
     //fmt::print("* {} {}\n", __func__, fmt::to_string(tmp));
     return fmt::to_string(tmp);
