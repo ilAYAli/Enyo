@@ -48,8 +48,11 @@ struct TimeAllocation {
 // Compute soft/hard time budgets for one move.
 //
 // Sudden-death (no movestogo): allocate ~1/30 of remaining time as the soft
-//   budget, capped at 1/5 as the hard budget. Increment is spent generously
-//   since it's replenished next move.
+//   budget; hard cap = min(time/6, soft*3). The tighter hard (previously
+//   min(time/5, soft*5)) keeps a single move from spending so much clock
+//   that a later one flags at fast TCs — see tm-base-rate-v1 SPRT which
+//   observed 16 time-loss games out of 112 when the cap was time/5.
+//   Increment is spent at 3/4 rate since it's replenished next move.
 // Classical (movestogo): divide remaining time across the mandated moves plus
 //   a small buffer; the hard budget is 4x soft, capped at time/4.
 // Both branches reserve a 50ms lag margin and clamp to a 100ms floor so the
@@ -83,9 +86,14 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
         soft = milliseconds(per_move);
         hard = std::min(milliseconds(time_budget / 4), soft * 4);
     } else {
-        // Sudden-death: budget ~1/30 of the clock, hard cap at 1/5.
+        // Sudden-death: keep the soft base rate at time/30 + 3/4*inc
+        // (proven fine at short tc — see tm-base-rate-v1 SPRT which
+        // flagged in 16/112 games when soft was widened). Tighten the
+        // hard cap to min(time/6, soft*3): a single move can still
+        // spend ~3× the soft target in an unstable position, but not
+        // ~5× which was enough to flag games at 10+0.1.
         soft = milliseconds(time_budget / 30 + uci_inc * 3 / 4);
-        hard = std::min(milliseconds(time_budget / 5), soft * 5);
+        hard = std::min(milliseconds(time_budget / 6), soft * 3);
     }
 
     soft = std::max(min_time, soft);
