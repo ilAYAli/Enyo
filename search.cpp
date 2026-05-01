@@ -179,9 +179,11 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         lm = generate_legal_moves<Us>(b);
     }
 
-    auto const mp = ss->in_check
-        ? prioritize_moves<Us, ABSEARCH>(worker, lm, tt_move, depth)
-        : prioritize_moves<Us, QSEARCH>(worker, lm, tt_move, depth);
+    PrioritizedMoves mp;
+    if (ss->in_check)
+        prioritize_moves<Us, ABSEARCH>(mp, worker, lm, tt_move, depth);
+    else
+        prioritize_moves<Us, QSEARCH>(mp, worker, lm, tt_move, depth);
     Move best_move {};
     for (auto move : mp) {
         if ((si.nodes & 1023U) == 0 && worker.time_expired())
@@ -496,7 +498,8 @@ moves_loop:
     const Worker::CmhPieceTable * cmh_slice = prev_move
         ? &worker.cmh[Us][static_cast<size_t>(prev_move.src_piece())][prev_move.dst_sq()]
         : nullptr;
-    auto const mp = prioritize_moves<Us, ABSEARCH>(worker, lm, tt_move, depth, ss->killers, cm, cmh_slice);
+    PrioritizedMoves mp;
+    prioritize_moves<Us, ABSEARCH>(mp, worker, lm, tt_move, depth, ss->killers, cm, cmh_slice);
 #else
     auto mp = MovePicker2<Us>(worker, lm, tt_move);
 #endif
