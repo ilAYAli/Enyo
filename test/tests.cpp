@@ -308,6 +308,104 @@ TEST(movegen, castle_does_not_touch_cleared_opposite_side_rights) {
     }
 }
 
+// When a rook is captured on its home square, the corresponding side's
+// castling right must be cleared in both state and hash. apply_move_generic's
+// switch keys on src_piece (the capturer), so historically only a rook
+// *moving* from its home cleared the right — the capture path never did.
+// Same reachable position via "rook captured" vs "rook moved and returned"
+// then produces different 64-bit hashes: TT fragmentation.
+TEST(movegen, captured_home_rook_clears_castling_rights) {
+    struct Case {
+        const char * fen;
+        square_t     src;
+        square_t     dst;
+        const char * post_fen;   // expected FEN after the capture
+        Color        mover;
+    };
+    const Case cases[] = {
+        // White knight b6 captures black rook on a8 — black queenside right clears.
+        {"r3k2r/2pq1ppp/pN1p1n2/4p3/8/2N5/PPPQ1PPP/R3K2R w KQkq - 0 1", b6, a8,
+         "N3k2r/2pq1ppp/p2p1n2/4p3/8/2N5/PPPQ1PPP/R3K2R b KQk - 0 1", white},
+        // White knight g6 captures black rook on h8 — black kingside right clears.
+        {"r3k2r/ppp2pp1/3p1nNp/4p3/8/2N5/PPPQ1PPP/R3K2R w KQkq - 0 1", g6, h8,
+         "r3k2N/ppp2pp1/3p1n1p/4p3/8/2N5/PPPQ1PPP/R3K2R b KQq - 0 1", white},
+        // Black queen a2 captures white rook on a1 — white queenside right clears.
+        // (Fullmove counter in post_fen intentionally says "1" not "2": the
+        // black-to-move fullmove-increment bug is tracked separately.)
+        {"r3k2r/pppq1ppp/2np1n2/4p3/8/2N5/qPPQ1PPP/R3K2R b KQkq - 0 1", a2, a1,
+         "r3k2r/pppq1ppp/2np1n2/4p3/8/2N5/1PPQ1PPP/q3K2R w Kkq - 0 1", black},
+        // Black queen h5 captures white rook on h1 — white kingside right clears.
+        {"r3k2r/pppq1pp1/2np1n2/4p2q/8/2N5/PPPQ1PP1/R3K2R b KQkq - 0 1", h5, h1,
+         "r3k2r/pppq1pp1/2np1n2/4p3/8/2N5/PPPQ1PP1/R3K2q w Qkq - 0 1", black},
+    };
+    for (const auto & c : cases) {
+        Board b{c.fen};
+        const auto before_hash = b.hash;
+        ASSERT_EQ(b.hash, zobrist::generate_hash(b)) << c.fen;
+        if (c.mover == white) {
+            const auto pt = get_piece_type<white>(b, c.src);
+            apply_move<white>(b, resolve_move<white>(b, pt, c.src, c.dst));
+        } else {
+            const auto pt = get_piece_type<black>(b, c.src);
+            apply_move<black>(b, resolve_move<black>(b, pt, c.src, c.dst));
+        }
+        EXPECT_EQ(b.fen(), c.post_fen) << "apply: " << c.fen;
+        EXPECT_EQ(b.hash, zobrist::generate_hash(b)) << "apply: " << c.fen;
+        if (c.mover == white) revert_move<white>(b); else revert_move<black>(b);
+        EXPECT_EQ(b.fen(), c.fen) << "revert: " << c.fen;
+        EXPECT_EQ(b.hash, before_hash) << "revert: " << c.fen;
+    }
+}
+
+// Promotion-capture variant of the above. Promotion captures flow through
+// apply_promotion/revert_promotion, not apply_move_generic, so they need
+// their own path for clearing the captured home rook's castling right.
+// Same TT-fragmentation hazard as captured_home_rook_clears_castling_rights.
+TEST(movegen, promotion_capture_home_rook_clears_castling_rights) {
+    struct Case {
+        const char * fen;
+        square_t     src;
+        square_t     dst;
+        const char * post_fen;   // expected FEN after the promotion capture
+        Color        mover;
+    };
+    const Case cases[] = {
+        // White pawn b7 captures black rook on a8, promoting to queen — black queenside right clears.
+        {"r3k2r/1P6/8/8/8/8/8/4K3 w kq - 0 1", b7, a8,
+         "Q3k2r/8/8/8/8/8/8/4K3 b k - 0 1", white},
+        // White pawn g7 captures black rook on h8, promoting to queen — black kingside right clears.
+        {"r3k2r/6P1/8/8/8/8/8/4K3 w kq - 0 1", g7, h8,
+         "r3k2Q/8/8/8/8/8/8/4K3 b q - 0 1", white},
+        // Black pawn b2 captures white rook on a1, promoting to queen — white queenside right clears.
+        // (Fullmove counter in post_fen intentionally says "1" not "2": the
+        // black-to-move fullmove-increment bug is tracked separately.)
+        {"4k3/8/8/8/8/8/1p6/R3K2R b KQ - 0 1", b2, a1,
+         "4k3/8/8/8/8/8/8/q3K2R w K - 0 1", black},
+        // Black pawn g2 captures white rook on h1, promoting to queen — white kingside right clears.
+        {"4k3/8/8/8/8/8/6p1/R3K2R b KQ - 0 1", g2, h1,
+         "4k3/8/8/8/8/8/8/R3K2q w Q - 0 1", black},
+    };
+    for (const auto & c : cases) {
+        Board b{c.fen};
+        const auto before_hash = b.hash;
+        ASSERT_EQ(b.hash, zobrist::generate_hash(b)) << c.fen;
+        if (c.mover == white) {
+            auto m = resolve_move<white>(b, pawn, c.src, c.dst);
+            m.set_promo_piece(PieceType::queen);
+            apply_move<white>(b, m);
+        } else {
+            auto m = resolve_move<black>(b, pawn, c.src, c.dst);
+            m.set_promo_piece(PieceType::queen);
+            apply_move<black>(b, m);
+        }
+        EXPECT_EQ(b.fen(), c.post_fen) << "apply: " << c.fen;
+        EXPECT_EQ(b.hash, zobrist::generate_hash(b)) << "apply: " << c.fen;
+        if (c.mover == white) revert_move<white>(b); else revert_move<black>(b);
+        EXPECT_EQ(b.fen(), c.fen) << "revert: " << c.fen;
+        EXPECT_EQ(b.hash, before_hash) << "revert: " << c.fen;
+    }
+}
+
 // --- NNUE incremental audit -----------------------------------------------
 // For each move type (quiet / capture / promotion / en-passant / castle),
 // apply the move with UpdateNNUE=true (the live incremental/refresh path),
