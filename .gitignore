@@ -24,3 +24,4 @@ profiling/
 .state
 gmon.out
 syzygy/
+.claude/settings.local.json
