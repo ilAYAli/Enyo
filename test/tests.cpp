@@ -186,6 +186,128 @@ TEST(movegen, lichess_fjmp5yck_endgame_sequence_preserves_position) {
     EXPECT_EQ(b.hash, initial_hash);
 }
 
+// Castling bugs caught before this was deployed:
+//   1. white O-O incorrectly SET white_ooo (copy-paste of "false" -> "true")
+//   2. black O-O-O XOR'd the wrong zobrist indices (2/3 swapped)
+//   3. opposite-side rights XOR'd unconditionally, injecting phantom bits
+//      into the hash whenever the bit was already cleared
+// Each assertion compares the incrementally-maintained hash against
+// zobrist::generate_hash (which rebuilds the hash from the current state),
+// and verifies the castling bits are correct in gamestate. Apply/revert
+// is also checked to round-trip both state and hash.
+TEST(movegen, castle_updates_rights_and_hash_white_kingside) {
+    Board b{"r3k2r/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/R3K2R w KQkq - 0 1"};
+    const auto before_hash = b.hash;
+    const auto before_fen = b.fen();
+
+    apply_move<white>(b, resolve_move<white>(b, king, e1, g1));
+    EXPECT_FALSE(b.gamestate.can_castle(CastlingRights::white_oo));
+    EXPECT_FALSE(b.gamestate.can_castle(CastlingRights::white_ooo));
+    EXPECT_TRUE(b.gamestate.can_castle(CastlingRights::black_oo));
+    EXPECT_TRUE(b.gamestate.can_castle(CastlingRights::black_ooo));
+    EXPECT_EQ(b.hash, zobrist::generate_hash(b));
+
+    revert_move<white>(b);
+    EXPECT_EQ(b.hash, before_hash);
+    EXPECT_EQ(b.fen(), before_fen);
+}
+
+TEST(movegen, castle_updates_rights_and_hash_white_queenside) {
+    Board b{"r3k2r/pppq1ppp/2np1n2/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/R3K2R w KQkq - 0 1"};
+    const auto before_hash = b.hash;
+    const auto before_fen = b.fen();
+
+    apply_move<white>(b, resolve_move<white>(b, king, e1, c1));
+    EXPECT_FALSE(b.gamestate.can_castle(CastlingRights::white_oo));
+    EXPECT_FALSE(b.gamestate.can_castle(CastlingRights::white_ooo));
+    EXPECT_TRUE(b.gamestate.can_castle(CastlingRights::black_oo));
+    EXPECT_TRUE(b.gamestate.can_castle(CastlingRights::black_ooo));
+    EXPECT_EQ(b.hash, zobrist::generate_hash(b));
+
+    revert_move<white>(b);
+    EXPECT_EQ(b.hash, before_hash);
+    EXPECT_EQ(b.fen(), before_fen);
+}
+
+TEST(movegen, castle_updates_rights_and_hash_black_kingside) {
+    Board b{"r3k2r/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/R3K2R b KQkq - 0 1"};
+    const auto before_hash = b.hash;
+    const auto before_fen = b.fen();
+
+    apply_move<black>(b, resolve_move<black>(b, king, e8, g8));
+    EXPECT_FALSE(b.gamestate.can_castle(CastlingRights::black_oo));
+    EXPECT_FALSE(b.gamestate.can_castle(CastlingRights::black_ooo));
+    EXPECT_TRUE(b.gamestate.can_castle(CastlingRights::white_oo));
+    EXPECT_TRUE(b.gamestate.can_castle(CastlingRights::white_ooo));
+    EXPECT_EQ(b.hash, zobrist::generate_hash(b));
+
+    revert_move<black>(b);
+    EXPECT_EQ(b.hash, before_hash);
+    EXPECT_EQ(b.fen(), before_fen);
+}
+
+TEST(movegen, castle_updates_rights_and_hash_black_queenside) {
+    Board b{"r3k2r/pppqbppp/2np1n2/4p3/2B1P3/2NP1N2/PPPQ1PPP/R3K2R b KQkq - 0 1"};
+    const auto before_hash = b.hash;
+    const auto before_fen = b.fen();
+
+    apply_move<black>(b, resolve_move<black>(b, king, e8, c8));
+    EXPECT_FALSE(b.gamestate.can_castle(CastlingRights::black_oo));
+    EXPECT_FALSE(b.gamestate.can_castle(CastlingRights::black_ooo));
+    EXPECT_TRUE(b.gamestate.can_castle(CastlingRights::white_oo));
+    EXPECT_TRUE(b.gamestate.can_castle(CastlingRights::white_ooo));
+    EXPECT_EQ(b.hash, zobrist::generate_hash(b));
+
+    revert_move<black>(b);
+    EXPECT_EQ(b.hash, before_hash);
+    EXPECT_EQ(b.fen(), before_fen);
+}
+
+// Catches unconditional XOR of opposite-side rights: if the "other" castle bit
+// is already cleared when we castle, XOR'ing its zobrist key injects a phantom
+// bit into the hash. All four FENs start with only the *castling* side's
+// rights, so the only correct hash delta is the one for the side that moved.
+TEST(movegen, castle_does_not_touch_cleared_opposite_side_rights) {
+    struct Case {
+        const char * fen;
+        const char * post_castle_fen;
+    };
+    // Each case: one-sided pre-castle rights; exercising the side that still
+    // has rights must not XOR or set the already-cleared opposite bit, and
+    // apply/revert must round-trip hash and FEN exactly.
+    const Case cases[] = {
+        {"4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/R3K2R w K - 0 1",
+         "4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/R4RK1 b - - 0 1"},  // W OO, W-OOO already cleared
+        {"4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/R3K2R w Q - 0 1",
+         "4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/2KR3R b - - 0 1"},  // W OOO, W-OO already cleared
+        {"r3k2r/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 b k - 0 1",
+         "r4rk1/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 w - - 0 1"},  // B OO, B-OOO already cleared
+        {"r3k2r/pppqbppp/2np1n2/4p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 b q - 0 1",
+         "2kr3r/pppqbppp/2np1n2/4p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 w - - 0 1"},    // B OOO, B-OO already cleared
+    };
+    for (const auto & c : cases) {
+        Board b{c.fen};
+        const auto expected_before = zobrist::generate_hash(b);
+        ASSERT_EQ(b.hash, expected_before) << c.fen;
+        if (b.side == white) {
+            const auto dst = b.gamestate.can_castle(CastlingRights::white_oo) ? g1 : c1;
+            apply_move<white>(b, resolve_move<white>(b, king, e1, dst));
+            EXPECT_EQ(b.fen(), c.post_castle_fen) << "apply: " << c.fen;
+            EXPECT_EQ(b.hash, zobrist::generate_hash(b)) << "apply: " << c.fen;
+            revert_move<white>(b);
+        } else {
+            const auto dst = b.gamestate.can_castle(CastlingRights::black_oo) ? g8 : c8;
+            apply_move<black>(b, resolve_move<black>(b, king, e8, dst));
+            EXPECT_EQ(b.fen(), c.post_castle_fen) << "apply: " << c.fen;
+            EXPECT_EQ(b.hash, zobrist::generate_hash(b)) << "apply: " << c.fen;
+            revert_move<black>(b);
+        }
+        EXPECT_EQ(b.fen(), c.fen) << "revert: " << c.fen;
+        EXPECT_EQ(b.hash, expected_before) << "revert: " << c.fen;
+        EXPECT_EQ(b.hash, zobrist::generate_hash(b)) << "revert: " << c.fen;
+    }
+}
+
 // --- NNUE incremental audit -----------------------------------------------
 // For each move type (quiet / capture / promotion / en-passant / castle),
 // apply the move with UpdateNNUE=true (the live incremental/refresh path),

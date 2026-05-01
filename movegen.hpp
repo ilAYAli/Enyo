@@ -203,49 +203,39 @@ static inline constexpr bool is_square_attacked(const Board & b, square_t sq)
 enum class CastleSide { Kingside, Queenside };
 
 template <Color Us, CastleSide Side, bool UpdateZobrist, bool UpdateNNUE>
-inline void revert_castle(Board & b, NNUE::Net * nnue)
+inline void revert_castle(Board & b, Undo const & undo, NNUE::Net * nnue)
 {
+    // Mirror the conditional clear_right in apply_castle: only touch rights
+    // (and their zobrist bits) that were actually set in the pre-castle state.
+    // apply_castle cleared own-side rights conditionally; the hash XOR must
+    // undo exactly the same set of bits.
+    auto restore_right = [&](CastlingRights cr, int zbr_idx) {
+        if (undo.gamestate.can_castle(cr) && !b.gamestate.can_castle(cr)) {
+            b.gamestate.set_castle(cr, true);
+            if constexpr (UpdateZobrist) {
+                b.hash ^= b.zbrs.castling_[zbr_idx];
+                if constexpr (zobrist::debug)
+                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
+                        __func__, b.hash, b.fen());
+            }
+        }
+    };
+
     const square_t w_ksq = lsb(b.pt_bb[white][king]);
     const square_t b_ksq = lsb(b.pt_bb[black][king]);
     if constexpr (Us == white) {
         // ----[ white kingside ]-----------------------------------------------
         if constexpr (Side == CastleSide::Kingside) {
-            b.gamestate.set_castle(CastlingRights::white_oo, true);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[1];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
-
-            b.gamestate.set_castle(CastlingRights::white_ooo, true);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[0];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
+            restore_right(CastlingRights::white_oo,  1);
+            restore_right(CastlingRights::white_ooo, 0);
 
             clr_piece<white, UpdateZobrist, UpdateNNUE>(b, rook, f1, nnue, w_ksq, b_ksq);
             clr_piece<white, UpdateZobrist, UpdateNNUE>(b, king, g1, nnue, w_ksq, b_ksq);
             set_piece<white, UpdateZobrist, UpdateNNUE>(b, rook, h1, nnue, w_ksq, b_ksq);
             set_piece<white, UpdateZobrist, UpdateNNUE>(b, king, e1, nnue, w_ksq, b_ksq);
         } else { //----[ white queenside ]--------------------------------------
-            b.gamestate.set_castle(CastlingRights::white_ooo, true);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[0];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
-
-            b.gamestate.set_castle(CastlingRights::white_oo, true);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[1];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
+            restore_right(CastlingRights::white_ooo, 0);
+            restore_right(CastlingRights::white_oo,  1);
 
             clr_piece<white, UpdateZobrist, UpdateNNUE>(b, rook, d1, nnue, w_ksq, b_ksq);
             clr_piece<white, UpdateZobrist, UpdateNNUE>(b, king, c1, nnue, w_ksq, b_ksq);
@@ -255,42 +245,16 @@ inline void revert_castle(Board & b, NNUE::Net * nnue)
     } else {
         //----[ black kingside ]------------------------------------------------
         if constexpr (Side == CastleSide::Kingside) {
-            b.gamestate.set_castle(CastlingRights::black_oo, true);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[3];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
-
-            if constexpr (UpdateZobrist) {
-                b.gamestate.set_castle(CastlingRights::black_ooo, true);
-                b.hash ^= b.zbrs.castling_[2];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
+            restore_right(CastlingRights::black_oo,  3);
+            restore_right(CastlingRights::black_ooo, 2);
 
             clr_piece<black, UpdateZobrist, UpdateNNUE>(b, rook, f8, nnue, w_ksq, b_ksq);
             clr_piece<black, UpdateZobrist, UpdateNNUE>(b, king, g8, nnue, w_ksq, b_ksq);
             set_piece<black, UpdateZobrist, UpdateNNUE>(b, rook, h8, nnue, w_ksq, b_ksq);
             set_piece<black, UpdateZobrist, UpdateNNUE>(b, king, e8, nnue, w_ksq, b_ksq);
         } else { //----[ black queenside ]--------------------------------------
-            b.gamestate.set_castle(CastlingRights::black_oo, true);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[3];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
-
-            b.gamestate.set_castle(CastlingRights::black_ooo, true);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[2];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
+            restore_right(CastlingRights::black_ooo, 2);
+            restore_right(CastlingRights::black_oo,  3);
 
             clr_piece<black, UpdateZobrist, UpdateNNUE>(b, rook, d8, nnue, w_ksq, b_ksq);
             clr_piece<black, UpdateZobrist, UpdateNNUE>(b, king, c8, nnue, w_ksq, b_ksq);
@@ -306,47 +270,37 @@ inline void apply_castle(Board & b, NNUE::Net * nnue)
 {
     const square_t w_ksq = lsb(b.pt_bb[white][king]);
     const square_t b_ksq = lsb(b.pt_bb[black][king]);
+    // Zobrist indices: [0]=white_ooo, [1]=white_oo, [2]=black_ooo, [3]=black_oo.
+    // For each side, clear both castling rights (own side guaranteed set; opposite
+    // side must be checked since it may have been cleared earlier by a rook
+    // move/capture or the king's own move).
+    auto clear_right = [&](CastlingRights cr, int zbr_idx) {
+        if (b.gamestate.can_castle(cr)) {
+            b.gamestate.set_castle(cr, false);
+            if constexpr (UpdateZobrist) {
+                b.hash ^= b.zbrs.castling_[zbr_idx];
+                if constexpr (zobrist::debug)
+                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
+                        __func__, b.hash, b.fen());
+            }
+        }
+    };
+
     if constexpr (Us == white) {
        if constexpr (Side == CastleSide::Kingside) { // white, kingside:
             clr_piece<white, UpdateZobrist, UpdateNNUE>(b, king, e1, nnue, w_ksq, b_ksq);
             clr_piece<white, UpdateZobrist, UpdateNNUE>(b, rook, h1, nnue, w_ksq, b_ksq);
             set_piece<white, UpdateZobrist, UpdateNNUE>(b, king, g1, nnue, w_ksq, b_ksq);
             set_piece<white, UpdateZobrist, UpdateNNUE>(b, rook, f1, nnue, w_ksq, b_ksq);
-            b.gamestate.set_castle(CastlingRights::white_oo, false);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[1];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
-            b.gamestate.set_castle(CastlingRights::white_ooo, true);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[0];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
+            clear_right(CastlingRights::white_oo,  1);
+            clear_right(CastlingRights::white_ooo, 0);
         } else { // white, queenside:
             clr_piece<white, UpdateZobrist, UpdateNNUE>(b, king, e1, nnue, w_ksq, b_ksq);
             clr_piece<white, UpdateZobrist, UpdateNNUE>(b, rook, a1, nnue, w_ksq, b_ksq);
             set_piece<white, UpdateZobrist, UpdateNNUE>(b, king, c1, nnue, w_ksq, b_ksq);
             set_piece<white, UpdateZobrist, UpdateNNUE>(b, rook, d1, nnue, w_ksq, b_ksq);
-
-            b.gamestate.set_castle(CastlingRights::white_ooo, false);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[0];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
-
-            b.gamestate.set_castle(CastlingRights::white_oo, false);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[1];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
+            clear_right(CastlingRights::white_ooo, 0);
+            clear_right(CastlingRights::white_oo,  1);
         }
     } else {
        if constexpr (Side == CastleSide::Kingside) { // black, kingside:
@@ -354,43 +308,15 @@ inline void apply_castle(Board & b, NNUE::Net * nnue)
             clr_piece<black, UpdateZobrist, UpdateNNUE>(b, rook, h8, nnue, w_ksq, b_ksq);
             set_piece<black, UpdateZobrist, UpdateNNUE>(b, king, g8, nnue, w_ksq, b_ksq);
             set_piece<black, UpdateZobrist, UpdateNNUE>(b, rook, f8, nnue, w_ksq, b_ksq);
-
-            b.gamestate.set_castle(CastlingRights::black_oo, false);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[3];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
-
-            b.gamestate.set_castle(CastlingRights::black_ooo, false);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[2];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
+            clear_right(CastlingRights::black_oo,  3);
+            clear_right(CastlingRights::black_ooo, 2);
         } else { // black, queenside:
             clr_piece<black, UpdateZobrist, UpdateNNUE>(b, king, e8, nnue, w_ksq, b_ksq);
             clr_piece<black, UpdateZobrist, UpdateNNUE>(b, rook, a8, nnue, w_ksq, b_ksq);
             set_piece<black, UpdateZobrist, UpdateNNUE>(b, king, c8, nnue, w_ksq, b_ksq);
             set_piece<black, UpdateZobrist, UpdateNNUE>(b, rook, d8, nnue, w_ksq, b_ksq);
-
-            b.gamestate.set_castle(CastlingRights::black_oo, false);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[2];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
-
-            b.gamestate.set_castle(CastlingRights::black_ooo, false);
-            if constexpr (UpdateZobrist) {
-                b.hash ^= b.zbrs.castling_[3];
-                if constexpr (zobrist::debug)
-                    fmt::print("<{}> zobrist: hash: {:016X}, fen: {}\n",
-                        __func__, b.hash, b.fen());
-            }
+            clear_right(CastlingRights::black_ooo, 2);
+            clear_right(CastlingRights::black_oo,  3);
         }
     }
 
@@ -896,9 +822,9 @@ inline void revert_move(Board & b, [[maybe_unused]] NNUE::Net * nnue = nullptr)
     switch (undo.move.flags()) {
         case Move::Flags::castle:
             if (undo.move.dst_sq() < undo.move.src_sq())
-                revert_castle<Us, CastleSide::Kingside, UpdateZobrist, false>(b, nnue);
+                revert_castle<Us, CastleSide::Kingside, UpdateZobrist, false>(b, undo, nnue);
             else
-                revert_castle<Us, CastleSide::Queenside, UpdateZobrist, false>(b, nnue);
+                revert_castle<Us, CastleSide::Queenside, UpdateZobrist, false>(b, undo, nnue);
             break;
         case Move::Flags::promote:
             revert_promotion<Us, UpdateZobrist, false>(b, undo, nnue);
