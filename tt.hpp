@@ -82,12 +82,18 @@ public:
     }
 
     ~Transposition() {
+        free_table();
+    }
+
+    void free_table() {
+        if (!hash_table) return;
         if constexpr (use_aligned_alloc) {
             std::free(hash_table);
         } else {
             delete[] hash_table;
         }
         hash_table = nullptr;
+        buckets = 0;
     }
 
     Transposition(const Transposition&) = delete;
@@ -156,6 +162,27 @@ public:
         new_write = 0;
         over_write = 0;
         cut = 0;
+    }
+
+    // Exposed so UCI `setoption name Hash value N` and settings.json
+    // load can actually change the TT size. Do NOT call during a live
+    // search — frees the old table and re-allocates. UCI protocol
+    // requires setoption only between `isready` exchanges, so the
+    // constraint is easy to honour from callers. No-op when the
+    // requested size already matches the current allocation (guards
+    // against redundant resize on every setoption).
+    void set_size(int megabytes) {
+        const auto requested_buckets =
+            static_cast<size_t>(megabytes * 1024 * 1024) / sizeof(SMPentry);
+        if (requested_buckets == buckets)
+            return;
+        free_table();
+        resize(megabytes);
+        new_write = 0;
+        over_write = 0;
+        cut = 0;
+        hit = 0;
+        current_age = 0;
     }
 
     SMPentry * hash_table { nullptr };

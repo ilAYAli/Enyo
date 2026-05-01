@@ -289,6 +289,15 @@ void Uci::setoption(std::istringstream& iss)
     std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
     if (lower_name == "logfile" || lower_name == "debug log file")
         eventlog::reopen_logfile(cfgmgr.logfile, true);
+    if (lower_name == "hash") {
+        // setoption previously just updated cfgmgr.hash_size; the TT
+        // was allocated once at Transposition singleton construction
+        // from the default, so the requested size never took effect.
+        // Now we resize in-place. UCI spec requires setoption only
+        // between go commands, so this is always idle-time safe.
+        tt::ttable.set_size(cfgmgr.hash_size);
+        ucilog("info string hash table resized to {} MB\n", cfgmgr.hash_size);
+    }
 #if ENYO_USE_SYZYGY
     if (lower_name == "syzygypath" && !cfgmgr.syzygy_path.empty()) {
         if (syzygy::init(cfgmgr.syzygy_path))
