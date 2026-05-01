@@ -12,6 +12,9 @@
 #include "see.hpp"
 #include "nnue.hpp"
 #include "probe.hpp"
+#include "search.hpp"
+#include "thread.hpp"
+#include "tt.hpp"
 
 #include <ranges>
 #include <nlohmann/json.hpp>
@@ -565,6 +568,68 @@ TEST(movegen, castle_does_not_reset_halfmove_clock) {
         const int after_counter = b.half_moves + b.gamestate.half_moves;
         EXPECT_EQ(after_counter, before_counter + 1) << c.label;
     }
+}
+
+// Qsearch-in-check regression. Pre-fix, qsearch unconditionally
+// stand-patted — even when the side to move was in check — and the
+// QSEARCH movepicker filtered out non-capturing / non-promoting moves
+// (movepicker.hpp:85). Both together meant that a child qsearch node
+// where the side to move was in check and mated would return the
+// static eval instead of mated_in(ply).
+//
+// Concretely: from 7k/8/5KQ1/8/8/8/8/8 w - - 0 1, white's winning reply
+// is g6g7 (mate in 1 — black is then in check with no legal move). At
+// depth 1, negamax evaluates each root move by calling -qsearch on the
+// child. After g6g7, the child position has black in check and mated;
+// pre-fix qsearch stand-patted and returned a material-ahead eval that
+// back-propagated as a finite score, not mate. Non-mating white moves
+// like g6e4 looked better because they avoided losing the queen to a
+// capture in the child's qsearch. The engine played g6e4 at depth 1
+// and only found g6g7 once normal search depth reached 2.
+//
+// Post-fix: at depth 1 the root sees one move scoring mate-in-1 and
+// picks g6g7.
+TEST(search, qsearch_in_check_finds_mate_in_one_at_depth_one) {
+    cfgmgr.num_threads = 1;
+
+    Board b{"7k/8/5KQ1/8/8/8/8/8 w - - 0 1"};
+    SearchInfo si{b, 1};
+    si.board = b;
+    si.nnue.refresh(si.board);
+    // Leave starttime == stoptime (default-constructed) so time_expired()
+    // is permanently false for this test. Setting only starttime would
+    // make stoptime (still epoch) strictly less than now and expire
+    // every call immediately.
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    tt::ttable.prepare();
+
+    Worker worker{si, 0};
+    worker.pvline.clear();
+
+    // Bypass search_position() (which depends on thread::pool being
+    // initialized for get_nps/get_nodes reporting). Call negamax<Root>
+    // directly at depth 1 — the only thing that matters for this
+    // regression is whether the in-check child-qsearch path back-
+    // propagates mate correctly.
+    Stack stack[MAX_PLY + 5];
+    stack[0].ply = 4;
+    stack[1].ply = 3;
+    stack[2].ply = 2;
+    stack[3].ply = 1;
+    for (int i = 0; i <= MAX_PLY; i++)
+        stack[i + 4].ply = i;
+    Stack * ss = stack + 4;
+
+    const auto value = negamax<white, NodeType::Root>(
+        1, worker, ss, -Value::infinite, Value::infinite);
+
+    // Expect the mate-in-1 move g6-g7 and a mate score.
+    const Move best = worker.pvline.bestmove();
+    EXPECT_EQ(best.src_sq(), g6);
+    EXPECT_EQ(best.dst_sq(), g7);
+    EXPECT_GE(static_cast<int>(value), static_cast<int>(Value::mate_in_max_ply));
 }
 
 // --- NNUE incremental audit -----------------------------------------------
