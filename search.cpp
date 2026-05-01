@@ -798,6 +798,17 @@ void search_position(Worker & worker)
 
     Value value = Value::draw;
     auto const max_depth = std::min(si.depth, MAX_PLY);
+
+    // Instability extension state.
+    // `bestmove_changed_last_iter` is re-set at the end of every
+    // iteration based on the most recent search result.
+    // `used_instability_extension` is sticky for the duration of
+    // this `go`: once we've granted an extra iteration past soft,
+    // we won't grant another in the same move regardless of
+    // subsequent flips. The hard cap remains the ultimate bound.
+    bool bestmove_changed_last_iter = false;
+    bool used_instability_extension = false;
+
     for (auto depth = 1; depth <= max_depth; ++depth) {
         if (worker.time_expired())
             break;
@@ -807,9 +818,30 @@ void search_position(Worker & worker)
         // cheap, principled "stop between iterations" behavior. The hard
         // limit (watchdog + time_expired) still aborts mid-iteration if we
         // blow through the emergency budget.
+        //
+        // Instability extension: if the last completed iteration *changed*
+        // the bestmove, grant one more iteration past soft. A low-time
+        // guard prevents the extension when the clock is thin: we need
+        // uci_time >= 10 * uci_inc + 1000 ms to have enough slack for a
+        // deeper search without risking a flag.
         if (worker.id == 0 && depth > 1 && si.soft_time_expired()) {
-            thread::pool.stop = true;
-            break;
+            const int uci_time = si.board.side == white ? si.wtime : si.btime;
+            const int uci_inc  = si.board.side == white
+                ? (si.winc != -1 ? si.winc : 0)
+                : (si.binc != -1 ? si.binc : 0);
+            const bool enough_time = uci_time >= 10 * uci_inc + 1000;
+            const bool may_extend =
+                   bestmove_changed_last_iter
+                && enough_time
+                && !used_instability_extension;
+            if (!may_extend) {
+                thread::pool.stop = true;
+                break;
+            }
+            // Extension fires exactly once per `go` — mark the sticky
+            // flag so subsequent post-soft iterations can't extend
+            // again even if bestmove keeps flipping.
+            used_instability_extension = true;
         }
 
         si.nodes = 0;
@@ -863,6 +895,11 @@ void search_position(Worker & worker)
             if (mate_distance > 0 && mate_distance < shortest_mate.moves)
                 shortest_mate = {mate_distance, pvbm};
             worker.bestmove = pvbm;
+            // TM: record whether this iteration changed the bestmove,
+            // for the next iteration's soft-time extension check. Only
+            // meaningful from depth 2 onward (depth 1 has no previous).
+            bestmove_changed_last_iter =
+                (depth > 1) && (pvbm != prev_bestmove);
         } else {
             eventlog::log<eventlog::Log::error>(
                 "ERROR: pvbm empty at depth {}. pv_str='{}' len[0]={} table[0][0]={} prev_bestmove={} score={} fen={}\n",
