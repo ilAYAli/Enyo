@@ -371,6 +371,32 @@ void Uci::position(std::istringstream& iss)
         auto src = str2sq(token.substr(0, 2).c_str());
         auto dst = str2sq(token.substr(2, 4).c_str());
         auto pp = get_promo_piece(token);
+
+        // Validate that the UCI move is legal in the current position.
+        // Without this check, a malformed or corrupted `position` command
+        // (e.g. from a buggy GUI) will silently leave Enyo searching a
+        // bogus position. See: lichess-bot score_syzygy_moves leak.
+        const auto legal = b.side == white
+            ? generate_legal_moves<white>(b)
+            : generate_legal_moves<black>(b);
+        bool is_legal = false;
+        for (const auto& mv : legal) {
+            if (mv.src_sq() == src && mv.dst_sq() == dst
+                && (pp == PieceType::no_piece_type || mv.promo_piece() == pp)) {
+                is_legal = true;
+                break;
+            }
+        }
+        if (!is_legal) {
+            eventlog::log<Log::error>(
+                "Rejecting illegal move '{}' in position command; FEN='{}'\n",
+                token, b.fen());
+            fmt::print("info string rejecting illegal move '{}' in position; FEN='{}'\n",
+                       token, b.fen());
+            fflush(stdout);
+            return;
+        }
+
         if (b.side == enyo::white) {
             const auto piece = get_piece_type<white>(b, src);
             auto m = resolve_move<white>(b, piece, src, dst);
@@ -453,10 +479,13 @@ void Uci::go(std::istringstream & iss)
     thread::pool.init_threads(std::move(si), cfgmgr.num_threads);
 
     auto watchdog = alloc.hard.count() >= 0
-        ? std::optional<std::jthread>(std::in_place, [deadline = std::chrono::high_resolution_clock::now() + alloc.hard](std::stop_token st) {
+        ? std::optional<std::jthread>(std::in_place, [deadline = std::chrono::high_resolution_clock::now() + alloc.hard,
+                                                      hard_ms = alloc.hard.count()](std::stop_token st) {
             while (!st.stop_requested()) {
                 if (std::chrono::high_resolution_clock::now() >= deadline) {
                     thread::pool.stop = true;
+                    eventlog::log<eventlog::Log::error>(
+                        "WATCHDOG: fired at deadline ({}ms budget)\n", hard_ms);
                     return;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
