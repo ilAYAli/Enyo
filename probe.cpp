@@ -3,6 +3,8 @@
 #include "3rdparty/Fathom/src/tbprobe.h"
 #endif
 
+#include <algorithm>
+
 #include "board.hpp"
 #include "config.hpp"
 #include "movegen.hpp"
@@ -52,7 +54,14 @@ pos board2pos(Board & b)
         .knights = bbconv(b.pt_bb[white][knight] | b.pt_bb[black][knight]),
         .pawns = bbconv(b.pt_bb[white][pawn] | b.pt_bb[black][pawn]),
         .castling = uint8_t(b.gamestate.castling_rights),
-        .rule50 = 0,
+        // Syzygy's rule50 is the FIDE halfmove clock. fen.cpp emits it as
+        // (b.half_moves + b.gamestate.half_moves) — the dynamic counter
+        // plus the base value parsed from the starting FEN — so mirror
+        // that here. Passing 0 (or only the base) made WDL overclaim
+        // wins that should have been cursed-draws near the 50-move limit,
+        // and made DTZ score moves off a rule50 that lagged reality.
+        .rule50 = static_cast<uint8_t>(std::min(255,
+            b.half_moves + static_cast<int>(b.gamestate.half_moves))),
         .ep = sqconv(b.gamestate.enpassant_square),
         .turn = b.side == white,
         .move = static_cast<uint16_t>(b.histply + 1),
@@ -101,7 +110,6 @@ std::pair<int, Move> DTZ_probe(Board & board, Status & status)
         return {0, Move{}};
 
     auto pos = board2pos(board);
-    pos.rule50 = static_cast<uint8_t>(board.gamestate.half_moves);
 
     unsigned TBresult =
         tb_probe_root(

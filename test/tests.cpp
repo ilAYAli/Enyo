@@ -277,13 +277,13 @@ TEST(movegen, castle_does_not_touch_cleared_opposite_side_rights) {
     // apply/revert must round-trip hash and FEN exactly.
     const Case cases[] = {
         {"4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/R3K2R w K - 0 1",
-         "4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/R4RK1 b - - 0 1"},  // W OO, W-OOO already cleared
+         "4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/R4RK1 b - - 1 1"},  // W OO, W-OOO already cleared
         {"4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/R3K2R w Q - 0 1",
-         "4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/2KR3R b - - 0 1"},  // W OOO, W-OO already cleared
+         "4k3/pppq1ppp/2np1n2/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/2KR3R b - - 1 1"},  // W OOO, W-OO already cleared
         {"r3k2r/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 b k - 0 1",
-         "r4rk1/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 w - - 0 1"},  // B OO, B-OOO already cleared
+         "r4rk1/pppq1ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 w - - 1 1"},  // B OO, B-OOO already cleared
         {"r3k2r/pppqbppp/2np1n2/4p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 b q - 0 1",
-         "2kr3r/pppqbppp/2np1n2/4p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 w - - 0 1"},    // B OOO, B-OO already cleared
+         "2kr3r/pppqbppp/2np1n2/4p3/2B1P3/2NP1N2/PPPQ1PPP/4K3 w - - 1 1"},    // B OOO, B-OO already cleared
     };
     for (const auto & c : cases) {
         Board b{c.fen};
@@ -455,6 +455,39 @@ TEST(movegen, double_push_does_not_wrap_ep_to_opposite_file) {
         if (c.mover == white) revert_move<white>(b); else revert_move<black>(b);
         EXPECT_EQ(b.fen(), c.fen) << "revert: " << c.fen;
         EXPECT_EQ(b.hash, before_hash) << "revert: " << c.fen;
+    }
+}
+
+// Castling is neither a capture nor a pawn move, so per FIDE the 50-move
+// halfmove clock must *increment* across a castle, not reset. apply_move
+// historically zeroed b.half_moves in the castle branch, which (a) emits a
+// wrong FEN, (b) mis-counts the 50-move rule, and (c) truncates the
+// is_repetition() lookback window — which uses b.half_moves as the scan
+// depth into history — allowing repetitions that straddle a castle to go
+// undetected.
+TEST(movegen, castle_does_not_reset_halfmove_clock) {
+    struct Case {
+        const char * fen;
+        square_t     src;
+        square_t     dst;
+        Color        mover;
+        const char * label;
+    };
+    const Case cases[] = {
+        {"r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 5 10", e1, g1, white, "white O-O"},
+        {"r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 5 10", e1, c1, white, "white O-O-O"},
+        {"r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 5 10", e8, g8, black, "black O-O"},
+        {"r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 5 10", e8, c8, black, "black O-O-O"},
+    };
+    for (const auto & c : cases) {
+        Board b{c.fen};
+        const int before_counter = b.half_moves + b.gamestate.half_moves;
+        if (c.mover == white)
+            apply_move<white>(b, resolve_move<white>(b, king, c.src, c.dst));
+        else
+            apply_move<black>(b, resolve_move<black>(b, king, c.src, c.dst));
+        const int after_counter = b.half_moves + b.gamestate.half_moves;
+        EXPECT_EQ(after_counter, before_counter + 1) << c.label;
     }
 }
 

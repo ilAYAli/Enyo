@@ -790,7 +790,13 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
                 apply_castle<Us, CastleSide::Kingside, UpdateZobrist, UpdateNNUE>(b, nnue);
             else
                 apply_castle<Us, CastleSide::Queenside, UpdateZobrist, UpdateNNUE>(b, nnue);
-            b.half_moves = 0;
+            // Castling is neither a capture nor a pawn move, so the
+            // FIDE 50-move counter is not reset — it increments like any
+            // other quiet king/rook move. Zeroing it here also truncated
+            // is_repetition()'s lookback window (which uses half_moves as
+            // the scan depth), letting a repetition that straddles a
+            // castle escape detection.
+            b.half_moves++;
             break;
         case Move::Flags::promote:
             apply_promotion<Us, UpdateZobrist, UpdateNNUE>(b, move, nnue);
