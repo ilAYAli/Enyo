@@ -95,6 +95,23 @@ static inline void prioritize_moves(
 
     for (const auto move : moves) {
         int score = DRAW_SCORE;
+        // In QSEARCH, reject a quiet (non-capture, non-promotion) tt_move
+        // before it can inherit TT_SCORE and bypass the capture/promo
+        // filter below. Previously the `move == tt_move` branch fired
+        // first, letting a quiet tt_move into qsearch and forcing the
+        // next node into the in-check all-evasions branch — a recursion
+        // explosion that burned the hard-time budget. See
+        // odonata-bot vs EnyoBot JCKXOwix replay experiment.
+        //
+        // Narrow fix: only reject *quiet* tt_move in QSEARCH. tt_move
+        // captures still get TT_SCORE (and, as before, bypass the SEE
+        // filter) — changing that is a separate question.
+        if constexpr (ST == QSEARCH) {
+            if (move == tt_move
+                && move.dst_piece() == no_piece_type
+                && (move.flags() & Move::Flags::promote) == 0)
+                continue;
+        }
         if (move == tt_move) {
             score = TT_SCORE;
         } else if (move.dst_piece() != no_piece_type) {
