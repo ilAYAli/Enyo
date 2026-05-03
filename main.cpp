@@ -28,16 +28,23 @@ namespace {
 namespace fs = std::filesystem;
 
 std::string get_default_config_file_path() {
-    // Prefer ./settings.json in the working directory: a deliberate per-launch
-    // config (e.g. replay harness, SPRT worker) should override the user's
-    // global ~/.config default.
-    if (fs::exists("settings.json"))
-        return "settings.json";
+    // Precedence:
+    // 1) ~/.config/enyo/settings.json — user's personal config
+    // 2) <exepath>/../settings.json   — shipped next to the binary as a
+    //                                   fallback so a fresh clone (replay
+    //                                   harness, SPRT worker, unpacked
+    //                                   release) finds a working default.
     const char * home_directory = getenv("HOME");
     if (home_directory) {
-        const std::string default_config_path = std::string(home_directory) + "/.config/enyo/settings.json";
-        if (fs::exists(default_config_path))
-            return default_config_path;
+        const std::string user_config = std::string(home_directory) + "/.config/enyo/settings.json";
+        if (fs::exists(user_config))
+            return user_config;
+    }
+    const auto exe = fs::path(get_exe_path());
+    if (!exe.empty()) {
+        const auto next_to_binary = exe.parent_path() / "settings.json";
+        if (fs::exists(next_to_binary))
+            return next_to_binary.string();
     }
     return "";
 }
