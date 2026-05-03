@@ -28,6 +28,11 @@ namespace {
 namespace fs = std::filesystem;
 
 std::string get_default_config_file_path() {
+    // Prefer ./settings.json in the working directory: a deliberate per-launch
+    // config (e.g. replay harness, SPRT worker) should override the user's
+    // global ~/.config default.
+    if (fs::exists("settings.json"))
+        return "settings.json";
     const char * home_directory = getenv("HOME");
     if (home_directory) {
         const std::string default_config_path = std::string(home_directory) + "/.config/enyo/settings.json";
