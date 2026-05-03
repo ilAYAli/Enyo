@@ -946,24 +946,17 @@ void search_position(Worker & worker)
         }
     }
     
-    eventlog::log<eventlog::Log::info>("After search loop: worker.id={}, shortest_mate.move={}, worker.bestmove={}\n",
-        worker.id, shortest_mate.move, worker.bestmove);
-    
     if (worker.id == 0) {
         if (si.has_searchmoves)
             ucilog("info string forced score {}\n", value);
 
         Move out = is_legal_root_move(shortest_mate.move) ? shortest_mate.move : worker.bestmove;
-        const Move pre_fallback_out = out;
-
-        eventlog::log<eventlog::Log::info>("Before bestmove output: out={}, is_legal={}\n",
-            out, is_legal_root_move(out));
 
         if (!is_legal_root_move(out) && !legal_fallback.empty()) {
             eventlog::log<eventlog::Log::error>(
                 "ERROR: bestmove fallback fired. pre_fallback_out={} worker.bestmove={} shortest_mate.move={} "
                 "pvline.bestmove()={} pv_str='{}' len[0]={} legal_fallback[0]={} fen={}\n",
-                pre_fallback_out,
+                out,
                 worker.bestmove,
                 shortest_mate.move,
                 worker.pvline.bestmove(),
@@ -974,11 +967,7 @@ void search_position(Worker & worker)
             out = legal_fallback[0];
         }
 
-        eventlog::log<eventlog::Log::info>("Outputting bestmove: {}\n", out);
         ucilog("bestmove {}\n", out);
-        eventlog::log<eventlog::Log::info>("Successfully output bestmove\n");
-    } else {
-        eventlog::log<eventlog::Log::error>("ERROR: worker.id={} is not 0, not outputting bestmove!\n", worker.id);
     }
 }
 
