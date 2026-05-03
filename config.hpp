@@ -40,6 +40,12 @@ namespace Constexpr {
     static constexpr bool use_aspiration_window      = true; // +274.6 Elo
     static constexpr bool use_razoring               = true; // +135.5 Elo
     static constexpr bool use_tt                     = true;
+    // Experimental: gate the qsearch TT-cut only. Probe still happens (tt_move
+    // is still used for ordering), but the early return on flag match is
+    // skipped. Negamax TT-cut is unaffected. Intended to isolate whether the
+    // depth-unguarded qsearch cut is the source of warm-TT depth-1 blowups in
+    // check-rich endgames (see odonata-bot vs EnyoBot JCKXOwix move 60).
+    static constexpr bool use_qsearch_tt_cut         = true;
     static constexpr bool use_syzygy                 = true;
     // testing:
     static constexpr bool use_iir                    = true; //
@@ -170,21 +176,28 @@ public:
     }
 
 private:
-    // needs to be in sync with the public API:
+    // Config is nested under "constants" / "toggles". Any field may be absent,
+    // in which case the member's in-class default is kept — so a user's
+    // settings.json only needs to carry the fields they care about overriding.
     void update_config() {
         try {
-            num_threads     = option["Threads"].get<int>();
-            hash_size       = option["Hash"].get<int>();
-            use_tt          = option["Use_tt"];
-            use_tt_exact_cutoff = option["Use_tt_exact_cutoff"];
-            use_tt_lower_cutoff = option["Use_tt_lower_cutoff"];
-            use_tt_upper_cutoff = option["Use_tt_upper_cutoff"];
-            nnue_file       = option["Nnue_file"].get<std::string>();
-            logfile         = option["Logfile"].get<std::string>();
-            use_lmr         = option["Use_lmr"];
+            const json empty = json::object();
+            const auto& c = option.contains("constants") ? option["constants"] : empty;
+            const auto& t = option.contains("toggles")   ? option["toggles"]   : empty;
 
+            num_threads = c.value("threads",   num_threads);
+            hash_size   = c.value("Hash",      hash_size);
+            nnue_file   = c.value("nnue_file", nnue_file);
+            logfile     = c.value("logfile",   logfile);
+            syzygy_path = c.value("syzygy_path", syzygy_path);
+
+            use_tt              = t.value("use_tt",              use_tt);
+            use_tt_exact_cutoff = t.value("use_tt_exact_cutoff", use_tt_exact_cutoff);
+            use_tt_lower_cutoff = t.value("use_tt_lower_cutoff", use_tt_lower_cutoff);
+            use_tt_upper_cutoff = t.value("use_tt_upper_cutoff", use_tt_upper_cutoff);
+            use_lmr             = t.value("use_lmr",             use_lmr);
         } catch (const json::exception& e) {
-            fmt::print("Error: Unable to parse config JSON: '{}\n", e.what());
+            fmt::print("Error: Unable to parse config JSON: '{}'\n", e.what());
         }
     }
 
