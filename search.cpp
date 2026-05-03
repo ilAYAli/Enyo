@@ -607,21 +607,17 @@ moves_loop:
 
                 worker.pvline.setmove(move, ss->ply);
 
-#if 0
+                // Publish the best root move incrementally. If the ID loop
+                // is interrupted mid-iteration (hard-time fires after some
+                // root moves have completed but before aspiration_window
+                // returns), the post-loop emission would otherwise find
+                // worker.bestmove still at its default sentinel and fall
+                // back to legal_fallback[0]. Keeping this tied to every
+                // alpha-improvement guarantees the published move is one
+                // search actually scored.
                 if constexpr (NT == NodeType::Root) {
-                    eventlog::log<eventlog::Log::error>(
-                        "ROOT setmove: depth={} move={} value={} alpha={} beta={} move_count={} table[0][0]={} len[0]={} pv='{}'\n",
-                        depth,
-                        move,
-                        value,
-                        alpha,
-                        beta,
-                        ss->move_count,
-                        worker.pvline.table[0][0],
-                        static_cast<int>(worker.pvline.len[0]),
-                        worker.pvline.str());
+                    worker.bestmove = move;
                 }
-#endif
 
                 if (value >= beta) {
                     if (is_quiet) {
