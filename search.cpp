@@ -858,6 +858,14 @@ void search_position(Worker & worker)
         }
 #endif
 
+        // Snapshot the previous iteration's bestmove *before* the call.
+        // Root negamax now publishes worker.bestmove incrementally on
+        // every alpha-improvement (see NodeType::Root block below), so by
+        // the time control returns, worker.bestmove already equals the
+        // current iteration's pvbm. The TM instability check (further
+        // down) needs the pre-iteration value to detect bestmove changes.
+        const Move bestmove_before_iter = worker.bestmove;
+
         value = Constexpr::use_aspiration_window
             ? (si.board.side == white
                 ? aspiration_window<white>(value, depth, worker, ss)
@@ -886,7 +894,6 @@ void search_position(Worker & worker)
 
         const auto pvbm = worker.pvline.bestmove();
         auto mate_distance = mate_in_moves(value);
-        const auto prev_bestmove = worker.bestmove;
         if (pvbm) {
             if (mate_distance > 0 && mate_distance < shortest_mate.moves)
                 shortest_mate = {mate_distance, pvbm};
@@ -894,8 +901,11 @@ void search_position(Worker & worker)
             // TM: record whether this iteration changed the bestmove,
             // for the next iteration's soft-time extension check. Only
             // meaningful from depth 2 onward (depth 1 has no previous).
+            // Compare against the pre-iteration snapshot, not the
+            // just-updated worker.bestmove — the latter is rewritten
+            // mid-iteration by the Root incremental-publish path.
             bestmove_changed_last_iter =
-                (depth > 1) && (pvbm != prev_bestmove);
+                (depth > 1) && (pvbm != bestmove_before_iter);
         } else {
             eventlog::log<eventlog::Log::error>(
                 "ERROR: pvbm empty at depth {}. pv_str='{}' len[0]={} table[0][0]={} prev_bestmove={} score={} fen={}\n",
@@ -903,7 +913,7 @@ void search_position(Worker & worker)
                 worker.pvline.str(),
                 static_cast<int>(worker.pvline.len[0]),
                 worker.pvline.table[0][0],
-                prev_bestmove,
+                bestmove_before_iter,
                 value,
                 board.fen());
         }
@@ -914,7 +924,7 @@ void search_position(Worker & worker)
                 worker.bestmove,
                 depth,
                 pvbm,
-                prev_bestmove,
+                bestmove_before_iter,
                 worker.pvline.str(),
                 static_cast<int>(worker.pvline.len[0]),
                 board.fen());
