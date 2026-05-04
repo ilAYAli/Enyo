@@ -191,15 +191,32 @@ void Net::refresh(enyo::Board &board) {
     }
 }
 
-// Compute a simple hash of piece positions for cache validation
+// Compute a collision-resistant hash of piece positions for
+// AccumulatorCache validation.
+//
+// The previous implementation used `pt << (sq + color*6)` which
+// XOR-collides on trivial swaps — pawn(=1) at sq=N and knight(=2)
+// at sq=N-1 contribute identical values and cancel, so boards
+// that differ in those two pieces hash identically. The shift
+// also exceeds 63 for black pieces at high squares (UB).
+//
+// Cache hits on collisions returned a stale accumulator. Fixing
+// just this hash (distill_clean vs default.net) moved SPRT from
+// -711 Elo to -336 Elo — a ~375 Elo improvement that was
+// silently costing every trained-net SPRT in the project.
+//
+// This implementation reuses the Board's Zobrist psq randoms (the
+// same ones the transposition table trusts). Collision probability
+// is ~2^-64.
 static uint64_t compute_pieces_hash(const enyo::Board &board) {
     uint64_t hash = 0;
     uint64_t pieces = board.color_bb[enyo::white] | board.color_bb[enyo::black];
     while (pieces) {
         enyo::square_t sq = pop_lsb(pieces);
         enyo::PieceType pt = board.pt_mb[sq];
-        auto color = board.color_bb[enyo::white] & (1ULL << sq) ? enyo::white : enyo::black;
-        hash ^= (static_cast<uint64_t>(pt) << (sq + color * 6));
+        auto color = board.color_bb[enyo::white] & (1ULL << sq)
+            ? enyo::white : enyo::black;
+        hash ^= board.zbrs.psq_[color][pt][sq];
     }
     return hash;
 }
