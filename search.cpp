@@ -804,6 +804,9 @@ void search_position(Worker & worker)
     // subsequent flips. The hard cap remains the ultimate bound.
     bool bestmove_changed_last_iter = false;
     bool used_instability_extension = false;
+    Value prev_iter_value = Value::none;
+    bool score_swung_last_iter = false;
+    constexpr int score_swing_cp = 100;
 
     for (auto depth = 1; depth <= max_depth; ++depth) {
         if (worker.time_expired())
@@ -815,11 +818,12 @@ void search_position(Worker & worker)
         // limit (watchdog + time_expired) still aborts mid-iteration if we
         // blow through the emergency budget.
         //
-        // Instability extension: if the last completed iteration *changed*
-        // the bestmove, grant one more iteration past soft. A low-time
-        // guard prevents the extension when the clock is thin: we need
-        // uci_time >= 10 * uci_inc + 1000 ms to have enough slack for a
-        // deeper search without risking a flag.
+        // Instability extension: if the last completed iteration either
+        // changed the bestmove OR swung the score by >= 100 cp, grant
+        // one more iteration past soft. A low-time guard prevents the
+        // extension when the clock is thin: we need uci_time >=
+        // 10 * uci_inc + 1000 ms to have enough slack for a deeper
+        // search without risking a flag. Fires at most once per `go`.
         if (worker.id == 0 && depth > 1 && si.soft_time_expired()) {
             const int uci_time = si.board.side == white ? si.wtime : si.btime;
             const int uci_inc  = si.board.side == white
@@ -827,7 +831,7 @@ void search_position(Worker & worker)
                 : (si.binc != -1 ? si.binc : 0);
             const bool enough_time = uci_time >= 10 * uci_inc + 1000;
             const bool may_extend =
-                   bestmove_changed_last_iter
+                   (bestmove_changed_last_iter || score_swung_last_iter)
                 && enough_time
                 && !used_instability_extension;
             if (!may_extend) {
@@ -906,6 +910,21 @@ void search_position(Worker & worker)
             // mid-iteration by the Root incremental-publish path.
             bestmove_changed_last_iter =
                 (depth > 1) && (pvbm != bestmove_before_iter);
+            // TM: track score volatility for the next iteration's
+            // soft-time extension check. A sharp swing (>= 100 cp)
+            // means the tree is re-evaluating a key branch — worth
+            // one more iteration of confirmation. Mate-range scores
+            // are excluded: the encoding (mate - ply) produces huge
+            // swings that don't reflect evaluation instability.
+            const bool either_mate =
+                   std::abs(value) >= Value::mate_in_max_ply
+                || std::abs(prev_iter_value) >= Value::mate_in_max_ply;
+            score_swung_last_iter =
+                   (depth > 1)
+                && prev_iter_value != Value::none
+                && !either_mate
+                && std::abs(value - prev_iter_value) >= score_swing_cp;
+            prev_iter_value = value;
         } else {
             eventlog::log<eventlog::Log::error>(
                 "ERROR: pvbm empty at depth {}. pv_str='{}' len[0]={} table[0][0]={} prev_bestmove={} score={} fen={}\n",
