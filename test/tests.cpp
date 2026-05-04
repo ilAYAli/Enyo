@@ -1046,6 +1046,55 @@ TEST(syzygy_bbconv, ep_square_conversion) {
     EXPECT_EQ(p.ep, 20u);  // e3 in A1=0 layout
 }
 
+// --- AccumulatorCache pieces_hash regression ---------------------------------
+// The original pieces_hash used `pt << (sq + color*6)`, which collides on
+// pawn(=1)@N and knight(=2)@(N-1) — each contributes 2^N, their XORs cancel
+// to zero. A board carrying such a pawn+knight pair therefore hashed
+// identically to a board with those squares empty. With identical king
+// squares (the cache's primary key) the stale-accumulator path was live.
+//
+// `compute_pieces_hash` is file-static, so we test the invariant that
+// refresh_with_cache must uphold: two positions with DIFFERENT piece
+// placements must produce DIFFERENT evals after refresh_with_cache, even
+// when their old-hash contributions happen to cancel. If the cache returns
+// a stale accumulator from the first position, the second position's eval
+// will match the first.
+TEST(nnue_cache, pieces_hash_pawn_knight_collision_does_not_stale_acc) {
+    // Position A: kings on e8/e1 plus white pawn on f2 (sq=10) and
+    //             white knight on g2 (sq=9). In H1=0 indexing:
+    //             (pawn=1)<<10 ^ (knight=2)<<9 = 0x400 ^ 0x400 = 0.
+    // Position B: same kings, pawn and knight absent. Old-hash contribution
+    //             from those two pieces is likewise 0, so the stale hash
+    //             functions compute the same value for both positions.
+    Board a{"4k3/8/8/8/8/8/5PN1/4K3 w - - 0 1"};
+    Board b{"4k3/8/8/8/8/8/8/4K3 w - - 0 1"};
+
+    NNUE::Net net;
+    // Prime cache with position A, then ask for position B. Under the old
+    // hash this was a false cache hit and B's eval == A's eval. Under the
+    // Zobrist-based hash the cache misses and B refreshes correctly.
+    net.refresh_with_cache(a);
+    const auto eval_a = net.Evaluate(a.side);
+
+    net.refresh_with_cache(b);
+    const auto eval_b = net.Evaluate(b.side);
+
+    EXPECT_NE(eval_a, eval_b)
+        << "AccumulatorCache returned a stale accumulator across positions "
+           "whose old XOR-based pieces_hash collide. The fix in 2672d35 "
+           "uses Board::zbrs.psq_ randoms and must keep these distinct.\n"
+           "Position A: " << a.fen() << " eval=" << eval_a << "\n"
+           "Position B: " << b.fen() << " eval=" << eval_b;
+
+    // Belt-and-suspenders: compare B's eval from the cached path against
+    // a forced full refresh of B. If the cache is behaving, they match.
+    NNUE::Net ref;
+    ref.refresh(b);
+    EXPECT_EQ(eval_b, ref.Evaluate(b.side))
+        << "refresh_with_cache(B) after priming with A produced a different "
+           "eval than a fresh refresh(B). Cache validator is unsound.";
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     NNUE::Init("");
