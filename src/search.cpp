@@ -34,6 +34,23 @@ void update_history_score(int16_t & entry, int bonus)
     entry += static_cast<int16_t>(bonus - (entry * std::abs(bonus)) / max_history);
 }
 
+template <Color Us>
+bool low_material_check_net(Board const & b)
+{
+    const int total_pieces = count_bits(b.color_bb[white] | b.color_bb[black]);
+    return total_pieces <= 8
+        && (b.pt_bb[Us][queen] | b.pt_bb[Us][rook]);
+}
+
+template <Color Us>
+bool move_gives_check(Board & b, NNUE::Net * nnue, Move move)
+{
+    apply_move<Us, true, true>(b, move, nnue);
+    const bool gives_check = is_check<~Us>(b);
+    revert_move<Us, true, true>(b, nnue);
+    return gives_check;
+}
+
 }
 
 int lmr_reductions[MAX_PLY][MAX_MOVES];
@@ -99,7 +116,6 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         return Value::draw;
     }
 
-    constexpr bool pv_node = Node == NodeType::PV;
     constexpr Color Them = ~Us;
 
     auto & si = worker.si;
@@ -117,7 +133,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
             : evaluate<Us, true>(b, &si.nnue);
     }
 
-    if (is_repetition(b, 1 + pv_node)) {
+    if (is_repetition(b)) {
         return Value::draw;
     }
 
@@ -274,7 +290,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     }
 
     if (NT != NodeType::Root) {
-        if (is_repetition(b, 1 + pv_node)) {
+        if (is_repetition(b)) {
             return Value::draw;
         }
 
@@ -492,6 +508,7 @@ moves_loop:
         }
         return Value::draw;
     }
+
 #if 1
     const Move prev_move = (ss-1)->move;
     const Move cm = prev_move ? worker.countermove[Us][prev_move.src_sq()][prev_move.dst_sq()] : Move{};
@@ -516,14 +533,19 @@ moves_loop:
         ss->move = move;
         ss->move_count++;
 
-       const bool is_quiet = move.dst_piece() == no_piece_type && move.flags() != Move::Flags::promote;
-       const bool is_capture = move.dst_piece() != no_piece_type;
+        const bool is_quiet = move.dst_piece() == no_piece_type && move.flags() != Move::Flags::promote;
+        const bool is_capture = move.dst_piece() != no_piece_type;
+        const bool protect_quiet_check =
+            is_quiet
+            && low_material_check_net<Us>(b)
+            && move_gives_check<Us>(b, &worker.si.nnue, move);
 
         // Futility pruning: skip quiet moves at shallow depth when static
         // eval plus a depth-scaled margin is still below alpha.
         if (!pv_node
             && !ss->in_check
             && is_quiet
+            && !protect_quiet_check
             && depth <= 6
             && ss->move_count > 1
             && ss->eval != Value::none
@@ -536,6 +558,7 @@ moves_loop:
         if (!pv_node
             && !ss->in_check
             && is_quiet
+            && !protect_quiet_check
             && depth <= 5
             && best_value > -Constexpr::mate_value + MAX_PLY
             && ss->move_count > (improving ? 5 + depth * depth : 3 + depth * depth)) {
@@ -550,7 +573,7 @@ moves_loop:
         apply_move<Us, true, true>(b, move, &worker.si.nnue);
 
         // LMR: Late Move Reductions
-        if (depth >= 3 && !ss->in_check && ss->move_count > 3 + 2 * pv_node) {
+        if (depth >= 3 && !ss->in_check && !protect_quiet_check && ss->move_count > 3 + 2 * pv_node) {
             int R = lmr_reductions[depth][ss->move_count];
 
             R += !improving;
