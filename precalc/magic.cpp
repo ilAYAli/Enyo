@@ -10,7 +10,7 @@ c magic.cpp -DFIND_MAGICS -DMAIN && ./a.out > magic_numbers.cpp && c magic.cpp -
 #include "fmt/format.h"
 
 #include "magic_numbers.cpp"
-#include "../board.hpp"
+#include "board.hpp"
 
 namespace enyo {
 

@@ -12,7 +12,7 @@ generate and test:
 #include "fmt/format.h"
 
 #include "magic.hpp"
-#include "../util.hpp"
+#include "util.hpp"
 
 namespace enyo {
 
@@ -266,7 +266,7 @@ void init_magics()
 }
 
 
-#include "../board.hpp"
+#include "board.hpp"
 int test() {
     using namespace enyo;
     init_sliders_attacks(bishop);

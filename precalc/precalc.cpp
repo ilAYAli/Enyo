@@ -3,8 +3,8 @@
 #include <getopt.h>
 #include <fmt/core.h>
 
-#include "../util.hpp"
-#include "../board.hpp"
+#include "util.hpp"
+#include "board.hpp"
 #include "pawn_attacks.hpp"
 #include "king_attacks.hpp"
 
