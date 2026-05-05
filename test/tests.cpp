@@ -16,6 +16,7 @@
 #include "thread.hpp"
 #include "tt.hpp"
 
+#include <chrono>
 #include <ranges>
 #include <nlohmann/json.hpp>
 
@@ -568,6 +569,55 @@ TEST(movegen, castle_does_not_reset_halfmove_clock) {
         const int after_counter = b.half_moves + b.gamestate.half_moves;
         EXPECT_EQ(after_counter, before_counter + 1) << c.label;
     }
+}
+
+TEST(search, repetition_detects_claimable_third_occurrence) {
+    Board b{"startpos"};
+
+    apply_move<white>(b, resolve_move<white>(b, knight, g1, f3));
+    apply_move<black>(b, resolve_move<black>(b, knight, g8, f6));
+    apply_move<white>(b, resolve_move<white>(b, knight, f3, g1));
+    apply_move<black>(b, resolve_move<black>(b, knight, f6, g8));
+    apply_move<white>(b, resolve_move<white>(b, knight, g1, f3));
+    apply_move<black>(b, resolve_move<black>(b, knight, g8, f6));
+    apply_move<white>(b, resolve_move<white>(b, knight, f3, g1));
+    apply_move<black>(b, resolve_move<black>(b, knight, f6, g8));
+
+    EXPECT_TRUE(is_repetition(b, 1));
+    EXPECT_FALSE(is_repetition(b, 2));
+}
+
+TEST(search, hypersion_check_net_root_evasions_find_safer_defenses) {
+    const struct {
+        std::string_view fen;
+        std::string_view bestmove;
+    } cases[] = {
+        {"2k4R/1p6/4p3/3pP3/8/2P1KB2/3Q4/1q4r1 b - - 16 53", "bestmove c8c7"},
+        {"7R/1p6/8/4Q3/8/8/1k3K2/1q1r4 b - - 3 62", "bestmove b2c1"},
+    };
+
+    const int old_threads = cfgmgr.num_threads;
+    cfgmgr.num_threads = 1;
+
+    for (const auto & c : cases) {
+        Board b{std::string{c.fen}};
+        SearchInfo si{b, 18};
+        si.board = b;
+        si.nnue.refresh(si.board);
+        si.starttime = std::chrono::high_resolution_clock::now();
+        si.stoptime = si.starttime + std::chrono::hours(1);
+        si.soft_stoptime = si.stoptime;
+
+        tt::ttable.clear();
+        testing::internal::CaptureStdout();
+        thread::pool.init_threads(si, 1);
+        thread::pool.wait();
+        const auto out = testing::internal::GetCapturedStdout();
+
+        EXPECT_NE(out.find(c.bestmove), std::string::npos) << c.fen << "\n" << out;
+    }
+
+    cfgmgr.num_threads = old_threads;
 }
 
 // Qsearch-in-check regression. Pre-fix, qsearch unconditionally
