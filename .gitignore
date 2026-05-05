@@ -25,3 +25,12 @@ profiling/
 gmon.out
 syzygy/
 .claude/settings.local.json
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Self-play smoke artifacts (parser test data, not checked in)
+tools/selfplay/*.pgn
+tools/selfplay/*.jsonl
+tools/selfplay/*.stats.json

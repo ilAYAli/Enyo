@@ -105,18 +105,18 @@ find_package(fmt REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
 set(ENYO_SOURCES
-    main.cpp
-    fen.cpp
-    board.cpp
-    exepath.cpp
+    src/main.cpp
+    src/fen.cpp
+    src/board.cpp
+    src/exepath.cpp
     magic/magic.cpp
-    thread.cpp
-    uci.cpp
-    pgn.cpp
-    nnue.cpp
-    search.cpp
-    zobrist.cpp
-    probe.cpp
+    src/thread.cpp
+    src/uci.cpp
+    src/pgn.cpp
+    src/nnue.cpp
+    src/search.cpp
+    src/zobrist.cpp
+    src/probe.cpp
 )
 
 if(ENYO_USE_SYZYGY)
@@ -148,7 +148,7 @@ add_custom_command(
 )
 
 add_custom_target(update_version_info DEPENDS ${CMAKE_BINARY_DIR}/version_info.hpp)
-add_library(version_lib OBJECT version.cpp)
+add_library(version_lib OBJECT src/version.cpp)
 add_dependencies(version_lib update_version_info)
 target_include_directories(version_lib PRIVATE ${CMAKE_BINARY_DIR})
 
@@ -167,7 +167,11 @@ if(CMAKE_BUILD_TYPE STREQUAL "Profile")
     target_link_libraries(enyo PRIVATE ${PROFILER_LIBRARY})
 endif()
 
-target_include_directories(enyo PRIVATE ${CMAKE_BINARY_DIR} 3rdparty/Fathom/src)
+target_include_directories(enyo PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_BINARY_DIR}
+    3rdparty/Fathom/src)
 
 option(BUILD_TESTS "Build the gtest target" ON)
 if(BUILD_TESTS)
@@ -175,24 +179,24 @@ if(BUILD_TESTS)
 
     set(ENYO_TEST_SOURCES
         test/tests.cpp
-        fen.cpp
-        board.cpp
-        exepath.cpp
+        src/fen.cpp
+        src/board.cpp
+        src/exepath.cpp
         magic/magic.cpp
-        thread.cpp
-        uci.cpp
-        pgn.cpp
-        nnue.cpp
-        search.cpp
-        zobrist.cpp
-        probe.cpp
+        src/thread.cpp
+        src/uci.cpp
+        src/pgn.cpp
+        src/nnue.cpp
+        src/search.cpp
+        src/zobrist.cpp
+        src/probe.cpp
     )
 
     add_executable(test
         ${ENYO_TEST_SOURCES}
     )
     target_compile_definitions(test PRIVATE ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>)
-    target_include_directories(test PRIVATE ${CMAKE_SOURCE_DIR})
+    target_include_directories(test PRIVATE src ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
     target_link_libraries(test PRIVATE version_lib fmt::fmt-header-only GTest::gtest nlohmann_json::nlohmann_json)
 
     if(ENYO_USE_SYZYGY)

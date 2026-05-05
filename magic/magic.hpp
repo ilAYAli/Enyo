@@ -2,7 +2,7 @@
 #pragma once
 #include <cstdint>
 #include "magic_numbers.hpp"
-#include "../types.hpp"
+#include "types.hpp"
 
 namespace enyo {
 
