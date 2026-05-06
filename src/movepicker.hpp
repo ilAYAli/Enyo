@@ -39,6 +39,7 @@ enum MoveScores : int {
     KILLER1_SCORE       = 6'000'000,
     KILLER2_SCORE       = 5'000'000,
     COUNTER_SCORE       = 4'500'000,
+    CHECK_SCORE         = 4'250'000,
     CASTLE_SCORE        = 4'000'000,
     DRAW_SCORE          = 0,
     NEGATIVE_SCORE      = -10'000'000

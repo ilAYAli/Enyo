@@ -39,7 +39,7 @@ template <Color Us>
 bool low_material_check_net(Board const & b)
 {
     const int total_pieces = count_bits(b.color_bb[white] | b.color_bb[black]);
-    return total_pieces <= 8
+    return total_pieces <= 18
         && (b.pt_bb[Us][queen] | b.pt_bb[Us][rook]);
 }
 
@@ -152,7 +152,11 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         tt_value = tt::value_from(tthit->value, ss->ply);
         tt_move = tthit->move;
 
-        if (Node != NodeType::PV && tt_value != Value::none) {
+        const bool check_net_context = Us == white
+            ? low_material_check_net<white>(b)
+            : low_material_check_net<black>(b);
+
+        if (Node != NodeType::PV && tt_value != Value::none && !check_net_context) {
             if (tthit->flag == tt::type::ExactBound
             || (tthit->flag == tt::type::UpperBound && (tt_value <= alpha))
             || (tthit->flag == tt::type::LowerBound && (tt_value >= beta)))
@@ -317,7 +321,10 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         tt::ttable.hit++;
         tt_value = tt::value_from(tte->value, ss->ply);
         tt_move = tte->move;
-        if (tt_value != Value::none && tte->depth >= depth) {
+        const bool check_net_context = Us == white
+            ? low_material_check_net<white>(b)
+            : low_material_check_net<black>(b);
+        if (tt_value != Value::none && tte->depth >= depth && !check_net_context) {
             if (tte->flag == tt::type::ExactBound
             || (tte->flag == tt::type::UpperBound && tt_value <= alpha)
             || (tte->flag == tt::type::LowerBound && tt_value >= beta)) {
@@ -619,7 +626,7 @@ moves_loop:
         apply_move<Us, true, true>(b, move, &worker.si.nnue);
 
         // LMR: Late Move Reductions
-        if (depth >= 3 && !ss->in_check && !protect_quiet_check && ss->move_count > 3 + 2 * pv_node) {
+        if (depth >= 3 && !ss->in_check && ss->move_count > 3 + 2 * pv_node && !protect_quiet_check) {
             int R = lmr_reductions[depth][ss->move_count];
 
             R += !improving;
@@ -649,7 +656,22 @@ moves_loop:
                 return Value::draw;
             }
 
-            value = -negamax<Them, NodeType::NonPV>(new_depth, worker, ss + 1, -alpha -1, -alpha);
+            const bool check_net = Us == white
+                ? low_material_check_net<white>(b)
+                : low_material_check_net<black>(b);
+            const bool use_full_window = protect_quiet_check && check_net;
+            
+            if constexpr (false) {
+                if (ss->ply == 0 && use_full_window) {
+                    fmt::print("ROOT: move {} gives check in check-net, using full window\n", move);
+                }
+            }
+            
+            if (use_full_window && NT != NodeType::NonPV) {
+                value = -negamax<Them, NodeType::PV>(new_depth, worker, ss + 1, -beta, -alpha);
+            } else {
+                value = -negamax<Them, NodeType::NonPV>(new_depth, worker, ss + 1, -alpha -1, -alpha);
+            }
         }
 
         // PVS: Principal Variation Search
