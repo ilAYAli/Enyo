@@ -583,7 +583,7 @@ moves_loop:
         const bool is_capture = move.dst_piece() != no_piece_type;
         const bool protect_quiet_check =
             is_quiet
-            && low_material_check_net<Us>(b)
+            && !ss->in_check
             && move_gives_check<Us>(b, &worker.si.nnue, move);
 
         // Futility pruning: skip quiet moves at shallow depth when static
