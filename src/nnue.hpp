@@ -2,6 +2,7 @@
 //#include "board.hpp"
 #include "simd.h"
 #include "types.hpp"
+#include "nnue2.hpp"
 
 #include <array>
 #include <cstdint>
@@ -145,15 +146,41 @@ struct AccumulatorCache {
 };
 
 struct Net {
+    struct NNUE2EvalCacheEntry {
+        uint64_t hash {};
+        int32_t eval {};
+        uint8_t valid {};
+    };
+
+    static constexpr size_t nnue2_eval_cache_size = 1 << 17;
+
     size_t currentAccumulator = 0;
 
     std::array<Accumulator, 512> accumulator_stack;
+    std::vector<NNUE2::Accumulator> nnue2_accumulator_stack;
+    std::array<NNUE2::AccumulatorKingState, 2 * 2 * NNUE2::N_KING_BUCKETS> nnue2_refresh_table;
+    std::vector<NNUE2EvalCacheEntry> nnue2_eval_cache;
+    uint64_t nnue2_refresh_generation = 0;
+    uint64_t nnue2_eval_cache_generation = 0;
     AccumulatorCache cache;
 
     Net();
 
-    inline void push() {
-        accumulator_stack[currentAccumulator + 1].copy(accumulator_stack[currentAccumulator]);
+    inline void push(bool copy_active_nnue2 = true) {
+        if (NNUE2::enabled && NNUE2::INPUT_WEIGHTS != nullptr) {
+            if (copy_active_nnue2) {
+                std::memcpy(&nnue2_accumulator_stack[currentAccumulator + 1],
+                            &nnue2_accumulator_stack[currentAccumulator],
+                            sizeof(NNUE2::Accumulator));
+            }
+        } else {
+            accumulator_stack[currentAccumulator + 1].copy(accumulator_stack[currentAccumulator]);
+            if (NNUE2::INPUT_WEIGHTS != nullptr) {
+                std::memcpy(&nnue2_accumulator_stack[currentAccumulator + 1],
+                            &nnue2_accumulator_stack[currentAccumulator],
+                            sizeof(NNUE2::Accumulator));
+            }
+        }
         currentAccumulator++;
         assert(currentAccumulator < accumulator_stack.size()
             && "currentAccumulator >= accumulator_stack.size()");
@@ -167,6 +194,8 @@ struct Net {
     }
 
     void refresh(enyo::Board &board);
+    void refresh_nnue2(enyo::Board &board);
+    void refresh_nnue2(enyo::Board &board, enyo::Color side);
     void refresh_with_cache(enyo::Board &board);
     void update_cache(enyo::Board &board, enyo::square_t w_ksq, enyo::square_t b_ksq);
 
@@ -187,8 +216,29 @@ struct Net {
         enyo::square_t kingSquare_White,
         enyo::square_t kingSquare_Black
     );
+    void updateAccumulatorFromPrevious(
+        enyo::PieceType pieceType,
+        enyo::Color pieceColor,
+        enyo::square_t from_square,
+        enyo::square_t to_square,
+        enyo::PieceType capturedPieceType,
+        enyo::Color capturedPieceColor,
+        enyo::square_t kingSquare_White,
+        enyo::square_t kingSquare_Black
+    );
+    bool try_nnue2_eager_move(enyo::Move move,
+                              enyo::PieceType capturedPieceType,
+                              enyo::square_t capturedSquare,
+                              enyo::square_t kingSquare_White,
+                              enyo::square_t kingSquare_Black);
+    void mark_nnue2_lazy_move(enyo::Move move,
+                              enyo::square_t captured_square,
+                              enyo::square_t kingSquare_White,
+                              enyo::square_t kingSquare_Black);
+    void ensure_nnue2(enyo::Board &board);
 
     int Evaluate(enyo::Color side);
+    int Evaluate2(enyo::Board &board, enyo::Color side);
 
     void Benchmark();
 
@@ -214,5 +264,18 @@ struct Net {
 };
 
 void Init(const std::string &file_name);
+
+// Enumerate active feature indices for a given perspective (view).
+// Indices are in the same space the accumulator uses — each one is
+// in [0, INPUT_SIZE) and corresponds to a row of inputWeights. Order
+// matches Board's piece iteration: pop_lsb over color_bb[white] |
+// color_bb[black], which is H1-indexed and LSB-first.
+//
+// Used by the `eval dump` UCI extension and by the Python parity
+// test to verify that C++ and Python compute the same feature set
+// (this is where king-bucket / mirror bugs manifest).
+void feature_indices(const enyo::Board & board,
+                     enyo::Color view,
+                     std::vector<int> & out);
 
 } // namespace NNUE

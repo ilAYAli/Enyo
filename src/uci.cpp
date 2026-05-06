@@ -5,6 +5,7 @@
 #include <thread>
 #include <string>
 #include <limits>
+#include <cstdlib>
 #include <fmt/format.h>
 
 #include "config.hpp"
@@ -19,11 +20,25 @@
 #include "version.hpp"
 #include "eventlog.hpp"
 #include "probe.hpp"
+#include "nnue.hpp"
+#include "nnue2.hpp"
 
 using namespace enyo;
 using namespace eventlog;
 
 namespace {
+
+std::string expand_home_path(std::string path)
+{
+    if (path == "~" || path.starts_with("~/")) {
+        if (const char * home = std::getenv("HOME")) {
+            if (path.size() == 1)
+                return home;
+            return std::string(home) + path.substr(1);
+        }
+    }
+    return path;
+}
 
 [[maybe_unused]] std::vector<std::string> history_to_vec(const Board & b, int max_size = 0)
 {
@@ -201,6 +216,50 @@ int Uci::operator()(const std::string& command)
         } else if (token == "eval") {
             std::string side_token;
             iss >> side_token;
+
+            // Non-UCI extension: `eval dump` emits one JSONL object
+            // with the fields needed by the Python parity test.
+            // tools/nnue/enyo_nnue.py consumes this to verify that
+            // its feature-index and forward-pass implementations
+            // match C++ byte-for-byte.
+            //
+            // `eval` is always evaluated from side-to-move's
+            // perspective (the field "side" records which color that
+            // is), regardless of any trailing token — `dump` does not
+            // accept a side argument. This matches how NNUE is
+            // actually called during search.
+            if (side_token == "dump") {
+                SearchInfo si(b, 1);
+                const auto side = b.side;
+                const auto score = static_cast<Value>(si.nnue.Evaluate(side));
+
+                std::vector<int> w_feats, bl_feats;
+                NNUE::feature_indices(b, white, w_feats);
+                NNUE::feature_indices(b, black, bl_feats);
+
+                auto join = [](const std::vector<int> & v) {
+                    std::string s;
+                    for (size_t i = 0; i < v.size(); ++i) {
+                        if (i) s += ",";
+                        s += std::to_string(v[i]);
+                    }
+                    return s;
+                };
+
+                fmt::print(
+                    "{{\"fen\":\"{}\",\"side\":\"{}\","
+                    "\"eval\":{},"
+                    "\"white_features\":[{}],"
+                    "\"black_features\":[{}]}}\n",
+                    b.fen(),
+                    side == white ? "white" : "black",
+                    static_cast<int>(score),
+                    join(w_feats),
+                    join(bl_feats));
+                fflush(stdout);
+                return 0;
+            }
+
             SearchInfo si(b, 1);
             const auto side = side_token == "white"
                 ? white
@@ -215,6 +274,47 @@ int Uci::operator()(const std::string& command)
             si.nnue.refresh(si.board);
             const auto full = static_cast<Value>(si.nnue.Evaluate(b.side));
             fmt::print("nnue inc {} full {}\n", inc, full);
+        } else if (token == "eval2") {
+            // Phase 4 (arch port): evaluate the current board through
+            // the new 1024-hidden Berserk-compatible NNUE, fresh accumulators.
+            // Requires a .nn loaded via `setoption name nnue2_file value ...`
+            // or the `eval2 load` subcommand. Emits a one-line result.
+            std::string sub;
+            iss >> sub;
+            if (sub == "load") {
+                std::string path;
+                iss >> path;
+                const auto resolved = expand_home_path(path);
+                const bool ok = NNUE2::LoadNetwork(resolved.c_str());
+                if (ok)
+                    NNUE2::enabled = true;
+                fmt::print("eval2 load {} {}{}\n",
+                           ok ? "ok" : "fail", resolved,
+                           ok ? " (search routed through nnue2)" : "");
+                return 0;
+            }
+            if (sub == "enable") {
+                if (NNUE2::INPUT_WEIGHTS == nullptr) {
+                    fmt::print("eval2 enable failed: no network loaded\n");
+                    return 0;
+                }
+                NNUE2::enabled = true;
+                fmt::print("eval2 enable ok\n");
+                return 0;
+            }
+            if (sub == "disable") {
+                NNUE2::enabled = false;
+                fmt::print("eval2 disable ok (reverted to embedded net)\n");
+                return 0;
+            }
+            if (NNUE2::INPUT_WEIGHTS == nullptr) {
+                fmt::print("eval2 error: no network loaded; try "
+                           "'eval2 load <path>' first\n");
+                return 0;
+            }
+            const int cp = NNUE2::EvaluateFromScratch(b);
+            fmt::print("eval2 {} cp (stm={})\n", cp,
+                       b.side == white ? "white" : "black");
         } else if (token == "pgn") {
             pgn();
         } else if (token == "move") { // non-UCI command
@@ -297,6 +397,23 @@ void Uci::setoption(std::istringstream& iss)
     std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
     if (lower_name == "logfile" || lower_name == "debug log file")
         eventlog::reopen_logfile(cfgmgr.logfile, true);
+    if (lower_name == "nnue2_file") {
+        // Auto-load the Berserk-arch network when the UCI option is set.
+        // Empty string disables routing and falls back to the embedded
+        // 512-hidden net. Used by cutechess / lichess to select NNUE2
+        // without having to send a custom `eval2 load` command.
+        if (cfgmgr.nnue2_file.empty()) {
+            NNUE2::enabled = false;
+            ucilog("info string nnue2 disabled\n");
+        } else if (const auto path = expand_home_path(cfgmgr.nnue2_file);
+                   NNUE2::LoadNetwork(path.c_str())) {
+            NNUE2::enabled = true;
+            ucilog("info string nnue2 loaded from '{}'\n", path);
+        } else {
+            NNUE2::enabled = false;
+            ucilog("info string nnue2 LOAD FAILED for '{}'\n", cfgmgr.nnue2_file);
+        }
+    }
     if (lower_name == "hash") {
         // setoption previously just updated cfgmgr.hash_size; the TT
         // was allocated once at Transposition singleton construction
@@ -305,6 +422,15 @@ void Uci::setoption(std::istringstream& iss)
         // between go commands, so this is always idle-time safe.
         tt::ttable.set_size(cfgmgr.hash_size);
         ucilog("info string hash table resized to {} MB\n", cfgmgr.hash_size);
+    }
+    if (lower_name == "nnue_file") {
+        // Re-init the NNUE module-level weights from the new path.
+        // Any Net instances already constructed will see the new
+        // weights on next Evaluate()/refresh() since weights are
+        // module globals. Missing files silently fall through to the
+        // embedded default (see NNUE::Init).
+        NNUE::Init(cfgmgr.nnue_file);
+        ucilog("info string nnue_file set to '{}'\n", cfgmgr.nnue_file);
     }
 #if ENYO_USE_SYZYGY
     if (lower_name == "syzygypath" && !cfgmgr.syzygy_path.empty()) {

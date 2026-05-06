@@ -700,6 +700,109 @@ bool accumulators_match(const NNUE::Accumulator & a, const NNUE::Accumulator & b
     return true;
 }
 
+void ensure_nnue2_mock_weights() {
+    static std::vector<NNUE2::acc_t> weights(
+        static_cast<size_t>(NNUE2::N_FEATURES) * NNUE2::N_HIDDEN);
+    static std::vector<NNUE2::acc_t> biases(NNUE2::N_HIDDEN);
+    static bool initialized = false;
+
+    if (!initialized) {
+        for (size_t f = 0; f < static_cast<size_t>(NNUE2::N_FEATURES); ++f) {
+            for (size_t h = 0; h < static_cast<size_t>(NNUE2::N_HIDDEN); ++h) {
+                uint64_t x = (f + 0x9e3779b97f4a7c15ULL)
+                           ^ ((h + 0xbf58476d1ce4e5b9ULL) << 1);
+                x ^= x >> 30;
+                x *= 0xbf58476d1ce4e5b9ULL;
+                x ^= x >> 27;
+                x *= 0x94d049bb133111ebULL;
+                x ^= x >> 31;
+                const int v = static_cast<int>(x % 255) - 127;
+                weights[f * NNUE2::N_HIDDEN + h] = static_cast<NNUE2::acc_t>(v);
+            }
+        }
+        for (size_t h = 0; h < static_cast<size_t>(NNUE2::N_HIDDEN); ++h)
+            biases[h] = static_cast<NNUE2::acc_t>(static_cast<int>(h % 23) - 11);
+        initialized = true;
+    }
+
+    NNUE2::SetWeights(weights.data(), biases.data());
+}
+
+bool nnue2_accumulators_match(const NNUE2::Accumulator & a,
+                              const NNUE2::Accumulator & b) {
+    for (int view = 0; view < 2; ++view) {
+        for (size_t i = 0; i < static_cast<size_t>(NNUE2::N_HIDDEN); ++i)
+            if (a.values[view][i] != b.values[view][i]) return false;
+    }
+    return true;
+}
+
+void materialize_nnue2(Board & b, NNUE::Net & net) {
+    net.ensure_nnue2(b);
+}
+
+template <Color Us>
+void audit_nnue2_lazy_tree(Board & b, NNUE::Net & live, int depth)
+{
+    if (depth == 0) {
+        materialize_nnue2(b, live);
+        NNUE::Net fresh;
+        fresh.refresh(b);
+        EXPECT_TRUE(nnue2_accumulators_match(
+            live.nnue2_accumulator_stack[live.currentAccumulator],
+            fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
+            << "active NNUE2 lazy tree diverged; fen after: " << b.fen();
+        return;
+    }
+
+    auto moves = generate_legal_moves<Us>(b);
+    int searched = 0;
+    for (auto move : moves) {
+        apply_move<Us, true, true>(b, move, &live);
+        audit_nnue2_lazy_tree<~Us>(b, live, depth - 1);
+        revert_move<Us, true, true>(b, &live);
+        if (++searched >= 12)
+            break;
+    }
+}
+
+struct ScopedNNUE2Enabled {
+    bool previous;
+
+    ScopedNNUE2Enabled()
+        : previous(NNUE2::enabled)
+    {
+        NNUE2::enabled = true;
+    }
+
+    ~ScopedNNUE2Enabled() {
+        NNUE2::enabled = previous;
+    }
+};
+
+void expect_nnue2_matches_refresh(const char * label, Board & b, Move move, Color us) {
+    ensure_nnue2_mock_weights();
+
+    NNUE::Net live;
+    live.refresh(b);
+
+    if (us == white)
+        apply_move<white, true, true>(b, move, &live);
+    else
+        apply_move<black, true, true>(b, move, &live);
+    materialize_nnue2(b, live);
+
+    const auto after_live = live.nnue2_accumulator_stack[live.currentAccumulator];
+
+    NNUE::Net fresh;
+    fresh.refresh(b);
+    const auto after_fresh = fresh.nnue2_accumulator_stack[fresh.currentAccumulator];
+
+    EXPECT_TRUE(nnue2_accumulators_match(after_live, after_fresh))
+        << label << ": NNUE2 incremental accumulator diverged from full refresh after "
+        << fmt::format("{}", move) << " (fen after: " << b.fen() << ")";
+}
+
 template <Color Us>
 void expect_incremental_matches_refresh(const char * label, Board & b, Move move) {
     NNUE::Net live;
@@ -1021,6 +1124,343 @@ TEST(nnue_audit, opening_sequence) {
     }
 }
 #endif
+
+TEST(nnue2_audit, opening_sequence_matches_refresh) {
+    Board b{"startpos"};
+    ensure_nnue2_mock_weights();
+    NNUE::Net live;
+    live.refresh(b);
+
+    struct Step { Color us; PieceType pt; square_t from; square_t to; };
+    const Step seq[] = {
+        { white, pawn,   e2, e4 },
+        { black, pawn,   e7, e5 },
+        { white, knight, g1, f3 },
+        { black, knight, b8, c6 },
+        { white, bishop, f1, b5 },
+        { black, pawn,   a7, a6 },
+        { white, bishop, b5, a4 },
+        { black, knight, g8, f6 },
+    };
+
+    int step_idx = 0;
+    for (auto const & s : seq) {
+        Move m = (s.us == white)
+            ? resolve_move<white>(b, s.pt, s.from, s.to)
+            : resolve_move<black>(b, s.pt, s.from, s.to);
+
+        if (s.us == white)
+            apply_move<white, true, true>(b, m, &live);
+        else
+            apply_move<black, true, true>(b, m, &live);
+        materialize_nnue2(b, live);
+
+        NNUE::Net fresh;
+        fresh.refresh(b);
+        EXPECT_TRUE(nnue2_accumulators_match(
+            live.nnue2_accumulator_stack[live.currentAccumulator],
+            fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
+            << "NNUE2 opening_sequence step " << step_idx << " ("
+            << fmt::format("{}", m) << ") diverged; fen after: " << b.fen();
+        ++step_idx;
+    }
+}
+
+TEST(nnue2_audit, active_quiet_delta_matches_refresh) {
+    Board b{"startpos"};
+    ensure_nnue2_mock_weights();
+    ScopedNNUE2Enabled scoped;
+
+    NNUE::Net live;
+    live.refresh(b);
+
+    struct Step { Color us; PieceType pt; square_t from; square_t to; };
+    const Step seq[] = {
+        { white, pawn,   e2, e4 },
+        { black, pawn,   e7, e5 },
+        { white, knight, g1, f3 },
+        { black, knight, b8, c6 },
+        { white, bishop, f1, b5 },
+        { black, pawn,   a7, a6 },
+        { white, bishop, b5, a4 },
+        { black, knight, g8, f6 },
+    };
+
+    int step_idx = 0;
+    for (auto const & s : seq) {
+        Move m = s.us == white
+            ? resolve_move<white>(b, s.pt, s.from, s.to)
+            : resolve_move<black>(b, s.pt, s.from, s.to);
+
+        if (s.us == white)
+            apply_move<white, true, true>(b, m, &live);
+        else
+            apply_move<black, true, true>(b, m, &live);
+        materialize_nnue2(b, live);
+
+        NNUE::Net fresh;
+        fresh.refresh(b);
+        EXPECT_TRUE(nnue2_accumulators_match(
+            live.nnue2_accumulator_stack[live.currentAccumulator],
+            fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
+            << "active NNUE2 quiet step " << step_idx << " ("
+            << fmt::format("{}", m) << ") diverged; fen after: " << b.fen();
+        ++step_idx;
+    }
+}
+
+TEST(nnue2_audit, active_lazy_chain_matches_refresh) {
+    Board b{"startpos"};
+    ensure_nnue2_mock_weights();
+    ScopedNNUE2Enabled scoped;
+
+    NNUE::Net live;
+    live.refresh(b);
+
+    struct Step { Color us; PieceType pt; square_t from; square_t to; };
+    const Step seq[] = {
+        { white, pawn,   e2, e4 },
+        { black, pawn,   e7, e5 },
+        { white, knight, g1, f3 },
+        { black, knight, b8, c6 },
+        { white, bishop, f1, b5 },
+        { black, pawn,   a7, a6 },
+        { white, bishop, b5, a4 },
+        { black, knight, g8, f6 },
+    };
+
+    for (auto const & s : seq) {
+        Move m = s.us == white
+            ? resolve_move<white>(b, s.pt, s.from, s.to)
+            : resolve_move<black>(b, s.pt, s.from, s.to);
+
+        if (s.us == white)
+            apply_move<white, true, true>(b, m, &live);
+        else
+            apply_move<black, true, true>(b, m, &live);
+    }
+    materialize_nnue2(b, live);
+
+    NNUE::Net fresh;
+    fresh.refresh(b);
+    EXPECT_TRUE(nnue2_accumulators_match(
+        live.nnue2_accumulator_stack[live.currentAccumulator],
+        fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
+        << "active NNUE2 lazy chain diverged; fen after: " << b.fen();
+}
+
+TEST(nnue2_audit, active_lazy_tree_matches_refresh) {
+    Board b{"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"};
+    ensure_nnue2_mock_weights();
+    ScopedNNUE2Enabled scoped;
+
+    NNUE::Net live;
+    live.refresh(b);
+    audit_nnue2_lazy_tree<white>(b, live, 3);
+}
+
+TEST(nnue2_audit, active_kiwipete_pv_with_castle_matches_refresh) {
+    Board b{"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"};
+    ensure_nnue2_mock_weights();
+    ScopedNNUE2Enabled scoped;
+
+    NNUE::Net live;
+    live.refresh(b);
+
+    const std::string moves =
+        "e2a6 b4c3 d2c3 e6d5 e4d5 h3g2 f3g2 f6d5 e1g1";
+    std::istringstream iss{moves};
+    std::string move_str;
+    while (iss >> move_str) {
+        const std::string src_str{move_str.substr(0, 2)};
+        const std::string dst_str{move_str.substr(2, 2)};
+        const auto src = str2sq(src_str.c_str());
+        const auto dst = str2sq(dst_str.c_str());
+        const auto pt = b.pt_mb[src];
+        if (b.side == white) {
+            auto move = resolve_move<white>(b, pt, src, dst);
+            apply_move<white, true, true>(b, move, &live);
+        } else {
+            auto move = resolve_move<black>(b, pt, src, dst);
+            apply_move<black, true, true>(b, move, &live);
+        }
+    }
+
+    materialize_nnue2(b, live);
+    NNUE::Net fresh;
+    fresh.refresh(b);
+    EXPECT_TRUE(nnue2_accumulators_match(
+        live.nnue2_accumulator_stack[live.currentAccumulator],
+        fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
+        << "active NNUE2 Kiwipete PV diverged; fen after: " << b.fen();
+}
+
+TEST(nnue2_audit, active_promotion_capture_king_chain_matches_refresh) {
+    ensure_nnue2_mock_weights();
+    ScopedNNUE2Enabled scoped;
+
+    const std::vector<std::string> moves = {
+        "e2a6", "b4c3", "b2c3", "h3g2", "d5e6",
+        "g2h1n", "e6f7", "e7f7", "e5f7", "e8f7",
+    };
+
+    for (size_t prefix = 1; prefix <= moves.size(); ++prefix) {
+        Board b{"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"};
+        NNUE::Net live;
+        live.refresh(b);
+
+        for (size_t i = 0; i < prefix; ++i) {
+            const auto & move_str = moves[i];
+            const std::string src_str{move_str.substr(0, 2)};
+            const std::string dst_str{move_str.substr(2, 2)};
+            const auto src = str2sq(src_str.c_str());
+            const auto dst = str2sq(dst_str.c_str());
+            const auto pt = b.pt_mb[src];
+            if (b.side == white) {
+                auto move = resolve_move<white>(b, pt, src, dst);
+                apply_move<white, true, true>(b, move, &live);
+            } else {
+                auto move = resolve_move<black>(b, pt, src, dst);
+                apply_move<black, true, true>(b, move, &live);
+            }
+        }
+
+        materialize_nnue2(b, live);
+        NNUE::Net fresh;
+        fresh.refresh(b);
+        EXPECT_TRUE(nnue2_accumulators_match(
+            live.nnue2_accumulator_stack[live.currentAccumulator],
+            fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
+            << "active NNUE2 promotion/king chain diverged at prefix "
+            << prefix << "; fen after: " << b.fen();
+    }
+}
+
+TEST(nnue2_audit, active_nonrefreshing_king_loop_matches_refresh) {
+    Board b{"8/8/2k5/8/8/5Q2/1pq2PKP/8 b - - 13 60"};
+    ensure_nnue2_mock_weights();
+    ScopedNNUE2Enabled scoped;
+
+    NNUE::Net live;
+    live.refresh(b);
+
+    const std::vector<std::string> moves = {
+        "c6c5", "f3e3", "c5c6",
+    };
+
+    for (const auto & move_str : moves) {
+        const std::string src_str{move_str.substr(0, 2)};
+        const std::string dst_str{move_str.substr(2, 2)};
+        const auto src = str2sq(src_str.c_str());
+        const auto dst = str2sq(dst_str.c_str());
+        const auto pt = b.pt_mb[src];
+        if (b.side == white) {
+            auto move = resolve_move<white>(b, pt, src, dst);
+            apply_move<white, true, true>(b, move, &live);
+        } else {
+            auto move = resolve_move<black>(b, pt, src, dst);
+            apply_move<black, true, true>(b, move, &live);
+        }
+    }
+
+    materialize_nnue2(b, live);
+    NNUE::Net fresh;
+    fresh.refresh(b);
+    EXPECT_TRUE(nnue2_accumulators_match(
+        live.nnue2_accumulator_stack[live.currentAccumulator],
+        fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
+        << "active NNUE2 non-refreshing king loop diverged; fen after: " << b.fen();
+}
+
+TEST(nnue2_audit, active_quiet_sibling_matches_refresh) {
+    Board b{"startpos"};
+    ensure_nnue2_mock_weights();
+    ScopedNNUE2Enabled scoped;
+
+    NNUE::Net live;
+    live.refresh(b);
+
+    auto e2e4 = resolve_move<white>(b, pawn, e2, e4);
+    apply_move<white, true, true>(b, e2e4, &live);
+    revert_move<white, true, true>(b, &live);
+
+    auto d2d4 = resolve_move<white>(b, pawn, d2, d4);
+    apply_move<white, true, true>(b, d2d4, &live);
+    materialize_nnue2(b, live);
+
+    NNUE::Net fresh;
+    fresh.refresh(b);
+    EXPECT_TRUE(nnue2_accumulators_match(
+        live.nnue2_accumulator_stack[live.currentAccumulator],
+        fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
+        << "active NNUE2 sibling quiet move diverged; fen after: " << b.fen();
+}
+
+TEST(nnue2_audit, active_generic_capture_matches_refresh) {
+    Board b{"rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2"};
+    ensure_nnue2_mock_weights();
+    ScopedNNUE2Enabled scoped;
+
+    NNUE::Net live;
+    live.refresh(b);
+
+    auto move = resolve_move<white>(b, pawn, e4, d5);
+    apply_move<white, true, true>(b, move, &live);
+    materialize_nnue2(b, live);
+
+    NNUE::Net fresh;
+    fresh.refresh(b);
+    EXPECT_TRUE(nnue2_accumulators_match(
+        live.nnue2_accumulator_stack[live.currentAccumulator],
+        fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
+        << "active NNUE2 generic capture diverged; fen after: " << b.fen();
+}
+
+TEST(nnue2_audit, special_moves_match_refresh) {
+    ScopedNNUE2Enabled scoped;
+
+    {
+        Board b{"rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3"};
+        auto moves = generate_legal_moves<white>(b);
+        Move ep{};
+        for (auto m : moves) {
+            if (m.flags() == Move::Flags::enpassant) { ep = m; break; }
+        }
+        ASSERT_TRUE(ep);
+        expect_nnue2_matches_refresh("enpassant", b, ep, white);
+    }
+    {
+        Board b{"1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1"};
+        auto moves = generate_legal_moves<white>(b);
+        Move promo{};
+        for (auto m : moves) {
+            if (m.flags() == Move::Flags::promote
+             && m.src_sq() == a7 && m.dst_sq() == b8
+             && m.promo_piece() == queen) {
+                promo = m; break;
+            }
+        }
+        ASSERT_TRUE(promo);
+        expect_nnue2_matches_refresh("promotion_with_capture", b, promo, white);
+    }
+    {
+        Board b{"r3k2r/pppqppbp/2np1np1/8/8/2NP1NP1/PPPQPPBP/R3K2R w KQkq - 0 1"};
+        auto moves = generate_legal_moves<white>(b);
+        Move castle{};
+        for (auto m : moves) {
+            if (m.flags() == Move::Flags::castle && m.dst_sq() < m.src_sq()) {
+                castle = m; break;
+            }
+        }
+        ASSERT_TRUE(castle);
+        expect_nnue2_matches_refresh("castle_kingside", b, castle, white);
+    }
+    {
+        Board b{"4k3/8/8/8/8/8/8/R3K3 w Q - 0 1"};
+        auto move = resolve_move<white>(b, king, e1, e2);
+        expect_nnue2_matches_refresh("king_move_non_castle", b, move, white);
+    }
+}
 
 // Fathom/Syzygy expects bitboards in A1=0 layout: a1=bit0, h1=bit7, a8=bit56.
 // Enyo internally uses H1=0. board2pos() applies bbconv()/sqconv() to bridge

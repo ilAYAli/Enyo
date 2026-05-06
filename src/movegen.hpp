@@ -150,8 +150,12 @@ static inline constexpr void apply_promotion(Board & b, enyo::Move move, NNUE::N
 
     clear_captured_home_rook_right<Them, UpdateZobrist>(b, dst_piece, dst_sq);
 
-    const square_t w_ksq = lsb(b.pt_bb[white][king]);
-    const square_t b_ksq = lsb(b.pt_bb[black][king]);
+    square_t w_ksq = nosquare;
+    square_t b_ksq = nosquare;
+    if constexpr (UpdateNNUE) {
+        w_ksq = lsb(b.pt_bb[white][king]);
+        b_ksq = lsb(b.pt_bb[black][king]);
+    }
     clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, src_sq, nnue, w_ksq, b_ksq);
     if (dst_piece != no_piece_type)
         clr_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst_sq, nnue, w_ksq, b_ksq);
@@ -170,8 +174,12 @@ static inline constexpr void revert_promotion(Board & b, Undo const& undo, NNUE:
     const auto dst_piece = undo.move.dst_piece();
     const auto dst_sq = undo.move.dst_sq();
 
-    const square_t w_ksq = lsb(b.pt_bb[white][king]);
-    const square_t b_ksq = lsb(b.pt_bb[black][king]);
+    square_t w_ksq = nosquare;
+    square_t b_ksq = nosquare;
+    if constexpr (UpdateNNUE) {
+        w_ksq = lsb(b.pt_bb[white][king]);
+        b_ksq = lsb(b.pt_bb[black][king]);
+    }
     clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, undo.move.promo_piece(), dst_sq, nnue, w_ksq, b_ksq);
     if (dst_piece != no_piece_type)
         set_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst_sq, nnue, w_ksq, b_ksq);
@@ -196,8 +204,12 @@ static constexpr bool apply_enpassant(Board & b, enyo::Move move, unsigned enpas
     if constexpr (false)
         fmt::print("[+] apply enpassant: {}{}, target: {}\n", sq2str(src), sq2str(dst), sq2str(target));
 
-    const square_t w_ksq = lsb(b.pt_bb[white][king]);
-    const square_t b_ksq = lsb(b.pt_bb[black][king]);
+    square_t w_ksq = nosquare;
+    square_t b_ksq = nosquare;
+    if constexpr (UpdateNNUE) {
+        w_ksq = lsb(b.pt_bb[white][king]);
+        b_ksq = lsb(b.pt_bb[black][king]);
+    }
     clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, src, nnue, w_ksq, b_ksq);
     clr_piece<Them, UpdateZobrist, UpdateNNUE>(b, pawn, target, nnue, w_ksq, b_ksq);
     set_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, dst, nnue, w_ksq, b_ksq);
@@ -219,8 +231,12 @@ static constexpr bool revert_enpassant(Board & b, Undo const & undo, NNUE::Net *
         fmt::print("[-] revert enpassant: {}, target: {}\n",
             move, sq2str(target));
 
-    const square_t w_ksq = lsb(b.pt_bb[white][king]);
-    const square_t b_ksq = lsb(b.pt_bb[black][king]);
+    square_t w_ksq = nosquare;
+    square_t b_ksq = nosquare;
+    if constexpr (UpdateNNUE) {
+        w_ksq = lsb(b.pt_bb[white][king]);
+        b_ksq = lsb(b.pt_bb[black][king]);
+    }
     clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, dst, nnue, w_ksq, b_ksq);
     set_piece<Them, UpdateZobrist, UpdateNNUE>(b, pawn, target, nnue, w_ksq, b_ksq);
     set_piece<Us, UpdateZobrist, UpdateNNUE>(b, pawn, src, nnue, w_ksq, b_ksq);
@@ -267,8 +283,12 @@ inline void revert_castle(Board & b, Undo const & undo, NNUE::Net * nnue)
         }
     };
 
-    const square_t w_ksq = lsb(b.pt_bb[white][king]);
-    const square_t b_ksq = lsb(b.pt_bb[black][king]);
+    square_t w_ksq = nosquare;
+    square_t b_ksq = nosquare;
+    if constexpr (UpdateNNUE) {
+        w_ksq = lsb(b.pt_bb[white][king]);
+        b_ksq = lsb(b.pt_bb[black][king]);
+    }
     if constexpr (Us == white) {
         // ----[ white kingside ]-----------------------------------------------
         if constexpr (Side == CastleSide::Kingside) {
@@ -314,8 +334,12 @@ inline void revert_castle(Board & b, Undo const & undo, NNUE::Net * nnue)
 template <Color Us, CastleSide Side, bool UpdateZobrist, bool UpdateNNUE>
 inline void apply_castle(Board & b, NNUE::Net * nnue)
 {
-    const square_t w_ksq = lsb(b.pt_bb[white][king]);
-    const square_t b_ksq = lsb(b.pt_bb[black][king]);
+    square_t w_ksq = nosquare;
+    square_t b_ksq = nosquare;
+    if constexpr (UpdateNNUE) {
+        w_ksq = lsb(b.pt_bb[white][king]);
+        b_ksq = lsb(b.pt_bb[black][king]);
+    }
     // Zobrist indices: [0]=white_ooo, [1]=white_oo, [2]=black_ooo, [3]=black_oo.
     // For each side, clear both castling rights (own side guaranteed set; opposite
     // side must be checked since it may have been cleared earlier by a rook
@@ -658,8 +682,22 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
 
     clear_captured_home_rook_right<Them, UpdateZobrist>(b, dst_piece, dst);
 
-    const square_t w_ksq = lsb(b.pt_bb[white][king]);
-    const square_t b_ksq = lsb(b.pt_bb[black][king]);
+    square_t w_ksq = nosquare;
+    square_t b_ksq = nosquare;
+    if constexpr (UpdateNNUE) {
+        w_ksq = lsb(b.pt_bb[white][king]);
+        b_ksq = lsb(b.pt_bb[black][king]);
+    }
+    if constexpr (UpdateNNUE) {
+        if (NNUE2::enabled && NNUE2::INPUT_WEIGHTS != nullptr) {
+            clr_piece<Us, UpdateZobrist, false>(b, src_piece, src, nnue, w_ksq, b_ksq);
+            if (dst_piece != no_piece_type)
+                clr_piece<Them, UpdateZobrist, false>(b, dst_piece, dst, nnue, w_ksq, b_ksq);
+            set_piece<Us, UpdateZobrist, false>(b, src_piece, dst, nnue, w_ksq, b_ksq);
+            nnue->mark_nnue2_lazy_move(mv, nosquare, w_ksq, b_ksq);
+            return true;
+        }
+    }
     clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, src_piece, src, nnue, w_ksq, b_ksq);
     if (dst_piece != no_piece_type)
         clr_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst, nnue, w_ksq, b_ksq);
@@ -726,8 +764,12 @@ inline void revert_move_generic(Board & b, Undo const & undo, NNUE::Net * nnue) 
     const auto src = undo.move.src_sq();
     const auto dst = undo.move.dst_sq();
 
-    const square_t w_ksq = lsb(b.pt_bb[white][king]);
-    const square_t b_ksq = lsb(b.pt_bb[black][king]);
+    square_t w_ksq = nosquare;
+    square_t b_ksq = nosquare;
+    if constexpr (UpdateNNUE) {
+        w_ksq = lsb(b.pt_bb[white][king]);
+        b_ksq = lsb(b.pt_bb[black][king]);
+    }
     clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, src_piece, dst, nnue, w_ksq, b_ksq);
     if (dst_piece != no_piece_type)
         set_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst, nnue, w_ksq, b_ksq);
@@ -773,14 +815,16 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
         fmt::print("[{}] {}<{}>: {} fen: {} side: {}, hash: {:016X}\n",
             b.histply, __func__, Us, move, b.fen(), b.side, b.hash);
 
-    if constexpr (UpdateNNUE) {
-        assert(nnue && "apply_move: nnue is null");
-        nnue->push();
-    }
-
     const auto src_piece = move.src_piece();
     const auto dst_piece = move.dst_piece();
     assert((src_piece != PieceType::no_piece_type) && "error, source position not specified");
+
+    bool nnue2_active = false;
+    if constexpr (UpdateNNUE) {
+        assert(nnue && "apply_move: nnue is null");
+        nnue2_active = NNUE2::enabled && NNUE2::INPUT_WEIGHTS != nullptr;
+        nnue->push(!nnue2_active);
+    }
 
     auto & undo = b.history[b.histply++] = Undo{
         .move = move,
@@ -796,10 +840,28 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
 
     switch (move.flags()) {
         case Move::Flags::castle:
-            if (move.dst_sq() < move.src_sq())
-                apply_castle<Us, CastleSide::Kingside, UpdateZobrist, UpdateNNUE>(b, nnue);
-            else
-                apply_castle<Us, CastleSide::Queenside, UpdateZobrist, UpdateNNUE>(b, nnue);
+            if constexpr (UpdateNNUE) {
+                if (nnue2_active) {
+                    const square_t nnue2_w_ksq = lsb(b.pt_bb[white][king]);
+                    const square_t nnue2_b_ksq = lsb(b.pt_bb[black][king]);
+                    if (move.dst_sq() < move.src_sq())
+                        apply_castle<Us, CastleSide::Kingside, UpdateZobrist, false>(b, nnue);
+                    else
+                        apply_castle<Us, CastleSide::Queenside, UpdateZobrist, false>(b, nnue);
+                    nnue->mark_nnue2_lazy_move(
+                        move, nosquare, nnue2_w_ksq, nnue2_b_ksq);
+                } else {
+                    if (move.dst_sq() < move.src_sq())
+                        apply_castle<Us, CastleSide::Kingside, UpdateZobrist, UpdateNNUE>(b, nnue);
+                    else
+                        apply_castle<Us, CastleSide::Queenside, UpdateZobrist, UpdateNNUE>(b, nnue);
+                }
+            } else {
+                if (move.dst_sq() < move.src_sq())
+                    apply_castle<Us, CastleSide::Kingside, UpdateZobrist, UpdateNNUE>(b, nnue);
+                else
+                    apply_castle<Us, CastleSide::Queenside, UpdateZobrist, UpdateNNUE>(b, nnue);
+            }
             // Castling is neither a capture nor a pawn move, so the
             // FIDE 50-move counter is not reset — it increments like any
             // other quiet king/rook move. Zeroing it here also truncated
@@ -809,11 +871,40 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
             b.half_moves++;
             break;
         case Move::Flags::promote:
-            apply_promotion<Us, UpdateZobrist, UpdateNNUE>(b, move, nnue);
+            if constexpr (UpdateNNUE) {
+                if (nnue2_active) {
+                    const square_t nnue2_w_ksq = lsb(b.pt_bb[white][king]);
+                    const square_t nnue2_b_ksq = lsb(b.pt_bb[black][king]);
+                    apply_promotion<Us, UpdateZobrist, false>(b, move, nnue);
+                    nnue->mark_nnue2_lazy_move(
+                        move, nosquare, nnue2_w_ksq, nnue2_b_ksq);
+                } else {
+                    apply_promotion<Us, UpdateZobrist, UpdateNNUE>(b, move, nnue);
+                }
+            } else {
+                apply_promotion<Us, UpdateZobrist, UpdateNNUE>(b, move, nnue);
+            }
             reset_halfmove_clock(b);
             break;
         case Move::Flags::enpassant:
-            apply_enpassant<Us, UpdateZobrist, UpdateNNUE>(b, move, undo.gamestate.enpassant_square, nnue);
+            if constexpr (UpdateNNUE) {
+                if (nnue2_active) {
+                    const square_t nnue2_w_ksq = lsb(b.pt_bb[white][king]);
+                    const square_t nnue2_b_ksq = lsb(b.pt_bb[black][king]);
+                    const square_t target = static_cast<square_t>(
+                        undo.gamestate.enpassant_square + (Us == black ? 8 : -8U));
+                    apply_enpassant<Us, UpdateZobrist, false>(
+                        b, move, undo.gamestate.enpassant_square, nnue);
+                    nnue->mark_nnue2_lazy_move(
+                        move, target, nnue2_w_ksq, nnue2_b_ksq);
+                } else {
+                    apply_enpassant<Us, UpdateZobrist, UpdateNNUE>(
+                        b, move, undo.gamestate.enpassant_square, nnue);
+                }
+            } else {
+                apply_enpassant<Us, UpdateZobrist, UpdateNNUE>(
+                    b, move, undo.gamestate.enpassant_square, nnue);
+            }
             reset_halfmove_clock(b);
             break;
         default:
