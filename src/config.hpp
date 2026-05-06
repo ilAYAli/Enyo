@@ -107,6 +107,7 @@ public:
     bool use_tt_upper_cutoff = false;
     bool use_lmr            = false;
     std::string nnue_file   = "nn-eba324f53044.nnue";
+    std::string nnue2_file  = "";  // empty = disabled (use embedded nnue)
     std::string logfile     = "/tmp/enyo.log";
     std::string syzygy_path = "";
 
@@ -137,6 +138,7 @@ public:
             concat("use_tt_upper_cutoff", "check", use_tt_upper_cutoff) +
             //concat("UCI_Chess960",  "check", use_chess_960) +
             concat("nnue_file",     "string", nnue_file) +
+            concat("nnue2_file",    "string", nnue2_file) +
             concat("logfile",       "string", logfile) +
             concat("SyzygyPath",    "string", syzygy_path) +
             concat("use_lmr",       "check", use_lmr);
@@ -164,6 +166,8 @@ public:
             use_tt_upper_cutoff = (value == "true");
         else if (lc == "nnue_file")
             nnue_file = value;
+        else if (lc == "nnue2_file")
+            nnue2_file = value;
         else if (lc == "logfile" || lc == "debug log file")
             logfile = value;
         else if (lc == "syzygypath")

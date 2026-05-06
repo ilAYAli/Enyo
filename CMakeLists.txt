@@ -114,6 +114,8 @@ set(ENYO_SOURCES
     src/uci.cpp
     src/pgn.cpp
     src/nnue.cpp
+    src/nnue2.cpp
+    src/nnue2_board.cpp
     src/search.cpp
     src/zobrist.cpp
     src/probe.cpp
@@ -187,6 +189,8 @@ if(BUILD_TESTS)
         src/uci.cpp
         src/pgn.cpp
         src/nnue.cpp
+        src/nnue2.cpp
+        src/nnue2_board.cpp
         src/search.cpp
         src/zobrist.cpp
         src/probe.cpp

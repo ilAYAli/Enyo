@@ -8,6 +8,7 @@
 #include "fmt/format.h"
 
 #include "nnue.hpp"
+#include "nnue2.hpp"
 #include "precalc/knight_attacks.hpp"
 #include "probe.hpp"
 #include "types.hpp"
@@ -93,6 +94,12 @@ template <Color Us, bool UseNNUE = true>
 Value evaluate(Board & b, NNUE::Net * nnue)
 {
     if constexpr (UseNNUE) {
+        if (NNUE2::enabled && NNUE2::INPUT_WEIGHTS != nullptr) {
+            auto const score = static_cast<Value>(nnue->Evaluate2(b, Us));
+            if constexpr (Constexpr::debug_eval)
+                fmt::print("<{}> move: {}, score2: {}\n", Us, b.history[b.histply -1].move, score);
+            return score;
+        }
         auto const score = static_cast<Value>(nnue->Evaluate(Us));
         if constexpr (Constexpr::debug_eval)
             fmt::print("<{}> move: {}, score: {}\n", Us, b.history[b.histply -1].move, score);
