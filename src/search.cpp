@@ -497,8 +497,47 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         }
     }
 
-    // todo: Internal iterative reductions
-    // todo: ProbCut
+    if constexpr (Constexpr::use_probcut) {
+        constexpr Value probcut_margin = static_cast<Value>(150);
+        constexpr int probcut_reduction = 4;
+        const Value probcut_beta = beta + probcut_margin;
+
+        if (NT == NodeType::NonPV
+            && depth >= 5
+            && !ss->in_check
+            && ss->eval + probcut_margin >= beta
+            && std::abs(beta) < Constexpr::mate_value - MAX_PLY) {
+            auto probcut_lm = generate_legal_moves<Us>(b);
+            PrioritizedMoves probcut_mp;
+            prioritize_moves<Us, QSEARCH>(
+                probcut_mp, worker, probcut_lm, tt_move, depth);
+
+            for (const auto move : probcut_mp) {
+                if ((si.nodes & 1023U) == 0 && worker.time_expired())
+                    return Value::draw;
+
+                apply_move<Us, true, true>(b, move, &worker.si.nnue);
+                Value probcut_value = -qsearch<Them, NodeType::NonPV>(
+                    b, worker, ss + 1, 0, -probcut_beta, -probcut_beta + 1);
+
+                if (probcut_value >= probcut_beta) {
+                    probcut_value = -negamax<Them, NodeType::NonPV>(
+                        depth - probcut_reduction,
+                        worker,
+                        ss + 1,
+                        -probcut_beta,
+                        -probcut_beta + 1);
+                }
+
+                revert_move<Us, true, true>(b, &worker.si.nnue);
+                if (thread::pool.stop.load(std::memory_order_relaxed))
+                    return Value::draw;
+
+                if (probcut_value >= probcut_beta)
+                    return probcut_value;
+            }
+        }
+    }
 
 moves_loop:
     auto const lm = (NT == NodeType::Root && !si.searchmoves.empty())

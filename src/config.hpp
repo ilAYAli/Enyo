@@ -39,6 +39,7 @@ namespace Constexpr {
     static constexpr bool use_nullmove               = true; // +195.2 Elo
     static constexpr bool use_aspiration_window      = true; // +274.6 Elo
     static constexpr bool use_razoring               = true; // +135.5 Elo
+    static constexpr bool use_probcut                = true;
     static constexpr bool use_tt                     = true;
     // Experimental: gate the qsearch TT-cut only. Probe still happens (tt_move
     // is still used for ordering), but the early return on flag match is
