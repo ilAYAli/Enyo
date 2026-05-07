@@ -191,6 +191,11 @@ int main(int argc, char **argv)
     // like "default.net" won't exist in the cwd and silently fall
     // through — which is the right behavior.
     NNUE::Init(cfgmgr.nnue_file);
+    if (!cfgmgr.nnue2_file.empty())
+        uci(fmt::format("setoption name nnue2_file value {}", cfgmgr.nnue2_file));
+
+    for (const auto& [name, value] : cfgmgr.configured_uci_options())
+        uci(fmt::format("setoption name {} value {}", name, value));
 
 #if ENYO_USE_SYZYGY
     if (!cfgmgr.syzygy_path.empty()) {

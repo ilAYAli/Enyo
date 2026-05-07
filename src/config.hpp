@@ -6,6 +6,8 @@
 #include <string>
 #include <fstream>
 #include <filesystem>
+#include <utility>
+#include <vector>
 #include <nlohmann/json.hpp>
 #include "fmt/format.h"
 
@@ -111,6 +113,7 @@ public:
     std::string nnue2_file  = "";  // empty = disabled (use embedded nnue)
     std::string logfile     = "/tmp/enyo.log";
     std::string syzygy_path = "";
+    std::vector<std::pair<std::string, std::string>> uci_options;
 
     static ConfigManager& instance() {
         static ConfigManager instance;
@@ -180,6 +183,11 @@ public:
         return found;
     }
 
+    const std::vector<std::pair<std::string, std::string>>& configured_uci_options() const
+    {
+        return uci_options;
+    }
+
 private:
     // Config is nested under "constants" / "toggles". Any field may be absent,
     // in which case the member's in-class default is kept — so a user's
@@ -193,6 +201,7 @@ private:
             num_threads = c.value("threads",   num_threads);
             hash_size   = c.value("Hash",      hash_size);
             nnue_file   = c.value("nnue_file", nnue_file);
+            nnue2_file  = c.value("nnue2_file", nnue2_file);
             logfile     = c.value("logfile",   logfile);
             syzygy_path = c.value("syzygy_path", syzygy_path);
 
@@ -201,8 +210,47 @@ private:
             use_tt_lower_cutoff = t.value("use_tt_lower_cutoff", use_tt_lower_cutoff);
             use_tt_upper_cutoff = t.value("use_tt_upper_cutoff", use_tt_upper_cutoff);
             use_lmr             = t.value("use_lmr",             use_lmr);
+
+            uci_options.clear();
+            if (option.contains("uci_options"))
+                load_uci_options(option["uci_options"]);
         } catch (const json::exception& e) {
             fmt::print("Error: Unable to parse config JSON: '{}'\n", e.what());
+        }
+    }
+
+    static std::string json_value_to_string(const json& value)
+    {
+        if (value.is_string())
+            return value.get<std::string>();
+        if (value.is_boolean())
+            return value.get<bool>() ? "true" : "false";
+        if (value.is_number_integer())
+            return fmt::format("{}", value.get<int64_t>());
+        if (value.is_number_unsigned())
+            return fmt::format("{}", value.get<uint64_t>());
+        if (value.is_number_float())
+            return fmt::format("{}", value.get<double>());
+        if (value.is_null())
+            return "";
+        return value.dump();
+    }
+
+    void load_uci_options(const json& options)
+    {
+        if (options.is_object()) {
+            for (auto it = options.begin(); it != options.end(); ++it)
+                uci_options.emplace_back(it.key(), json_value_to_string(it.value()));
+            return;
+        }
+        if (options.is_array()) {
+            for (const auto& entry : options) {
+                if (!entry.is_object() || !entry.contains("name"))
+                    continue;
+                uci_options.emplace_back(
+                    entry.value("name", ""),
+                    json_value_to_string(entry.value("value", json{})));
+            }
         }
     }
 
