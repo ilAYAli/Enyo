@@ -104,23 +104,20 @@ add_compile_definitions(EVAL_FILE="${CMAKE_CURRENT_SOURCE_DIR}/nnue/default.net"
 find_package(fmt REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
-set(ENYO_CHESS_SOURCES
+set(ENYO_SOURCES
+    src/main.cpp
     src/fen.cpp
     src/board.cpp
-    magic/magic.cpp
-    src/pgn.cpp
-    src/zobrist.cpp
-)
-
-set(ENYO_ENGINE_SOURCES
-    src/main.cpp
     src/exepath.cpp
+    magic/magic.cpp
     src/thread.cpp
     src/uci.cpp
+    src/pgn.cpp
     src/nnue.cpp
     src/nnue2.cpp
     src/nnue2_board.cpp
     src/search.cpp
+    src/zobrist.cpp
     src/probe.cpp
 )
 
@@ -157,26 +154,12 @@ add_library(version_lib OBJECT src/version.cpp)
 add_dependencies(version_lib update_version_info)
 target_include_directories(version_lib PRIVATE ${CMAKE_BINARY_DIR})
 
-add_library(enyo_chess STATIC
-    ${ENYO_CHESS_SOURCES}
-)
-
-target_include_directories(enyo_chess PUBLIC
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}
-)
-
-target_link_libraries(enyo_chess PUBLIC
-    fmt::fmt-header-only
-    nlohmann_json::nlohmann_json
-)
-
 add_executable(enyo
-    ${ENYO_ENGINE_SOURCES}
+    ${ENYO_SOURCES}
 )
 
 target_compile_definitions(enyo PRIVATE ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>)
-target_link_libraries(enyo PRIVATE enyo_chess version_lib)
+target_link_libraries(enyo PRIVATE version_lib fmt::fmt-header-only nlohmann_json::nlohmann_json)
 
 if(ENYO_USE_SYZYGY)
     target_link_libraries(enyo PRIVATE fathom_lib)
@@ -187,6 +170,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Profile")
 endif()
 
 target_include_directories(enyo PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}
     ${CMAKE_BINARY_DIR}
     3rdparty/Fathom/src)
 
@@ -196,13 +181,18 @@ if(BUILD_TESTS)
 
     set(ENYO_TEST_SOURCES
         test/tests.cpp
+        src/fen.cpp
+        src/board.cpp
         src/exepath.cpp
+        magic/magic.cpp
         src/thread.cpp
         src/uci.cpp
+        src/pgn.cpp
         src/nnue.cpp
         src/nnue2.cpp
         src/nnue2_board.cpp
         src/search.cpp
+        src/zobrist.cpp
         src/probe.cpp
     )
 
@@ -210,8 +200,8 @@ if(BUILD_TESTS)
         ${ENYO_TEST_SOURCES}
     )
     target_compile_definitions(test PRIVATE ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>)
-    target_include_directories(test PRIVATE ${CMAKE_BINARY_DIR})
-    target_link_libraries(test PRIVATE enyo_chess version_lib GTest::gtest)
+    target_include_directories(test PRIVATE src ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+    target_link_libraries(test PRIVATE version_lib fmt::fmt-header-only GTest::gtest nlohmann_json::nlohmann_json)
 
     if(ENYO_USE_SYZYGY)
         target_link_libraries(test PRIVATE fathom_lib)
