@@ -10,6 +10,6 @@
     "logfile":                  "/tmp/enyo.log"
   },
   "uci_options": {
-    "nnue2_file":               "nnue/berserk-d43206fe90e4.nn"
+    "nnue2_file":               "~/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn"
   }
 }
