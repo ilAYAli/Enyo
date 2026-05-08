@@ -148,7 +148,6 @@ add_custom_command(
         -P ${CMAKE_SOURCE_DIR}/cmake/update_version_info.cmake
     DEPENDS ${CMAKE_SOURCE_DIR}/version_info.hpp.in
             ${CMAKE_SOURCE_DIR}/cmake/update_version_info.cmake
-    BYPRODUCTS ${CMAKE_BINARY_DIR}/version_info.hpp
     COMMENT "Generating version_info.hpp"
 )
 
@@ -177,6 +176,11 @@ add_executable(enyo
 
 target_compile_definitions(enyo PRIVATE ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>)
 target_link_libraries(enyo PRIVATE enyo_chess version_lib)
+
+if(WIN32)
+    target_link_libraries(enyo PRIVATE ws2_32)
+    target_link_options(enyo PRIVATE -Wl,--stack,67108864)
+endif()
 
 if(ENYO_USE_SYZYGY)
     target_link_libraries(enyo PRIVATE fathom_lib)
@@ -212,6 +216,11 @@ if(BUILD_TESTS)
     target_compile_definitions(test PRIVATE ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>)
     target_include_directories(test PRIVATE ${CMAKE_BINARY_DIR})
     target_link_libraries(test PRIVATE enyo_chess version_lib GTest::gtest)
+
+    if(WIN32)
+        target_link_libraries(test PRIVATE ws2_32)
+        target_link_options(test PRIVATE -Wl,--stack,67108864)
+    endif()
 
     if(ENYO_USE_SYZYGY)
         target_link_libraries(test PRIVATE fathom_lib)

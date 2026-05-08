@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 
 // x86/x64 SIMD (Intel/AMD)
 #if defined(__AVX__) || defined(__AVX2__) || defined(__AVX512F__)
