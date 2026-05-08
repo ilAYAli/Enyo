@@ -2,8 +2,18 @@
 #include "config.hpp"
 #include "types.hpp"
 
-#if defined(__APPLE__)
+#include <cstdlib>
+
+#if defined(_WIN32)
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #include <windows.h>
+    #include <malloc.h>
+#elif defined(__APPLE__)
     #include <sys/sysctl.h>
+#else
+    #include <unistd.h>
 #endif
 #include <optional>
 #include <utility>
@@ -88,7 +98,11 @@ public:
     void free_table() {
         if (!hash_table) return;
         if constexpr (use_aligned_alloc) {
-            std::free(hash_table);
+            #if defined(_WIN32)
+                _aligned_free(hash_table);
+            #else
+                std::free(hash_table);
+            #endif
         } else {
             delete[] hash_table;
         }
@@ -200,7 +214,11 @@ private:
     }
 
     [[maybe_unused]] size_t get_page_size() {
-        #if defined(__APPLE__)
+        #if defined(_WIN32)
+            SYSTEM_INFO system_info;
+            GetSystemInfo(&system_info);
+            return static_cast<size_t>(system_info.dwPageSize);
+        #elif defined(__APPLE__)
             int mib[2];
             int page_size;
             size_t len = sizeof(page_size);
@@ -223,7 +241,11 @@ private:
             size_t alignment = get_page_size();
             alloc_size = ((alloc_size + alignment - 1) / alignment) * alignment;
 
-            hash_table = static_cast<SMPentry*>(std::aligned_alloc(alignment, alloc_size));
+            #if defined(_WIN32)
+                hash_table = static_cast<SMPentry*>(_aligned_malloc(alloc_size, alignment));
+            #else
+                hash_table = static_cast<SMPentry*>(std::aligned_alloc(alignment, alloc_size));
+            #endif
             if (!hash_table) {
                 fmt::print("Failed to allocate hash table\n");
                 std::exit(EXIT_FAILURE);
