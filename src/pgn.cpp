@@ -1,9 +1,12 @@
 #include <iostream>
+#include <cctype>
 #include <string>
 #include <regex>
 #include <chrono>
 #include <sstream>
 #include <vector>
+#include <optional>
+#include <string_view>
 
 #include <fstream>
 #include <filesystem>
@@ -101,6 +104,27 @@ auto piece_type_to_string(enyo::PieceType type) {
         case enyo::PieceType::king:   return "king";
         case enyo::PieceType::no_piece_type: return "None";
         default: return "??";
+    }
+}
+
+auto promotion_to_char(enyo::PieceType type) -> char {
+    switch (type) {
+        case enyo::PieceType::queen:  return 'q';
+        case enyo::PieceType::rook:   return 'r';
+        case enyo::PieceType::bishop: return 'b';
+        case enyo::PieceType::knight: return 'n';
+        default: return '\0';
+    }
+}
+
+auto algebra_piece(enyo::PieceType type) -> std::string {
+    switch (type) {
+        case enyo::PieceType::knight: return "N";
+        case enyo::PieceType::bishop: return "B";
+        case enyo::PieceType::rook:   return "R";
+        case enyo::PieceType::queen:  return "Q";
+        case enyo::PieceType::king:   return "K";
+        default: return "";
     }
 }
 
@@ -494,6 +518,142 @@ std::string move2algebra(Move m, bool check = false)
         s += check ? "+" : "";
     }
     return s;
+}
+
+template <Color Us>
+std::optional<Move> uci_to_move_for_side(Board & b, std::string_view uci)
+{
+    if (uci.size() != 4 && uci.size() != 5)
+        return std::nullopt;
+
+    const Movelist moves = generate_legal_moves<Us, false, false>(b);
+    for (auto move : moves) {
+        if (uci.substr(0, 4) != mv2str(move))
+            continue;
+
+        if (uci.size() == 5) {
+            if (!(move.flags() & Move::Flags::promote))
+                continue;
+            char promotion = static_cast<char>(std::tolower(static_cast<unsigned char>(uci[4])));
+            if (promotion_to_char(move.promo_piece()) != promotion)
+                continue;
+        }
+
+        return move;
+    }
+
+    return std::nullopt;
+}
+
+template <Color Us>
+Movelist legal_moves_for_side(Board & b)
+{
+    return generate_legal_moves<Us, false, false>(b);
+}
+
+template <Color Us>
+void apply_move_for_side(Board & b, Move move)
+{
+    apply_move<Us, true, false>(b, move);
+}
+
+template <Color Us>
+bool check_for_side(Board const & b)
+{
+    return is_check<Us>(b);
+}
+
+template <Color Us>
+std::string move_to_algebra_for_side(Board const & input, Move move)
+{
+    Board b = input;
+    bool capture = move.dst_piece() != PieceType::no_piece_type
+                || (move.flags() & Move::Flags::enpassant);
+
+    std::string algebra;
+    if (move.flags() & Move::Flags::castle) {
+        algebra = move.dst_sq() < move.src_sq() ? "O-O" : "O-O-O";
+    } else if (move.src_piece() == PieceType::pawn) {
+        if (capture) {
+            algebra += file_to_char(move.src_sq());
+            algebra += "x";
+        }
+        algebra += sq2str(move.dst_sq());
+        if (move.flags() & Move::Flags::promote) {
+            algebra += "=";
+            algebra += static_cast<char>(std::toupper(static_cast<unsigned char>(promotion_to_char(move.promo_piece()))));
+        }
+    } else {
+        algebra += algebra_piece(move.src_piece());
+
+        auto legal_moves = legal_moves_for_side<Us>(b);
+        bool ambiguous = false;
+        bool same_file = false;
+        bool same_rank = false;
+        for (auto other : legal_moves) {
+            if (other.src_sq() == move.src_sq())
+                continue;
+            if (other.src_piece() != move.src_piece() || other.dst_sq() != move.dst_sq())
+                continue;
+
+            ambiguous = true;
+            same_file = same_file || std::string_view(file_to_char(other.src_sq())) == file_to_char(move.src_sq());
+            same_rank = same_rank || std::string_view(rank_to_char(other.src_sq())) == rank_to_char(move.src_sq());
+        }
+
+        if (ambiguous) {
+            if (!same_file)
+                algebra += file_to_char(move.src_sq());
+            else if (!same_rank)
+                algebra += rank_to_char(move.src_sq());
+            else {
+                algebra += file_to_char(move.src_sq());
+                algebra += rank_to_char(move.src_sq());
+            }
+        }
+
+        if (capture)
+            algebra += "x";
+        algebra += sq2str(move.dst_sq());
+    }
+
+    apply_move_for_side<Us>(b, move);
+    constexpr Color Them = ~Us;
+    if (check_for_side<Them>(b)) {
+        auto replies = legal_moves_for_side<Them>(b);
+        algebra += replies.empty() ? "#" : "+";
+    }
+
+    return algebra;
+}
+
+namespace enyo {
+
+std::optional<Move> uci_to_move(Board const & b, std::string_view uci)
+{
+    Board copy = b;
+    if (copy.side == white)
+        return uci_to_move_for_side<white>(copy, uci);
+    return uci_to_move_for_side<black>(copy, uci);
+}
+
+std::string move_to_algebra(Board const & b, Move move)
+{
+    if (!move)
+        return "";
+    if (move.src_color() == white)
+        return move_to_algebra_for_side<white>(b, move);
+    return move_to_algebra_for_side<black>(b, move);
+}
+
+std::string uci_to_algebra(Board const & b, std::string_view uci)
+{
+    auto move = uci_to_move(b, uci);
+    if (!move)
+        return "";
+    return move_to_algebra(b, *move);
+}
+
 }
 
 std::vector<Move> copy_played_moves(const Board & b)

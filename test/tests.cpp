@@ -15,6 +15,7 @@
 #include "search.hpp"
 #include "thread.hpp"
 #include "tt.hpp"
+#include "pgn.hpp"
 
 #include <chrono>
 #include <ranges>
@@ -236,6 +237,17 @@ TEST(fen, halfmove_clock_resets_to_zero_with_nonzero_fen_base) {
         apply_move<white>(b, resolve_move<white>(b, knight, f3, e5));
         EXPECT_EQ(b.fen(), "4k3/8/8/4N3/8/8/8/4K3 b - - 8 12");
     }
+}
+
+TEST(pgn, uci_to_algebra_formats_check_without_mutating_board) {
+    Board b{"4k3/8/8/8/8/8/8/3R3K w - - 0 1"};
+    const auto before = b.fen();
+
+    auto move = uci_to_move(b, "d1d8");
+    ASSERT_TRUE(move.has_value());
+    EXPECT_EQ("Rd8+", move_to_algebra(b, *move));
+    EXPECT_EQ("Rd8+", uci_to_algebra(b, "d1d8"));
+    EXPECT_EQ(before, b.fen());
 }
 
 TEST(movegen, lichess_fjmp5yck_endgame_sequence_preserves_position) {
