@@ -94,18 +94,31 @@ and replay are mandatory.
 ## Pipeline
 
 1. Generate self-play PGNs with `fastchess`.
+   - Script: `tools/selfplay/run_selfplay.sh`.
+   - Orchestration script: `tools/selfplay/pilot.sh`.
+   - Current runner: `/home/petter/source/fastchess/fastchess`.
    - Use the current strongest Enyo binary.
    - Use the current strongest NNUE2 file.
    - Use fixed depth first, usually depth 8-10.
    - Store PGNs under `~/tmp/enyo_selfplay/...`.
 
 2. Convert PGN to JSONL training rows.
+   - Script: `tools/selfplay/pgn_to_jsonl.py`.
+   - Current source PGN:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.pgn`.
+   - Current JSONL rows:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.jsonl`.
+   - Current stats:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.stats.json`.
    - `fen`: position before the searched move.
    - `score`: root score in centipawns, side-to-move perspective.
    - `wdl`: game result from side-to-move perspective.
    - Keep depth, ply, move, and source metadata for audit.
 
 3. Validate the dataset.
+   - Script: `tools/selfplay/audit_jsonl.py`.
+   - Main run log:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/pilot.log`.
    - Verify sign convention on sample positions.
    - Check score distribution.
    - Check WDL distribution.
@@ -113,7 +126,13 @@ and replay are mandatory.
    - Drop mate-score rows and extreme tails for pilots.
 
 4. Train NNUE2.
-   - Initialize from the current strong Berserk-format net.
+   - Script: `tools/nnue2/train.py`.
+   - Variant runner:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/train_variants.sh`.
+   - Variant log:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/train_variants.log`.
+   - Initialize from the current strong Berserk-format net:
+     `/home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn`.
    - Use score/result mixing via `wdl-lambda`; Stockfish's trainer uses the
      same basic idea with a lambda between eval target and game result.
    - Pilot objective can be MPE25 or MSE; choose by held-out metrics and replay
@@ -122,15 +141,26 @@ and replay are mandatory.
      require conservative all-layer fine-tuning.
 
 5. Export to `.nn`.
-   - Roundtrip-test loader/exporter.
-   - Load via `setoption name nnue2_file value nnue/<candidate>.nn`.
+   - Export is handled by `tools/nnue2/train.py --out-nn`.
+   - Roundtrip script: `tools/nnue2/roundtrip.py`.
+   - Dataset metric script: `tools/nnue2/eval_dataset.py`.
+   - First candidate:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/own_net_pilot.nn`.
+   - Safer all-layer variant:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/all_mpe_lr1e6_lam1_e3/model.nn`.
+   - Load via `setoption name nnue2_file value <candidate>.nn`.
 
 6. Gate the candidate.
-   - Replay known bad games:
-     - `bugs/Hypersion vs EnyoBot - npmgxvIO.log`
-     - `bugs/EnyoBot vs Lynx_BOT - jjThVRPN.log`
-     - `bugs/JustinBot15 vs EnyoBot - JZaA98Uv.log`
-     - `bugs/EnyoBot vs JustinBot15 - 2WGVezt0.log`
+   - Replay tool: `/home/petter/code/cpp/chess/replay/build/replay`.
+   - Replay gate script for first candidate:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/run_replay_gates.sh`.
+   - Replay gate log for first candidate:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/replay/gates.log`.
+   - Known bad games:
+     - `/home/petter/code/cpp/chess/enyo/bugs/Hypersion vs EnyoBot - npmgxvIO.log`
+     - `/home/petter/code/cpp/chess/enyo/bugs/EnyoBot vs Lynx_BOT - jjThVRPN.log`
+     - `/home/petter/code/cpp/chess/enyo/bugs/JustinBot15 vs EnyoBot - JZaA98Uv.log`
+     - `/home/petter/code/cpp/chess/lichess/pgns/EnyoBot vs JustinBot15 - 2WGVezt0.log`
    - Run dataset eval metrics.
    - Run fixed-depth sanity games if useful.
    - Run SPRT against the current reference.
