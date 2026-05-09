@@ -99,6 +99,8 @@ labels better, but it does not prove higher Elo. The practical checks are:
 
 - Validation MAE/MSE/MPE25 should improve or at least not regress badly.
 - Sign accuracy should not collapse; sign errors often mean wrong side of zero.
+- Calibration should stay sane: candidate slope should stay close to the
+  reference net, and bucketed MAE/sign should not hide failures near zero.
 - Replay gates must not introduce obvious tactical or endgame failures.
 - SPRT decides whether the net is actually stronger.
 
@@ -190,6 +192,75 @@ and replay are mandatory.
 7. Iterate only if the candidate is neutral or positive.
    - Candidate becomes new generator only after it is accepted.
    - Otherwise keep the generator fixed and improve data/training.
+
+## Current Diagnosis
+
+The first 6M-row pilots prove the pipeline, but they are not strong nets yet.
+The failure mode is clear:
+
+- MPE25 can improve while centipawn scale and sign accuracy get worse.
+- Float-head-only training is too weak; it mostly warps the output scale.
+- Lower learning rate all-layer training is safer, but still needs stricter
+  exported-net validation before replay or SPRT.
+
+This matches the Stockfish/Berserk lesson: training loss is only a filter.
+Stockfish uses very large generated datasets and empirical game testing.
+Berserk points at Grapheus/Koivisto-style trainers rather than small one-off
+scripts. Enyo's current Python trainer is useful for pilots, but acceptance
+must be stricter than "loss went down".
+
+## Immediate Next Training Plan
+
+Do not start another long run until these gates pass on the exported `.nn`:
+
+1. Baseline metrics on the same validation rows for the source Berserk net.
+2. Candidate metrics with:
+   - MAE, MSE, RMSE, MPE25.
+   - sign accuracy and wrong-sign count.
+   - bias, correlation, and slope.
+   - bucketed metrics by absolute target score.
+3. Reject candidates that improve MPE25 but regress sign/MAE/scale.
+4. Prefer score-preserving objectives first:
+   - all-layer Huber, `wdl-lambda=1.0`, low LR.
+   - all-layer MSE, `wdl-lambda=1.0`, very low LR.
+   - only after that, reintroduce a small WDL blend.
+5. Once a candidate passes metrics, run replay gates.
+6. Only then run SPRT.
+
+Useful validation command:
+
+```sh
+python3 tools/nnue2/eval_dataset.py \
+  --net /home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn \
+  --data /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.jsonl \
+  --skip 6185602 \
+  --rows 50000 \
+  --batch-size 8192 \
+  --target-clamp 1600 \
+  --buckets
+```
+
+Useful safer training command:
+
+```sh
+python3 tools/nnue2/train.py \
+  --data /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.jsonl \
+  --init-from-nn /home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn \
+  --out /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/huber_lr5e7_e3/model.pt \
+  --out-nn /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/huber_lr5e7_e3/model.nn \
+  --objective huber \
+  --huber-beta 200 \
+  --select-metric mae \
+  --wdl-lambda 1.0 \
+  --target-clamp 1600 \
+  --epochs 3 \
+  --lr 5e-7 \
+  --weight-decay 1e-6 \
+  --batch-size 8192 \
+  --val-rows 50000 \
+  --workers 4 \
+  --trainable all
+```
 
 ## Milestones
 

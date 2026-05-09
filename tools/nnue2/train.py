@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from dataset import FenScoreDataset, collate
@@ -33,13 +34,29 @@ def mpe25_loss(pred_cp: torch.Tensor, target_cp: torch.Tensor,
     return ((pred_p - target_p).abs() ** MPE_EXPONENT).mean()
 
 
+def score_loss(pred: torch.Tensor, target: torch.Tensor,
+               wdl: torch.Tensor, args: argparse.Namespace) -> torch.Tensor:
+    if args.objective == "mpe25":
+        return mpe25_loss(pred, target, wdl, args.wdl_lambda)
+    if args.objective == "huber":
+        return F.smooth_l1_loss(pred, target, beta=args.huber_beta)
+    return ((pred - target) ** 2).mean()
+
+
+def selection_value(metrics: dict[str, float], args: argparse.Namespace) -> float:
+    value = metrics[args.select_metric]
+    return -value if args.select_metric == "sign" else value
+
+
 @torch.no_grad()
 def eval_metrics(model: EnyoNNUE2, loader: DataLoader, args: argparse.Namespace
-                 ) -> tuple[float, float, float]:
+                 ) -> dict[str, float]:
     model.eval()
     loss_sum = 0.0
     mae_sum = 0.0
     mse_sum = 0.0
+    sign_sum = 0
+    sign_n = 0
     n = 0
     for w, b, w_off, b_off, stm, y, wdl, phase_scale in loader:
         w = w.to(args.device)
@@ -53,19 +70,24 @@ def eval_metrics(model: EnyoNNUE2, loader: DataLoader, args: argparse.Namespace
         if args.target_clamp > 0:
             y = torch.clamp(y, -args.target_clamp, args.target_clamp)
         pred = model(w, b, w_off, b_off, stm, phase_scale)
-        if args.objective == "mpe25":
-            loss = mpe25_loss(pred, y, wdl, args.wdl_lambda)
-        else:
-            loss = ((pred - y) ** 2).mean()
+        loss = score_loss(pred, y, wdl, args)
         err = pred - y
+        sign_mask = y != 0
         batch_n = len(y)
         loss_sum += float(loss) * batch_n
         mae_sum += float(err.abs().sum())
         mse_sum += float((err * err).sum())
+        sign_sum += int(((pred[sign_mask] > 0) == (y[sign_mask] > 0)).sum())
+        sign_n += int(sign_mask.sum())
         n += batch_n
     model.train()
     denom = max(1, n)
-    return loss_sum / denom, mse_sum / denom, mae_sum / denom
+    return {
+        "loss": loss_sum / denom,
+        "mse": mse_sum / denom,
+        "mae": mae_sum / denom,
+        "sign": sign_sum / max(1, sign_n),
+    }
 
 
 def train(args: argparse.Namespace) -> EnyoNNUE2:
@@ -128,7 +150,8 @@ def train(args: argparse.Namespace) -> EnyoNNUE2:
         (p for p in model.parameters() if p.requires_grad),
         lr=args.lr, weight_decay=args.weight_decay)
 
-    best_loss = float("inf")
+    best_metric = float("inf")
+    best_display = float("inf")
     best_state = None
     bad = 0
     for epoch in range(args.epochs):
@@ -148,10 +171,7 @@ def train(args: argparse.Namespace) -> EnyoNNUE2:
                 y = torch.clamp(y, -args.target_clamp, args.target_clamp)
 
             pred = model(w, b, w_off, b_off, stm, phase_scale)
-            if args.objective == "mpe25":
-                loss = mpe25_loss(pred, y, wdl, args.wdl_lambda)
-            else:
-                loss = ((pred - y) ** 2).mean()
+            loss = score_loss(pred, y, wdl, args)
 
             opt.zero_grad()
             loss.backward()
@@ -164,13 +184,18 @@ def train(args: argparse.Namespace) -> EnyoNNUE2:
 
         line = (f"epoch {epoch:4d} train mse={mse_sum / max(1, n):10.2f} "
                 f"mae={mae_sum / max(1, n):7.2f}")
-        val_loss = None
+        val_metrics = None
         if val_loader is not None:
-            val_loss, val_mse, val_mae = eval_metrics(model, val_loader, args)
-            line += (f" val loss={val_loss:.6f} mse={val_mse:10.2f} "
-                     f"mae={val_mae:7.2f}")
-            if val_loss < best_loss:
-                best_loss = val_loss
+            val_metrics = eval_metrics(model, val_loader, args)
+            line += (
+                f" val loss={val_metrics['loss']:.6f}"
+                f" mse={val_metrics['mse']:10.2f}"
+                f" mae={val_metrics['mae']:7.2f}"
+                f" sign={val_metrics['sign'] * 100:5.2f}%")
+            metric = selection_value(val_metrics, args)
+            if metric < best_metric:
+                best_metric = metric
+                best_display = val_metrics[args.select_metric]
                 best_state = {
                     k: v.detach().cpu().clone()
                     for k, v in model.state_dict().items()
@@ -179,10 +204,11 @@ def train(args: argparse.Namespace) -> EnyoNNUE2:
             else:
                 bad += 1
             if args.patience > 0:
-                line += f" best_loss={best_loss:.6f} bad={bad}"
+                line += (f" best_{args.select_metric}="
+                         f"{best_display:.6f} bad={bad}")
         print(line, flush=True)
 
-        if args.patience > 0 and val_loss is not None and bad >= args.patience:
+        if args.patience > 0 and val_metrics is not None and bad >= args.patience:
             print(f"early stop at epoch {epoch}")
             break
 
@@ -202,7 +228,13 @@ def main() -> None:
     ap.add_argument("--init", default="kaiming",
                     choices=["kaiming", "berserk-ish"])
     ap.add_argument("--objective", default="mpe25",
-                    choices=["mse", "mpe25"])
+                    choices=["mse", "huber", "mpe25"])
+    ap.add_argument("--huber-beta", type=float, default=200.0,
+                    help="SmoothL1/Huber transition in centipawns.")
+    ap.add_argument("--select-metric", default="loss",
+                    choices=["loss", "mse", "mae", "sign"],
+                    help="Validation metric used to keep the best checkpoint. "
+                         "sign is maximized; the others are minimized.")
     ap.add_argument("--wdl-lambda", type=float, default=0.75)
     ap.add_argument("--epochs", type=int, default=80)
     ap.add_argument("--batch-size", type=int, default=4096)
