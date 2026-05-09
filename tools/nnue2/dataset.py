@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 
@@ -63,6 +65,38 @@ class FenScoreDataset(Dataset):
         )
 
 
+class PackedFenScoreDataset(Dataset):
+    def __init__(self, path: str | Path, *,
+                 limit: int = 0, skip: int = 0) -> None:
+        root = Path(path)
+        self.w_features = np.load(root / "white_features.npy", mmap_mode="r")
+        self.b_features = np.load(root / "black_features.npy", mmap_mode="r")
+        self.counts = np.load(root / "counts.npy", mmap_mode="r")
+        self.stms = np.load(root / "stm.npy", mmap_mode="r")
+        self.scores = np.load(root / "score.npy", mmap_mode="r")
+        self.wdls = np.load(root / "wdl.npy", mmap_mode="r")
+        self.phase_scales = np.load(root / "phase_scale.npy", mmap_mode="r")
+
+        rows = len(self.counts)
+        self.start = min(skip, rows)
+        self.end = rows if limit <= 0 else min(rows, self.start + limit)
+
+    def __len__(self) -> int:
+        return self.end - self.start
+
+    def __getitem__(self, idx: int):
+        real_idx = self.start + idx
+        return (
+            self.w_features[real_idx],
+            self.b_features[real_idx],
+            self.counts[real_idx],
+            self.stms[real_idx],
+            self.scores[real_idx],
+            self.wdls[real_idx],
+            self.phase_scales[real_idx],
+        )
+
+
 def collate(batch):
     w_all, b_all = [], []
     w_offsets, b_offsets = [0], [0]
@@ -87,3 +121,49 @@ def collate(batch):
         torch.stack(wdls),
         torch.stack(phase_scales),
     )
+
+
+def collate_packed(batch):
+    w_rows, b_rows, counts, stms, scores, wdls, phase_scales = zip(*batch)
+    w_padded = torch.as_tensor(np.stack(w_rows), dtype=torch.long)
+    b_padded = torch.as_tensor(np.stack(b_rows), dtype=torch.long)
+    counts_t = torch.as_tensor(np.asarray(counts), dtype=torch.long)
+    max_features = w_padded.shape[1]
+    mask = (torch.arange(max_features).unsqueeze(0)
+            < counts_t.unsqueeze(1))
+    offsets = torch.cat((
+        torch.zeros(1, dtype=torch.long),
+        torch.cumsum(counts_t, dim=0)[:-1],
+    ))
+    return (
+        w_padded[mask],
+        b_padded[mask],
+        offsets,
+        offsets.clone(),
+        torch.as_tensor(np.asarray(stms), dtype=torch.long),
+        torch.as_tensor(np.asarray(scores), dtype=torch.float32),
+        torch.as_tensor(np.asarray(wdls), dtype=torch.float32),
+        torch.as_tensor(np.asarray(phase_scales), dtype=torch.float32),
+    )
+
+
+def count_rows(path: str | Path) -> int:
+    p = Path(path)
+    if p.is_dir():
+        counts = np.load(p / "counts.npy", mmap_mode="r")
+        return len(counts)
+
+    n = 0
+    with p.open() as handle:
+        for line in handle:
+            if line.strip():
+                n += 1
+    return n
+
+
+def load_score_dataset(path: str | Path, *, limit: int = 0, skip: int = 0
+                       ) -> tuple[Dataset, Callable]:
+    p = Path(path)
+    if p.is_dir():
+        return PackedFenScoreDataset(p, limit=limit, skip=skip), collate_packed
+    return FenScoreDataset.from_jsonl(p, limit=limit, skip=skip), collate

@@ -8,21 +8,12 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from dataset import FenScoreDataset, collate
+from dataset import count_rows, load_score_dataset
 from model import EnyoNNUE2, export_model, load_model_from_nn
 
 
 MPE_SCALE = 2.5 / 400.0
 MPE_EXPONENT = 2.5
-
-
-def count_jsonl_rows(path: str | Path) -> int:
-    n = 0
-    with Path(path).open() as handle:
-        for line in handle:
-            if line.strip():
-                n += 1
-    return n
 
 
 def mpe25_loss(pred_cp: torch.Tensor, target_cp: torch.Tensor,
@@ -95,7 +86,7 @@ def train(args: argparse.Namespace) -> EnyoNNUE2:
     train_limit = args.max_rows
     val_skip = args.skip_rows + (args.max_rows if args.max_rows > 0 else 0)
     if not args.val and args.max_rows == 0 and args.val_rows > 0:
-        total_rows = count_jsonl_rows(args.data)
+        total_rows = count_rows(args.data)
         train_limit = max(0, total_rows - args.skip_rows - args.val_rows)
         val_skip = args.skip_rows + train_limit
         print(
@@ -103,17 +94,18 @@ def train(args: argparse.Namespace) -> EnyoNNUE2:
             f"(total={total_rows}, train_limit={train_limit}, "
             f"val_skip={val_skip})", flush=True)
 
-    train_set = FenScoreDataset.from_jsonl(
+    train_set, collate_fn = load_score_dataset(
         args.data, limit=train_limit, skip=args.skip_rows)
     print(f"train rows: {len(train_set)}", flush=True)
     val_set = None
     if args.val:
         print(f"loading val rows from {args.val}", flush=True)
-        val_set = FenScoreDataset.from_jsonl(args.val, limit=args.val_rows)
+        val_set, val_collate_fn = load_score_dataset(
+            args.val, limit=args.val_rows)
     elif args.val_rows > 0:
         print(f"loading val rows from {args.data} at skip={val_skip}",
               flush=True)
-        val_set = FenScoreDataset.from_jsonl(
+        val_set, val_collate_fn = load_score_dataset(
             args.data, limit=args.val_rows, skip=val_skip)
     if val_set is not None:
         print(f"val rows: {len(val_set)}", flush=True)
@@ -140,11 +132,11 @@ def train(args: argparse.Namespace) -> EnyoNNUE2:
 
     train_loader = DataLoader(
         train_set, batch_size=args.batch_size, shuffle=True,
-        collate_fn=collate, num_workers=args.workers,
+        collate_fn=collate_fn, num_workers=args.workers,
         pin_memory=args.device.startswith("cuda"))
     val_loader = (DataLoader(
         val_set, batch_size=args.batch_size, shuffle=False,
-        collate_fn=collate, num_workers=args.workers,
+        collate_fn=val_collate_fn, num_workers=args.workers,
         pin_memory=args.device.startswith("cuda"))
         if val_set is not None else None)
 

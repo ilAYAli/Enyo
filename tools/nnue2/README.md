@@ -39,4 +39,13 @@ Notes:
 - `--init-from-nn` is the sane default. Training this architecture from
   scratch needs much more data and time.
 - The current dataset loader is intentionally simple and loads selected
-  rows into memory. Use `--max-rows` for pilots before scaling.
+  JSONL rows into memory. Use `--max-rows` for JSONL pilots.
+- For multi-million-row runs, first pack the JSONL to mmap arrays:
+
+```bash
+python3 tools/nnue2/pack_dataset.py \
+  --input ~/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.jsonl \
+  --out-dir ~/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay_packed
+```
+
+Then pass the packed directory to `--data`.

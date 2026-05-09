@@ -69,6 +69,8 @@ Training is fine-tuning, not building a net from nothing.
      `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.pgn`.
    - Current training rows:
      `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.jsonl`.
+   - Current packed training rows:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay_packed`.
    - Current conversion stats:
      `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.stats.json`.
    - `fen`: position before the searched move.
@@ -151,6 +153,7 @@ and replay are mandatory.
 
 4. Train NNUE2.
    - Script: `tools/nnue2/train.py`.
+   - Packed dataset script: `tools/nnue2/pack_dataset.py`.
    - Variant runner:
      `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/train_variants.sh`.
    - Variant log:
@@ -206,8 +209,8 @@ The failure mode is clear:
 This matches the Stockfish/Berserk lesson: training loss is only a filter.
 Stockfish uses very large generated datasets and empirical game testing.
 Berserk points at Grapheus/Koivisto-style trainers rather than small one-off
-scripts. Enyo's current Python trainer is useful for pilots, but acceptance
-must be stricter than "loss went down".
+scripts. Enyo's current JSONL path is useful for pilots, but serious iteration
+needs packed or streamed data and acceptance stricter than "loss went down".
 
 ## Immediate Next Training Plan
 
@@ -232,7 +235,7 @@ Useful validation command:
 ```sh
 python3 tools/nnue2/eval_dataset.py \
   --net /home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn \
-  --data /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.jsonl \
+  --data /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay_packed \
   --skip 6185602 \
   --rows 50000 \
   --batch-size 8192 \
@@ -244,7 +247,7 @@ Useful safer training command:
 
 ```sh
 python3 tools/nnue2/train.py \
-  --data /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.jsonl \
+  --data /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay_packed \
   --init-from-nn /home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn \
   --out /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/huber_lr5e7_e3/model.pt \
   --out-nn /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/huber_lr5e7_e3/model.nn \

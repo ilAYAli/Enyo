@@ -6,7 +6,7 @@ import math
 import torch
 from torch.utils.data import DataLoader
 
-from dataset import FenScoreDataset, collate
+from dataset import load_score_dataset
 from model import load_model_from_nn
 from train import MPE_EXPONENT, MPE_SCALE
 
@@ -41,9 +41,10 @@ def main() -> None:
                     help="Print metrics grouped by absolute target score.")
     args = ap.parse_args()
 
-    ds = FenScoreDataset.from_jsonl(args.data, limit=args.rows, skip=args.skip)
+    ds, collate_fn = load_score_dataset(
+        args.data, limit=args.rows, skip=args.skip)
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False,
-                        collate_fn=collate)
+                        collate_fn=collate_fn)
     model = load_model_from_nn(args.net, device=args.device)
     model.eval()
 
