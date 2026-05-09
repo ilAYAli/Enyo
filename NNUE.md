@@ -27,58 +27,17 @@ This architecture is already strong enough to use externally trained Berserk
 networks. The next step is replacing the borrowed weights with Enyo-owned
 weights.
 
-## What Did Not Work
-
-Do not restart these tracks without a new reason:
-
-- Small cp-only distillation from `default.net`.
-- Mixing `default.net` static labels with Stockfish search labels.
-- SF-binpack data under the current Python trainer at small scale.
-- Ranking child positions as the sole acceptance metric.
-
-Those experiments produced useful tooling, but not a competitive network.
-
 ## Competitive Network Path
-
-There are two viable data strategies.
-
-### Option A: Lichess Data
-
-Train on hundreds of millions of Lichess positions.
-
-Pros:
-
-- Broad chess coverage.
-- Proven to produce decent small NNUEs.
-- Does not require weeks of self-play generation.
-
-Cons:
-
-- Game-result labels are noisy.
-- Search-score labels still need an engine pass.
-- The result is a broad generic net, not specifically adapted to Enyo.
-
-This is a good scaling path, but not the best first Enyo-owned network.
-
-### Option B: Enyo Self-Play
 
 Generate games with the current strongest Enyo, record root search scores, and
 train on those positions.
 
-Pros:
+This is the chosen path because:
 
-- Labels come from Enyo's own search.
-- Data distribution is shaped by positions Enyo actually reaches.
-- Iteration is possible: new champion generates the next dataset.
-- Avoids mixed-teacher label noise.
-
-Cons:
-
-- Generation is slower.
-- Early datasets may be homogeneous unless openings are diverse.
-- Requires an end-to-end pipeline and careful validation.
-
-This is the recommended first path.
+- labels come from Enyo's own search;
+- data distribution is shaped by positions Enyo actually reaches;
+- accepted networks can generate the next dataset;
+- the result is Enyo-specific instead of a generic Lichess net.
 
 ## Pipeline
 
