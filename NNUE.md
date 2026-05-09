@@ -39,6 +39,15 @@ This is the chosen path because:
 - accepted networks can generate the next dataset;
 - the result is Enyo-specific instead of a generic Lichess net.
 
+The self-play row does not assert that the played move is objectively best. The
+move advances the game and shapes the position distribution. The label is the
+root search score for the position before the move, so training teaches the net
+to approximate Enyo's searched position value.
+
+Move quality is validated after training with replay, root-child audits, deeper
+search, Stockfish checks where useful, and SPRT. A net is only useful if the
+learned evaluator improves move choice inside Enyo's search.
+
 ## Pipeline
 
 1. Generate self-play PGNs with `fastchess`.
@@ -83,22 +92,8 @@ This is the chosen path because:
 
 ## First Milestone
 
-Create a 1M-row self-play dataset and train a pilot net:
-
-```sh
-tools/selfplay/pilot.sh \
-  --runner ~/source/fastchess/fastchess \
-  --engine ./build/enyo \
-  --nnue2-file nnue/berserk-d43206fe90e4.nn \
-  --games 7000 \
-  --shard-games 1000 \
-  --concurrency 8 \
-  --threads 4 \
-  --depth 8 \
-  --epochs 5 \
-  --trainable float-head \
-  --out-dir ~/tmp/enyo_selfplay/pilot_d8_1m
-```
+Create a 1M-row self-play dataset and train a pilot net with the command in
+the Scripts section.
 
 Expected first result: not necessarily stronger. The useful result is a
 validated end-to-end process that can be scaled to 10M, 50M, then 100M+ rows.
@@ -113,3 +108,51 @@ A network is not accepted because training loss improved. It must satisfy:
 - SPRT against the current reference is neutral or positive.
 
 Only accepted networks may become the next self-play generator.
+
+## Scripts
+
+The self-play and NNUE2 training scripts live on the `nnue/own-net-pipeline`
+branch until the pipeline is proven:
+
+- `tools/selfplay/pilot.sh`: end-to-end pilot runner.
+- `tools/selfplay/run_selfplay.sh`: runs Enyo-vs-Enyo fixed-depth games with
+  `fastchess`.
+- `tools/selfplay/pgn_to_jsonl.py`: converts annotated PGN to JSONL rows.
+- `tools/nnue2/eval_dataset.py`: validates dataset shape and score statistics.
+- `tools/nnue2/train.py`: trains an NNUE2 candidate.
+- `tools/nnue2/export.py`: exports a Berserk-format `.nn`.
+- `tools/nnue2/roundtrip.py`: verifies exported loader compatibility.
+
+Current pwa-5090 pilot command:
+
+```sh
+cd ~/tmp/enyo-own-net-pipeline
+
+tools/selfplay/pilot.sh \
+  --python ~/.venv/bin/python \
+  --runner ~/source/fastchess/fastchess \
+  --engine ./build/enyo \
+  --nnue2-file ~/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn \
+  --games 7000 \
+  --shard-games 1000 \
+  --concurrency 6 \
+  --threads 4 \
+  --depth 8 \
+  --epochs 5 \
+  --trainable float-head \
+  --max-rows 0 \
+  --val-rows 50000 \
+  --batch-size 4096 \
+  --device cuda \
+  --out-dir ~/tmp/enyo_selfplay/pilot_d8_1m_$(date +%Y%m%d_%H%M%S)
+```
+
+Run it in tmux and tee the log:
+
+```sh
+tmux new-window -t ai -n ownnet-pilot
+
+cd ~/tmp/enyo-own-net-pipeline
+set -o pipefail
+tools/selfplay/pilot.sh ... 2>&1 | tee ~/tmp/enyo_ownnet_pilot.log
+```
