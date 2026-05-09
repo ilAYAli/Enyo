@@ -91,7 +91,7 @@ def eval_metrics(model: EnyoNNUE2, loader: DataLoader, args: argparse.Namespace
 
 
 def train(args: argparse.Namespace) -> EnyoNNUE2:
-    print(f"loading train rows from {args.data}")
+    print(f"loading train rows from {args.data}", flush=True)
     train_limit = args.max_rows
     val_skip = args.skip_rows + (args.max_rows if args.max_rows > 0 else 0)
     if not args.val and args.max_rows == 0 and args.val_rows > 0:
@@ -101,24 +101,25 @@ def train(args: argparse.Namespace) -> EnyoNNUE2:
         print(
             f"reserving final {args.val_rows} rows for validation "
             f"(total={total_rows}, train_limit={train_limit}, "
-            f"val_skip={val_skip})")
+            f"val_skip={val_skip})", flush=True)
 
     train_set = FenScoreDataset.from_jsonl(
         args.data, limit=train_limit, skip=args.skip_rows)
-    print(f"train rows: {len(train_set)}")
+    print(f"train rows: {len(train_set)}", flush=True)
     val_set = None
     if args.val:
-        print(f"loading val rows from {args.val}")
+        print(f"loading val rows from {args.val}", flush=True)
         val_set = FenScoreDataset.from_jsonl(args.val, limit=args.val_rows)
     elif args.val_rows > 0:
-        print(f"loading val rows from {args.data} at skip={val_skip}")
+        print(f"loading val rows from {args.data} at skip={val_skip}",
+              flush=True)
         val_set = FenScoreDataset.from_jsonl(
             args.data, limit=args.val_rows, skip=val_skip)
     if val_set is not None:
-        print(f"val rows: {len(val_set)}")
+        print(f"val rows: {len(val_set)}", flush=True)
 
     if args.init_from_nn:
-        print(f"initializing from {args.init_from_nn}")
+        print(f"initializing from {args.init_from_nn}", flush=True)
         model = load_model_from_nn(args.init_from_nn, device=args.device)
     else:
         model = EnyoNNUE2(init=args.init).to(args.device)
@@ -134,7 +135,8 @@ def train(args: argparse.Namespace) -> EnyoNNUE2:
                 param.requires_grad_(True)
         trainable_params = sum(
             p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"trainable={args.trainable} params={trainable_params}")
+        print(f"trainable={args.trainable} params={trainable_params}",
+              flush=True)
 
     train_loader = DataLoader(
         train_set, batch_size=args.batch_size, shuffle=True,
