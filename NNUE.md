@@ -29,11 +29,13 @@ weights.
 
 ## Data Strategy
 
-Use Enyo self-play as the first Enyo-owned network path. Generate games with
-the current strongest Enyo, record root search scores, and train on the
-positions Enyo actually reaches. This matches the documented Stockfish NNUE
-training pattern: self-play generation plus search evaluations, followed by
-empirical net testing.
+Use Enyo self-play as the first Enyo-owned network path. The self-play games
+define the position distribution Enyo actually reaches.
+
+For the current training track, do not directly trust shallow Enyo root scores
+as final labels. Use them to collect positions, then relabel sampled positions
+with a stronger teacher engine before fine-tuning the Berserk-format net. This
+reduces the risk of training Enyo to repeat its own mistakes.
 
 The plan is deliberately empirical. Dataset metrics and loss curves are useful
 filters, but a candidate network is accepted only by replay gates and games.
@@ -76,25 +78,39 @@ Training is fine-tuning, not building a net from nothing.
    - `fen`: position before the searched move.
    - `score`: Enyo root search score in centipawns from side-to-move view.
    - `wdl`: final game result from side-to-move view.
-3. Load the `.nn` into the PyTorch model with the same NNUE2 architecture.
+3. For the teacher-labeled track, sample and relabel positions with:
+   - Pipeline script: `tools/nnue2/run_teacher_pipeline.sh`.
+   - Sampler: `tools/nnue2/sample_jsonl.py`.
+   - Teacher labeler: `tools/nnue2/label_with_uci.py`.
+   - Current teacher input:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.jsonl`.
+   - Current teacher output root:
+     `/home/petter/tmp/enyo_teacher/latest`.
+   - Sampled rows:
+     `/home/petter/tmp/enyo_teacher/latest/sample.jsonl`.
+   - Teacher-labeled rows:
+     `/home/petter/tmp/enyo_teacher/latest/labeled.jsonl`.
+   - Packed teacher-labeled rows:
+     `/home/petter/tmp/enyo_teacher/latest/labeled_packed`.
+4. Load the `.nn` into the PyTorch model with the same NNUE2 architecture.
    - Training script: `tools/nnue2/train.py`.
-4. Train the model to predict the self-play labels.
-   - Current variant runner:
-     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/train_variants.sh`.
-   - Current variant log:
-     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/train_variants.log`.
-5. Keep a validation slice out of training and compare candidate metrics against
+5. Train the model to predict teacher centipawn labels.
+   - Current run directory:
+     `/home/petter/tmp/enyo_teacher/latest`.
+   - Candidate net:
+     `/home/petter/tmp/enyo_teacher/latest/huber_lr2e-7_e4/model.nn`.
+6. Keep a validation slice out of training and compare candidate metrics against
    the original Berserk net.
    - Metric script: `tools/nnue2/eval_dataset.py`.
-6. Export the trained weights back to Berserk `.nn` format and load it in Enyo.
-   - First candidate:
-     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/own_net_pilot.nn`.
-   - Safer all-layer variant:
-     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/all_mpe_lr1e6_lam1_e3/model.nn`.
-7. Accept only after replay gates and games.
+   - Baseline metrics:
+     `/home/petter/tmp/enyo_teacher/latest/baseline_metrics.log`.
+   - Candidate metrics:
+     `/home/petter/tmp/enyo_teacher/latest/huber_lr2e-7_e4/metrics.log`.
+7. Export the trained weights back to Berserk `.nn` format and load it in Enyo.
+   - Export is handled by `tools/nnue2/train.py --out-nn`.
+8. Accept only after replay gates and games.
    - Replay tool: `/home/petter/code/cpp/chess/replay/build/replay`.
-   - First replay log:
-     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/replay/gates.log`.
+   - Replay logs should be stored under the candidate run directory.
 
 The loss is only a filter. A lower loss means the candidate fits the self-play
 labels better, but it does not prove higher Elo. The practical checks are:
@@ -151,33 +167,34 @@ and replay are mandatory.
    - Check duplicate rate.
    - Drop mate-score rows and extreme tails for pilots.
 
-4. Train NNUE2.
+4. Relabel a sampled position set with a teacher.
+   - Pipeline script: `tools/nnue2/run_teacher_pipeline.sh`.
+   - Output root: `/home/petter/tmp/enyo_teacher/latest`.
+   - Default teacher: `stockfish`.
+   - Default source rows:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.jsonl`.
+   - Current pilot scale: 150k sampled positions at teacher depth 12.
+   - This is the active path until Enyo-owned labels prove better.
+
+5. Train NNUE2.
    - Script: `tools/nnue2/train.py`.
    - Packed dataset script: `tools/nnue2/pack_dataset.py`.
-   - Variant runner:
-     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/train_variants.sh`.
-   - Variant log:
-     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/train_variants.log`.
+   - Current runner: `tools/nnue2/run_teacher_pipeline.sh`.
+   - Current log: `/home/petter/tmp/enyo_teacher/latest/pipeline.log`.
    - Initialize from the current strong Berserk-format net:
      `/home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn`.
-   - Use score/result mixing via `wdl-lambda`; Stockfish's trainer uses the
-     same basic idea with a lambda between eval target and game result.
-   - Pilot objective can be MPE25 or MSE; choose by held-out metrics and replay
-     gates, not by loss alone.
-   - Pilot mode may train only the float head, but useful own-net candidates
-     require conservative all-layer fine-tuning.
+   - Current objective: all-layer Huber on teacher centipawn labels.
+   - Choose candidates by held-out metrics and replay gates, not loss alone.
 
-5. Export to `.nn`.
+6. Export to `.nn`.
    - Export is handled by `tools/nnue2/train.py --out-nn`.
    - Roundtrip script: `tools/nnue2/roundtrip.py`.
    - Dataset metric script: `tools/nnue2/eval_dataset.py`.
-   - First candidate:
-     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/own_net_pilot.nn`.
-   - Safer all-layer variant:
-     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/all_mpe_lr1e6_lam1_e3/model.nn`.
+   - Current candidate path:
+     `/home/petter/tmp/enyo_teacher/latest/huber_lr2e-7_e4/model.nn`.
    - Load via `setoption name nnue2_file value <candidate>.nn`.
 
-6. Gate the candidate.
+7. Gate the candidate.
    - Replay tool: `/home/petter/code/cpp/chess/replay/build/replay`.
    - Replay gate script for first candidate:
      `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/run_replay_gates.sh`.
@@ -192,7 +209,7 @@ and replay are mandatory.
    - Run fixed-depth sanity games if useful.
    - Run SPRT against the current reference.
 
-7. Iterate only if the candidate is neutral or positive.
+8. Iterate only if the candidate is neutral or positive.
    - Candidate becomes new generator only after it is accepted.
    - Otherwise keep the generator fixed and improve data/training.
 
@@ -214,60 +231,47 @@ needs packed or streamed data and acceptance stricter than "loss went down".
 
 ## Immediate Next Training Plan
 
-Do not start another long run until these gates pass on the exported `.nn`:
+The active plan is teacher relabeling, not more direct Enyo-score fine-tuning.
+The 6M self-play rows are useful as positions, but shallow Enyo scores can
+encode Enyo's current mistakes.
 
-1. Baseline metrics on the same validation rows for the source Berserk net.
-2. Candidate metrics with:
+Run:
+
+```sh
+tools/nnue2/run_teacher_pipeline.sh
+```
+
+Default inputs and outputs:
+
+- Source rows:
+  `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.jsonl`.
+- Source net:
+  `/home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn`.
+- Latest output symlink:
+  `/home/petter/tmp/enyo_teacher/latest`.
+- Candidate net:
+  `/home/petter/tmp/enyo_teacher/latest/huber_lr2e-7_e4/model.nn`.
+- Pipeline log:
+  `/home/petter/tmp/enyo_teacher/latest/pipeline.log`.
+
+The pipeline:
+
+1. Samples 150k unique positions from the 6M-row self-play set.
+2. Relabels them with Stockfish at depth 12.
+3. Packs the teacher-labeled rows into mmap arrays.
+4. Evaluates the original Berserk net on the held-out validation slice.
+5. Fine-tunes all layers with a conservative Huber objective.
+6. Evaluates the exported candidate on the same validation slice.
+
+Reject candidates that only improve loss. The exported `.nn` must also pass:
+
+- Baseline/candidate metrics with:
    - MAE, MSE, RMSE, MPE25.
    - sign accuracy and wrong-sign count.
    - bias, correlation, and slope.
    - bucketed metrics by absolute target score.
-3. Reject candidates that improve MPE25 but regress sign/MAE/scale.
-4. Prefer score-preserving objectives first:
-   - all-layer Huber, `wdl-lambda=1.0`, low LR.
-   - all-layer MSE, `wdl-lambda=1.0`, very low LR.
-   - only after that, reintroduce a small WDL blend.
-5. Once a candidate passes metrics, run replay gates.
-6. Only then run SPRT.
-
-Useful validation command:
-
-```sh
-python3 tools/nnue2/eval_dataset.py \
-  --net /home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn \
-  --data /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay_packed \
-  --skip 6185602 \
-  --rows 50000 \
-  --batch-size 8192 \
-  --target-clamp 1600 \
-  --buckets
-```
-
-Useful safer training command:
-
-```sh
-python3 tools/nnue2/train.py \
-  --data /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay_packed \
-  --init-from-nn /home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn \
-  --out /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/huber_lr5e7_e3/model.pt \
-  --out-nn /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/huber_lr5e7_e3/model.nn \
-  --objective huber \
-  --huber-beta 200 \
-  --select-metric mae \
-  --wdl-lambda 1.0 \
-  --target-clamp 1600 \
-  --epochs 3 \
-  --lr 5e-7 \
-  --weight-decay 1e-6 \
-  --batch-size 8192 \
-  --val-rows 50000 \
-  --workers 0 \
-  --trainable all
-```
-
-Use `--workers 0` with the current JSONL/in-memory dataset. DataLoader workers
-fork the already materialized dataset and can multiply memory use. Non-zero
-workers belong to a streamed or binary dataset loader, not this pilot loader.
+- Replay gates on known bad games.
+- SPRT against the current reference only after metrics and replay pass.
 
 ## Milestones
 
@@ -284,9 +288,7 @@ Result:
 - Pilot candidates were not accepted; they improved some held-out metrics but
   failed replay gates.
 
-### Active: 50k-Game / Roughly 6M-Row Pilot
-
-Running in tmux `ai:ownnet-6m` on `pwa-5090`.
+### Completed: 50k-Game / Roughly 6M-Row Position Set
 
 Output: `~/tmp/enyo_selfplay/d8_6m_20260509_165354`
 
@@ -311,8 +313,8 @@ tools/selfplay/pilot.sh \
   --out-dir /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354
 ```
 
-Purpose: produce a first real pilot candidate and validate whether 5M-10M rows
-are enough to make replay-safe progress before scaling to 50M+.
+Purpose: produce the position distribution for first Enyo-owned NNUE2
+experiments.
 
 Initial result:
 
@@ -321,12 +323,20 @@ Initial result:
   sampled dataset, but sign accuracy dropped from 90.09% to 88.77%.
 - Replay gates were mixed: JustinBot blunders improved, but Lynx still produced
   a 1000cp flagged endgame move.
-- Status: not accepted; training safer variants before any SPRT.
+- Status: not accepted as direct-score training data for a final net.
 
-Active follow-up variants:
+Rejected direct-score variants:
 
 - `all_mpe_lr1e6_lam1_e3`: all-layer MPE25, lower LR, search-score-only target.
 - `float_head_mpe_lr1e5_lam09_e5`: float-head-only MPE25, blended target.
+- `huber_lr5e7_e3`: metric-positive but failed the Hypersion replay gate.
+
+### Active: Teacher-Labeled Pilot
+
+Running target: `/home/petter/tmp/enyo_teacher/latest`.
+
+Purpose: train on Enyo-reachable positions with stronger teacher scores, then
+accept only candidates that beat the source net on metrics and replay gates.
 
 ## Acceptance Standard
 
