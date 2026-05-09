@@ -61,16 +61,38 @@ should not be treated as final evidence.
 Training is fine-tuning, not building a net from nothing.
 
 1. Start from a known strong Berserk-format `.nn` file.
+   - Current source net:
+     `/home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn`.
 2. Convert self-play games into rows with:
+   - Converter script: `tools/selfplay/pgn_to_jsonl.py`.
+   - Current source PGN:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.pgn`.
+   - Current training rows:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.jsonl`.
+   - Current conversion stats:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/selfplay.stats.json`.
    - `fen`: position before the searched move.
    - `score`: Enyo root search score in centipawns from side-to-move view.
    - `wdl`: final game result from side-to-move view.
 3. Load the `.nn` into the PyTorch model with the same NNUE2 architecture.
+   - Training script: `tools/nnue2/train.py`.
 4. Train the model to predict the self-play labels.
+   - Current variant runner:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/train_variants.sh`.
+   - Current variant log:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/train_variants.log`.
 5. Keep a validation slice out of training and compare candidate metrics against
    the original Berserk net.
+   - Metric script: `tools/nnue2/eval_dataset.py`.
 6. Export the trained weights back to Berserk `.nn` format and load it in Enyo.
+   - First candidate:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/own_net_pilot.nn`.
+   - Safer all-layer variant:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/all_mpe_lr1e6_lam1_e3/model.nn`.
 7. Accept only after replay gates and games.
+   - Replay tool: `/home/petter/code/cpp/chess/replay/build/replay`.
+   - First replay log:
+     `/home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354/replay/gates.log`.
 
 The loss is only a filter. A lower loss means the candidate fits the self-play
 labels better, but it does not prove higher Elo. The practical checks are:
