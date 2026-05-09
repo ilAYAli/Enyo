@@ -15,6 +15,15 @@ MPE_SCALE = 2.5 / 400.0
 MPE_EXPONENT = 2.5
 
 
+def count_jsonl_rows(path: str | Path) -> int:
+    n = 0
+    with Path(path).open() as handle:
+        for line in handle:
+            if line.strip():
+                n += 1
+    return n
+
+
 def mpe25_loss(pred_cp: torch.Tensor, target_cp: torch.Tensor,
                wdl: torch.Tensor, wdl_lambda: float) -> torch.Tensor:
     pred_p = torch.sigmoid(pred_cp * MPE_SCALE)
@@ -61,15 +70,25 @@ def eval_metrics(model: EnyoNNUE2, loader: DataLoader, args: argparse.Namespace
 
 def train(args: argparse.Namespace) -> EnyoNNUE2:
     print(f"loading train rows from {args.data}")
+    train_limit = args.max_rows
+    val_skip = args.skip_rows + (args.max_rows if args.max_rows > 0 else 0)
+    if not args.val and args.max_rows == 0 and args.val_rows > 0:
+        total_rows = count_jsonl_rows(args.data)
+        train_limit = max(0, total_rows - args.skip_rows - args.val_rows)
+        val_skip = args.skip_rows + train_limit
+        print(
+            f"reserving final {args.val_rows} rows for validation "
+            f"(total={total_rows}, train_limit={train_limit}, "
+            f"val_skip={val_skip})")
+
     train_set = FenScoreDataset.from_jsonl(
-        args.data, limit=args.max_rows, skip=args.skip_rows)
+        args.data, limit=train_limit, skip=args.skip_rows)
     print(f"train rows: {len(train_set)}")
     val_set = None
     if args.val:
         print(f"loading val rows from {args.val}")
         val_set = FenScoreDataset.from_jsonl(args.val, limit=args.val_rows)
     elif args.val_rows > 0:
-        val_skip = args.skip_rows + (args.max_rows if args.max_rows > 0 else 0)
         print(f"loading val rows from {args.data} at skip={val_skip}")
         val_set = FenScoreDataset.from_jsonl(
             args.data, limit=args.val_rows, skip=val_skip)
