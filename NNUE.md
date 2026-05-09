@@ -258,9 +258,13 @@ python3 tools/nnue2/train.py \
   --weight-decay 1e-6 \
   --batch-size 8192 \
   --val-rows 50000 \
-  --workers 4 \
+  --workers 0 \
   --trainable all
 ```
+
+Use `--workers 0` with the current JSONL/in-memory dataset. DataLoader workers
+fork the already materialized dataset and can multiply memory use. Non-zero
+workers belong to a streamed or binary dataset loader, not this pilot loader.
 
 ## Milestones
 
