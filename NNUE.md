@@ -56,6 +56,41 @@ Stockfish-scale datasets are far larger; their wiki cites generated datasets in
 the billions of positions. Enyo does not need to start there, but small pilots
 should not be treated as final evidence.
 
+## How Training Works
+
+Training is fine-tuning, not building a net from nothing.
+
+1. Start from a known strong Berserk-format `.nn` file.
+2. Convert self-play games into rows with:
+   - `fen`: position before the searched move.
+   - `score`: Enyo root search score in centipawns from side-to-move view.
+   - `wdl`: final game result from side-to-move view.
+3. Load the `.nn` into the PyTorch model with the same NNUE2 architecture.
+4. Train the model to predict the self-play labels.
+5. Keep a validation slice out of training and compare candidate metrics against
+   the original Berserk net.
+6. Export the trained weights back to Berserk `.nn` format and load it in Enyo.
+7. Accept only after replay gates and games.
+
+The loss is only a filter. A lower loss means the candidate fits the self-play
+labels better, but it does not prove higher Elo. The practical checks are:
+
+- Validation MAE/MSE/MPE25 should improve or at least not regress badly.
+- Sign accuracy should not collapse; sign errors often mean wrong side of zero.
+- Replay gates must not introduce obvious tactical or endgame failures.
+- SPRT decides whether the net is actually stronger.
+
+`wdl-lambda` controls how much the target is search score versus game result:
+
+- `1.0`: train only toward search-score labels.
+- `0.0`: train only toward game-result labels.
+- between them: blend both signals.
+
+Quantization also matters. The PyTorch model trains in float, but the exported
+`.nn` stores quantized integer layers plus float head layers. A candidate can
+look better before export and still be worse after export, so exported-net eval
+and replay are mandatory.
+
 ## Pipeline
 
 1. Generate self-play PGNs with `fastchess`.
@@ -148,6 +183,20 @@ tools/selfplay/pilot.sh \
 
 Purpose: produce a first real pilot candidate and validate whether 5M-10M rows
 are enough to make replay-safe progress before scaling to 50M+.
+
+Initial result:
+
+- Dataset generation and audit passed: 50,000 games, 6,235,602 rows.
+- First all-layer MPE25 candidate improved exported-net MPE25/MSE/MAE on the
+  sampled dataset, but sign accuracy dropped from 90.09% to 88.77%.
+- Replay gates were mixed: JustinBot blunders improved, but Lynx still produced
+  a 1000cp flagged endgame move.
+- Status: not accepted; training safer variants before any SPRT.
+
+Active follow-up variants:
+
+- `all_mpe_lr1e6_lam1_e3`: all-layer MPE25, lower LR, search-score-only target.
+- `float_head_mpe_lr1e5_lam09_e5`: float-head-only MPE25, blended target.
 
 ## Acceptance Standard
 
