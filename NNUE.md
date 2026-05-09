@@ -91,7 +91,11 @@ should not be treated as final evidence.
    - Load via `setoption name nnue2_file value nnue/<candidate>.nn`.
 
 6. Gate the candidate.
-   - Replay known bad games.
+   - Replay known bad games:
+     - `bugs/Hypersion vs EnyoBot - npmgxvIO.log`
+     - `bugs/EnyoBot vs Lynx_BOT - jjThVRPN.log`
+     - `bugs/JustinBot15 vs EnyoBot - JZaA98Uv.log`
+     - `bugs/EnyoBot vs JustinBot15 - 2WGVezt0.log`
    - Run dataset eval metrics.
    - Run fixed-depth sanity games if useful.
    - Run SPRT against the current reference.
