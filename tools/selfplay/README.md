@@ -61,4 +61,10 @@ Default filters:
 
 - skip first 8 plies
 - skip mate-score rows
-- skip rows with `abs(score) > 10000`
+- skip rows with `abs(score) > 10000` in the converter
+- the pilot uses `--max-abs-cp 2000` to drop Enyo's saturated `±2045`
+  search-score cap
+
+Before training, `pilot.sh` runs `audit_jsonl.py` and fails on invalid FENs,
+illegal moves, wrong side-to-move metadata, unexpected depth, too few rows,
+large duplicate spikes, or saturated score leakage.

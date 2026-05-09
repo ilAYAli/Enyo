@@ -25,6 +25,7 @@ epochs=5
 batch_size=4096
 max_rows=0
 val_rows=5000
+max_abs_cp=2000
 trainable="float-head"
 lr="1e-5"
 wdl_lambda="0.75"
@@ -64,6 +65,7 @@ Options:
   --batch-size N
   --max-rows N
   --val-rows N
+  --max-abs-cp N
   --trainable all|float-head|output
   --lr FLOAT
   --wdl-lambda FLOAT
@@ -89,6 +91,7 @@ while [[ $# -gt 0 ]]; do
         --batch-size) batch_size="$2"; shift 2 ;;
         --max-rows) max_rows="$2"; shift 2 ;;
         --val-rows) val_rows="$2"; shift 2 ;;
+        --max-abs-cp) max_abs_cp="$2"; shift 2 ;;
         --trainable) trainable="$2"; shift 2 ;;
         --lr) lr="$2"; shift 2 ;;
         --wdl-lambda) wdl_lambda="$2"; shift 2 ;;
@@ -145,10 +148,24 @@ fi
     --stats "$stats" \
     --skip-plies 8 \
     --min-depth 1 \
-    --max-abs-cp 10000
+    --max-abs-cp "$max_abs_cp"
 
 wc -l "$jsonl"
 cat "$stats"
+
+min_rows=$((games * 20))
+if ((min_rows < 1000)); then
+    min_rows=1000
+fi
+audit_depth=0
+if [[ -z "$tc" ]]; then
+    audit_depth="$depth"
+fi
+"$python_bin" "$script_dir/audit_jsonl.py" "$jsonl" \
+    --min-rows "$min_rows" \
+    --expected-depth "$audit_depth" \
+    --cap-cp 2045 \
+    --max-capped-pct 0.5
 
 "$python_bin" "$repo_root/tools/nnue2/roundtrip.py" "$nnue2_file"
 "$python_bin" "$repo_root/tools/nnue2/eval_dataset.py" \
