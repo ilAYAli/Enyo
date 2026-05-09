@@ -27,58 +27,34 @@ This architecture is already strong enough to use externally trained Berserk
 networks. The next step is replacing the borrowed weights with Enyo-owned
 weights.
 
-## What Did Not Work
+## Data Strategy
 
-Do not restart these tracks without a new reason:
+Use Enyo self-play as the first Enyo-owned network path. Generate games with
+the current strongest Enyo, record root search scores, and train on the
+positions Enyo actually reaches. This matches the documented Stockfish NNUE
+training pattern: self-play generation plus search evaluations, followed by
+empirical net testing.
 
-- Small cp-only distillation from `default.net`.
-- Mixing `default.net` static labels with Stockfish search labels.
-- SF-binpack data under the current Python trainer at small scale.
-- Ranking child positions as the sole acceptance metric.
+The plan is deliberately empirical. Dataset metrics and loss curves are useful
+filters, but a candidate network is accepted only by replay gates and games.
 
-Those experiments produced useful tooling, but not a competitive network.
+Relevant references:
 
-## Competitive Network Path
+- Stockfish nnue-pytorch: https://github.com/official-stockfish/nnue-pytorch
+- Training datasets: https://github.com/official-stockfish/nnue-pytorch/wiki/Training-datasets
+- Basic training procedure: https://github.com/official-stockfish/nnue-pytorch/wiki/Basic-training-procedure-%28train.py%29
+- NNUE architecture/training notes: https://github.com/official-stockfish/nnue-pytorch/blob/master/docs/nnue.md
 
-There are two viable data strategies.
+## Scale Targets
 
-### Option A: Lichess Data
+- 1M rows: pipeline validation only.
+- 5M-10M rows: first real pilot candidates.
+- 50M+ rows: serious candidate scale.
+- 100M+ rows: competitive training scale.
 
-Train on hundreds of millions of Lichess positions.
-
-Pros:
-
-- Broad chess coverage.
-- Proven to produce decent small NNUEs.
-- Does not require weeks of self-play generation.
-
-Cons:
-
-- Game-result labels are noisy.
-- Search-score labels still need an engine pass.
-- The result is a broad generic net, not specifically adapted to Enyo.
-
-This is a good scaling path, but not the best first Enyo-owned network.
-
-### Option B: Enyo Self-Play
-
-Generate games with the current strongest Enyo, record root search scores, and
-train on those positions.
-
-Pros:
-
-- Labels come from Enyo's own search.
-- Data distribution is shaped by positions Enyo actually reaches.
-- Iteration is possible: new champion generates the next dataset.
-- Avoids mixed-teacher label noise.
-
-Cons:
-
-- Generation is slower.
-- Early datasets may be homogeneous unless openings are diverse.
-- Requires an end-to-end pipeline and careful validation.
-
-This is the recommended first path.
+Stockfish-scale datasets are far larger; their wiki cites generated datasets in
+the billions of positions. Enyo does not need to start there, but small pilots
+should not be treated as final evidence.
 
 ## Pipeline
 
@@ -103,10 +79,12 @@ This is the recommended first path.
 
 4. Train NNUE2.
    - Initialize from the current strong Berserk-format net.
-   - Objective: MPE25.
-   - Start with `wdl-lambda` around `0.75`.
-   - Pilot mode: train only the float head first.
-   - Scale mode: train all layers once the pipeline is proven.
+   - Use score/result mixing via `wdl-lambda`; Stockfish's trainer uses the
+     same basic idea with a lambda between eval target and game result.
+   - Pilot objective can be MPE25 or MSE; choose by held-out metrics and replay
+     gates, not by loss alone.
+   - Pilot mode may train only the float head, but useful own-net candidates
+     require conservative all-layer fine-tuning.
 
 5. Export to `.nn`.
    - Roundtrip-test loader/exporter.
@@ -122,27 +100,50 @@ This is the recommended first path.
    - Candidate becomes new generator only after it is accepted.
    - Otherwise keep the generator fixed and improve data/training.
 
-## First Milestone
+## Milestones
 
-Create a 1M-row self-play dataset and train a pilot net:
+### Completed: 1M-Row Pipeline Pilot
+
+Output: `~/tmp/enyo_selfplay/pilot_d8_1m_20260509_141352/selfplay.jsonl`
+
+Result:
+
+- 7,000 games.
+- 894,358 JSONL rows.
+- Dataset audit passed.
+- First training/export/replay loop proved the tooling works.
+- Pilot candidates were not accepted; they improved some held-out metrics but
+  failed replay gates.
+
+### Active: 50k-Game / Roughly 6M-Row Pilot
+
+Running in tmux `ai:ownnet-6m` on `pwa-5090`.
+
+Output: `~/tmp/enyo_selfplay/d8_6m_20260509_165354`
 
 ```sh
 tools/selfplay/pilot.sh \
-  --runner ~/source/fastchess/fastchess \
-  --engine ./build/enyo \
-  --nnue2-file nnue/berserk-d43206fe90e4.nn \
-  --games 7000 \
+  --runner /home/petter/source/fastchess/fastchess \
+  --engine /home/petter/tmp/enyo-own-net-pipeline/build/enyo \
+  --nnue2-file /home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn \
+  --book /home/petter/code/cpp/chess/assets/books/UHO_Lichess_4852_v1.epd \
+  --games 50000 \
   --shard-games 1000 \
   --concurrency 8 \
   --threads 4 \
   --depth 8 \
-  --epochs 5 \
-  --trainable float-head \
-  --out-dir ~/tmp/enyo_selfplay/pilot_d8_1m
+  --epochs 3 \
+  --trainable all \
+  --lr 3e-6 \
+  --wdl-lambda 0.9 \
+  --batch-size 8192 \
+  --val-rows 50000 \
+  --max-abs-cp 1600 \
+  --out-dir /home/petter/tmp/enyo_selfplay/d8_6m_20260509_165354
 ```
 
-Expected first result: not necessarily stronger. The useful result is a
-validated end-to-end process that can be scaled to 10M, 50M, then 100M+ rows.
+Purpose: produce a first real pilot candidate and validate whether 5M-10M rows
+are enough to make replay-safe progress before scaling to 50M+.
 
 ## Acceptance Standard
 

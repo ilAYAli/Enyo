@@ -34,3 +34,5 @@ __pycache__/
 tools/selfplay/*.pgn
 tools/selfplay/*.jsonl
 tools/selfplay/*.stats.json
+# fastchess writes this in the current working directory
+config.json
