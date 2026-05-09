@@ -116,7 +116,7 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
     return { soft, hard };
 }
 
-TimeAllocation handle_time_management(const Board& b, SearchInfo & si)
+TimeAllocation handle_time_management(Board& b, SearchInfo & si)
 {
     bool have_time_limit = si.wtime != -1 || si.btime != -1 || si.movetime != -1;
     if (!have_time_limit) {
@@ -131,7 +131,17 @@ TimeAllocation handle_time_management(const Board& b, SearchInfo & si)
         uci_time = si.btime;
         uci_inc = si.binc != -1 ? si.binc : 0;
     }
-    const auto alloc = calculate_time_allocation(si, uci_time, uci_inc);
+    auto alloc = calculate_time_allocation(si, uci_time, uci_inc);
+    if (alloc.hard.count() != -1 && si.movetime == -1 && si.movestogo == 0 && uci_time >= 3000) {
+        const auto legal_count = b.side == white
+            ? generate_legal_moves<white>(b).size()
+            : generate_legal_moves<black>(b).size();
+        if (legal_count <= 4) {
+            const auto budget = std::chrono::milliseconds(std::max(0, uci_time - 50));
+            alloc.soft = std::min(budget / 2, std::max(alloc.soft * 8, alloc.hard));
+            alloc.hard = std::min(budget * 3 / 4, std::max(alloc.hard, alloc.soft * 2));
+        }
+    }
     if (alloc.hard.count() == -1) {
         si.stoptime      = std::chrono::high_resolution_clock::time_point::max();
         si.soft_stoptime = std::chrono::high_resolution_clock::time_point::max();
