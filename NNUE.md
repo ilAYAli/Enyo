@@ -118,6 +118,7 @@ branch until the pipeline is proven:
 - `tools/selfplay/run_selfplay.sh`: runs Enyo-vs-Enyo fixed-depth games with
   `fastchess`.
 - `tools/selfplay/pgn_to_jsonl.py`: converts annotated PGN to JSONL rows.
+- `tools/selfplay/audit_jsonl.py`: fails bad training data before training.
 - `tools/nnue2/eval_dataset.py`: validates dataset shape and score statistics.
 - `tools/nnue2/train.py`: trains an NNUE2 candidate.
 - `tools/nnue2/export.py`: exports a Berserk-format `.nn`.
@@ -142,10 +143,16 @@ tools/selfplay/pilot.sh \
   --trainable float-head \
   --max-rows 0 \
   --val-rows 50000 \
+  --max-abs-cp 2000 \
   --batch-size 4096 \
   --device cuda \
   --out-dir ~/tmp/enyo_selfplay/pilot_d8_1m_$(date +%Y%m%d_%H%M%S)
 ```
+
+The pilot drops mate-score rows and saturated `±2045` eval-cap rows. It then
+runs `audit_jsonl.py`; training does not start unless the JSONL has legal FENs,
+legal moves, correct side-to-move metadata, expected depth, enough rows, low
+duplicate rate, no capped-score leakage, and sane WDL/score ordering.
 
 Run it in tmux and tee the log:
 
