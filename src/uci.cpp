@@ -60,6 +60,11 @@ struct TimeAllocation {
     std::chrono::milliseconds hard{-1};  // maximum — emergency stop
 };
 
+constexpr int clock_move_overhead_ms(int uci_inc)
+{
+    return uci_inc > 0 ? 50 : 250;
+}
+
 // Compute soft/hard time budgets for one move.
 //
 // Sudden-death (no movestogo): allocate ~1/30 of remaining time as the soft
@@ -70,27 +75,31 @@ struct TimeAllocation {
 //   Increment is spent at 3/4 rate since it's replenished next move.
 // Classical (movestogo): divide remaining time across the mandated moves plus
 //   a small buffer; the hard budget is 4x soft, capped at time/4.
-// Both branches reserve a 50ms lag margin and clamp to a 100ms floor so the
-// engine never tries to move instantly on critically low time.
+// Both branches reserve move overhead: 50ms with increment, 250ms without.
+// Critically low clock is handled by returning an immediate legal move before
+// search starts.
 TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, int uci_inc)
 {
     using namespace std::chrono;
 
-    constexpr milliseconds lag(50);
     constexpr milliseconds min_time(100);
+    const milliseconds lag(clock_move_overhead_ms(uci_inc));
 
     if (si.movetime != -1) {
-        auto t = std::max(min_time, milliseconds(si.movetime) - lag);
+        auto t = std::max(min_time, milliseconds(si.movetime) - milliseconds(50));
         return { t, t };
     }
     if (uci_time == -1) {
         return { milliseconds(-1), milliseconds(-1) };
     }
-    if (uci_time < min_time.count()) { // critically low on time
-        return { milliseconds(uci_time), milliseconds(uci_time) };
+    if (uci_time <= lag.count()) {
+        return { milliseconds(0), milliseconds(0) };
     }
 
-    const int time_budget = std::max(0, uci_time - static_cast<int>(lag.count()));
+    const int time_budget = uci_time - static_cast<int>(lag.count());
+    if (time_budget < min_time.count()) {
+        return { milliseconds(time_budget), milliseconds(time_budget) };
+    }
 
     milliseconds soft;
     milliseconds hard;
@@ -132,7 +141,7 @@ TimeAllocation handle_time_management(Board& b, SearchInfo & si)
         uci_inc = si.binc != -1 ? si.binc : 0;
     }
     auto alloc = calculate_time_allocation(si, uci_time, uci_inc);
-    if (alloc.hard.count() != -1 && si.movetime == -1 && si.movestogo == 0 && uci_time >= 3000) {
+    if (alloc.hard.count() != -1 && si.movetime == -1 && si.movestogo == 0 && uci_inc > 0 && uci_time >= 3000) {
         const auto legal_count = b.side == white
             ? generate_legal_moves<white>(b).size()
             : generate_legal_moves<black>(b).size();
@@ -151,6 +160,18 @@ TimeAllocation handle_time_management(Board& b, SearchInfo & si)
     }
 
     return alloc;
+}
+
+int active_clock_ms(Board const & b, SearchInfo const & si)
+{
+    return b.side == white ? si.wtime : si.btime;
+}
+
+int active_increment_ms(Board const & b, SearchInfo const & si)
+{
+    return b.side == white
+        ? (si.winc != -1 ? si.winc : 0)
+        : (si.binc != -1 ? si.binc : 0);
 }
 
 PieceType get_promo_piece(std::string const & token)
@@ -595,17 +616,11 @@ void Uci::go(std::istringstream & iss)
         }
     }
 
-    si.starttime = std::chrono::high_resolution_clock::now();
-    const auto alloc = handle_time_management(b, si);
-    si.board = b;
-    si.nnue.refresh(si.board);
-
+    const auto legal = b.side == white
+        ? generate_legal_moves<white>(b)
+        : generate_legal_moves<black>(b);
+    Movelist filtered;
     if (!searchmoves.empty()) {
-        Movelist filtered;
-        const auto legal = b.side == white
-            ? generate_legal_moves<white>(b)
-            : generate_legal_moves<black>(b);
-
         for (const auto& move_str : searchmoves) {
             auto src = str2sq(move_str.substr(0, 2).c_str());
             auto dst = str2sq(move_str.substr(2, 2).c_str());
@@ -623,6 +638,32 @@ void Uci::go(std::istringstream & iss)
             si.has_searchmoves = true;
         }
     }
+
+    const auto active_clock = active_clock_ms(b, si);
+    const auto emergency_move_ms = clock_move_overhead_ms(active_increment_ms(b, si));
+    if (si.movetime == -1 && si.depth == MAX_PLY && active_clock >= 0 && active_clock <= emergency_move_ms) {
+        const auto& moves = si.has_searchmoves ? si.searchmoves : legal;
+        if (moves.empty()) {
+            eventlog::log<eventlog::Log::warning>(
+                "EMERGENCY_MOVE: no legal move clock={} overhead={}\n",
+                active_clock,
+                emergency_move_ms);
+            fmt::print("bestmove 0000\n");
+        } else {
+            eventlog::log<eventlog::Log::warning>(
+                "EMERGENCY_MOVE: clock={} overhead={} move={}\n",
+                active_clock,
+                emergency_move_ms,
+                moves[0]);
+            fmt::print("bestmove {}\n", moves[0]);
+        }
+        return;
+    }
+
+    si.starttime = std::chrono::high_resolution_clock::now();
+    const auto alloc = handle_time_management(b, si);
+    si.board = b;
+    si.nnue.refresh(si.board);
 
 #if 1
     fmt::print("info string threads:{},soft:{},hard:{},movetime:{},wtime:{},btime:{},winc:{},binc:{},movestogo:{},depth:{}\n",
