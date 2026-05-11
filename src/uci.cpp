@@ -65,6 +65,28 @@ constexpr int clock_move_overhead_ms(int uci_inc)
     return uci_inc > 0 ? 50 : 250;
 }
 
+std::chrono::milliseconds clock_managed_hard_cap(int uci_time, int uci_inc)
+{
+    using namespace std::chrono;
+
+    constexpr milliseconds min_time(100);
+    constexpr milliseconds max_rapid_move(30000);
+    constexpr int rapid_clock_ms = 15 * 60 * 1000;
+
+    const auto by_clock = milliseconds(std::max(0, uci_time) / 20 + std::max(0, uci_inc));
+    const auto absolute = uci_time <= rapid_clock_ms
+        ? max_rapid_move
+        : milliseconds(std::max(0, uci_time) / 6);
+    return std::max(min_time, std::min(by_clock, absolute));
+}
+
+void cap_clock_managed_allocation(TimeAllocation & alloc, int uci_time, int uci_inc)
+{
+    const auto hard_cap = clock_managed_hard_cap(uci_time, uci_inc);
+    alloc.hard = std::min(alloc.hard, hard_cap);
+    alloc.soft = std::min(alloc.soft, alloc.hard);
+}
+
 // Compute soft/hard time budgets for one move.
 //
 // Sudden-death (no movestogo): allocate ~1/30 of remaining time as the soft
@@ -122,7 +144,10 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
 
     soft = std::max(min_time, soft);
     hard = std::max(soft, hard);
-    return { soft, hard };
+    TimeAllocation alloc { soft, hard };
+    if (si.movestogo == 0)
+        cap_clock_managed_allocation(alloc, uci_time, uci_inc);
+    return alloc;
 }
 
 TimeAllocation handle_time_management(Board& b, SearchInfo & si)
@@ -151,6 +176,8 @@ TimeAllocation handle_time_management(Board& b, SearchInfo & si)
             alloc.hard = std::min(budget * 3 / 4, std::max(alloc.hard, alloc.soft * 2));
         }
     }
+    if (alloc.hard.count() != -1 && si.movetime == -1 && si.movestogo == 0)
+        cap_clock_managed_allocation(alloc, uci_time, uci_inc);
     if (alloc.hard.count() == -1) {
         si.stoptime      = std::chrono::high_resolution_clock::time_point::max();
         si.soft_stoptime = std::chrono::high_resolution_clock::time_point::max();
