@@ -135,8 +135,7 @@ if(ENYO_USE_SYZYGY)
 endif()
 
 #---[ targets ]----------------------------------------------------------------
-add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/version_info.hpp
+add_custom_target(update_version_info
     COMMAND ${CMAKE_COMMAND}
         -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
         -DINPUT_FILE=${CMAKE_SOURCE_DIR}/version_info.hpp.in
@@ -146,12 +145,12 @@ add_custom_command(
         -DENYO_GIT_HASH=${ENYO_GIT_HASH}
         -DENYO_GIT_DIRTY=${ENYO_GIT_DIRTY}
         -P ${CMAKE_SOURCE_DIR}/cmake/update_version_info.cmake
+    BYPRODUCTS ${CMAKE_BINARY_DIR}/version_info.hpp
     DEPENDS ${CMAKE_SOURCE_DIR}/version_info.hpp.in
             ${CMAKE_SOURCE_DIR}/cmake/update_version_info.cmake
     COMMENT "Generating version_info.hpp"
 )
 
-add_custom_target(update_version_info DEPENDS ${CMAKE_BINARY_DIR}/version_info.hpp)
 add_library(version_lib OBJECT src/version.cpp)
 add_dependencies(version_lib update_version_info)
 target_include_directories(version_lib PRIVATE ${CMAKE_BINARY_DIR})
