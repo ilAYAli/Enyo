@@ -417,7 +417,7 @@ void Uci::uci()
 {
     auto & config = cfgmgr;
 
-    fmt::print("id name {}\n", g_version);
+    ucilog("id name {}\n", g_version);
     ucilog("id author Petter Wahlman\n\n");
     ucilog("{}", config.allopts());
     ucilog("\n");

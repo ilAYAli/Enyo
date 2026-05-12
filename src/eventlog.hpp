@@ -68,10 +68,6 @@ inline void remove_old_logfiles(const std::string& baseFilename, std::size_t max
 }
 
 
-inline void init() {
-    remove_old_logfiles(enyo::cfgmgr.logfile, logfilesToKeep);
-}
-
 inline std::string getLogFilename(const std::string& baseFilename) {
     std::ostringstream oss;
     oss << baseFilename.substr(0, baseFilename.find_last_of('.'))
@@ -87,7 +83,7 @@ inline std::string getDefaultLogFilename()
 }
 
 inline std::string logFilename = getDefaultLogFilename();
-inline std::ofstream logFile(logFilename, std::ios::app);
+inline std::ofstream logFile;
 inline std::mutex logMutex;
 
 inline void reopen_logfile(const std::string& filename, bool exact_path = false)
@@ -96,6 +92,11 @@ inline void reopen_logfile(const std::string& filename, bool exact_path = false)
     logFile.close();
     logFilename = exact_path ? filename : getLogFilename(filename);
     logFile.open(logFilename, std::ios::app);
+}
+
+inline void init() {
+    remove_old_logfiles(enyo::cfgmgr.logfile, logfilesToKeep);
+    reopen_logfile(enyo::cfgmgr.logfile);
 }
 
 template <Log level = Log::info, typename... T>
