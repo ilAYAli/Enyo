@@ -674,14 +674,14 @@ void Uci::go(std::istringstream & iss)
                 "EMERGENCY_MOVE: no legal move clock={} overhead={}\n",
                 active_clock,
                 emergency_move_ms);
-            fmt::print("bestmove 0000\n");
+            ucilog("bestmove 0000\n");
         } else {
             eventlog::log<eventlog::Log::warning>(
                 "EMERGENCY_MOVE: clock={} overhead={} move={}\n",
                 active_clock,
                 emergency_move_ms,
                 moves[0]);
-            fmt::print("bestmove {}\n", moves[0]);
+            ucilog("bestmove {}\n", moves[0]);
         }
         return;
     }
