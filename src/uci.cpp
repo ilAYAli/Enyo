@@ -65,6 +65,16 @@ constexpr int clock_move_overhead_ms(int uci_inc)
     return uci_inc > 0 ? 50 : 250;
 }
 
+constexpr int last_resort_move_threshold_ms(int uci_inc)
+{
+    return clock_move_overhead_ms(uci_inc);
+}
+
+std::chrono::milliseconds safe_clock_hard_cap(int uci_time, int uci_inc)
+{
+    return std::chrono::milliseconds(std::max(0, uci_time - clock_move_overhead_ms(uci_inc)));
+}
+
 std::chrono::milliseconds clock_managed_hard_cap(int uci_time, int uci_inc)
 {
     using namespace std::chrono;
@@ -82,14 +92,11 @@ std::chrono::milliseconds clock_managed_hard_cap(int uci_time, int uci_inc)
 
 void cap_clock_managed_allocation(TimeAllocation & alloc, int uci_time, int uci_inc)
 {
-    const auto hard_cap = clock_managed_hard_cap(uci_time, uci_inc);
+    const auto hard_cap = std::min(
+        clock_managed_hard_cap(uci_time, uci_inc),
+        safe_clock_hard_cap(uci_time, uci_inc));
     alloc.hard = std::min(alloc.hard, hard_cap);
     alloc.soft = std::min(alloc.soft, alloc.hard);
-}
-
-constexpr int emergency_move_threshold_ms(int uci_inc)
-{
-    return uci_inc > 0 ? 200 : 2000;
 }
 
 // Compute soft/hard time budgets for one move.
@@ -100,8 +107,9 @@ constexpr int emergency_move_threshold_ms(int uci_inc)
 // Classical (movestogo): divide remaining time across the mandated moves plus
 //   a small buffer; the hard budget is 4x soft, capped at time/4.
 // Both branches reserve move overhead: 50ms with increment, 250ms without.
-// Critically low clock is handled by returning an immediate legal move before
-// search starts.
+// The hard budget is always capped to the current clock minus move overhead:
+// increment is useful for the long-term spending rate, but it is only added
+// after this move is made.
 TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, int uci_inc)
 {
     using namespace std::chrono;
@@ -116,7 +124,7 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
     if (uci_time == -1) {
         return { milliseconds(-1), milliseconds(-1) };
     }
-    if (uci_time <= emergency_move_threshold_ms(uci_inc)) {
+    if (uci_time <= last_resort_move_threshold_ms(uci_inc)) {
         return { milliseconds(0), milliseconds(0) };
     }
 
@@ -146,6 +154,10 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
     TimeAllocation alloc { soft, hard };
     if (si.movestogo == 0)
         cap_clock_managed_allocation(alloc, uci_time, uci_inc);
+    else if (alloc.hard.count() >= 0) {
+        alloc.hard = std::min(alloc.hard, safe_clock_hard_cap(uci_time, uci_inc));
+        alloc.soft = std::min(alloc.soft, alloc.hard);
+    }
     return alloc;
 }
 
@@ -666,20 +678,20 @@ void Uci::go(std::istringstream & iss)
     }
 
     const auto active_clock = active_clock_ms(b, si);
-    const auto emergency_move_ms = emergency_move_threshold_ms(active_increment_ms(b, si));
-    if (si.movetime == -1 && si.depth == MAX_PLY && active_clock >= 0 && active_clock <= emergency_move_ms) {
+    const auto last_resort_move_ms = last_resort_move_threshold_ms(active_increment_ms(b, si));
+    if (si.movetime == -1 && si.depth == MAX_PLY && active_clock >= 0 && active_clock <= last_resort_move_ms) {
         const auto& moves = si.has_searchmoves ? si.searchmoves : legal;
         if (moves.empty()) {
             eventlog::log<eventlog::Log::warning>(
-                "EMERGENCY_MOVE: no legal move clock={} overhead={}\n",
+                "EMERGENCY_MOVE: no legal move clock={} threshold={}\n",
                 active_clock,
-                emergency_move_ms);
+                last_resort_move_ms);
             ucilog("bestmove 0000\n");
         } else {
             eventlog::log<eventlog::Log::warning>(
-                "EMERGENCY_MOVE: clock={} overhead={} move={}\n",
+                "EMERGENCY_MOVE: clock={} threshold={} move={}\n",
                 active_clock,
-                emergency_move_ms,
+                last_resort_move_ms,
                 moves[0]);
             ucilog("bestmove {}\n", moves[0]);
         }
