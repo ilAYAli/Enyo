@@ -128,7 +128,7 @@ Target audit finding:
 - Before using binpack in MPE/WDL training, confirm result POV and either use a
   source-specific `wdl_lambda` or train binpack as CP-only.
 
-Active source-aware run:
+Source-aware 30M run:
 
 ```sh
 /home/petter/tmp/run_nnue_source_aware_20260512.sh
@@ -149,6 +149,22 @@ This run uses the source-aware trainer commit:
 ```text
 6814334 tools/nnue2: add source-aware training controls
 ```
+
+Results:
+
+- `src_mpe_wdl75_bin35_lr1e6_e2`: rejected before SPRT. It improved MAE, but
+  damaged sign accuracy enough that the static metrics were not worth spending
+  a full SPRT on.
+- `src_huber_bin35_lr3e8_e2`: passed replay and metric gates, then failed to
+  show useful Elo in SPRT. Stopped manually at:
+
+```text
+[1140/2000] Elo  -3.0 +/- 13.2 | LLR -0.91/2.94 (-31%) | LOS 32.5% | draw 57.2%
+```
+
+Takeaway: source-aware controls work technically, but this target mix is not
+enough to produce a stronger net. The blocker is now target/data quality, not
+the trainer mechanics.
 
 ## Validation
 
@@ -191,14 +207,11 @@ again.
 
 1. Keep `all_lr2e8_e2` archived, but do not make it the main reference yet.
 2. Stop rerunning small optimizer variations on the same 30M target mix.
-3. Improve the pipeline before the next expensive run:
-   keep source identity in packed data, support source-specific loss weights,
-   and validate each source independently.
-4. Improve the targets:
-   use deeper or higher-node teacher labels for selected Enyo positions,
-   add tactical/endgame coverage, and avoid using biased game-result WDL as a
-   global target.
-5. Train only small pilots until one improves source-separated validation
-   without replay damage.
-6. Scale to a large run only after a pilot has a realistic chance of at least
-   `+5 Elo`; otherwise the SPRT cost is mostly noise measurement.
+3. Build a better target set before training again:
+   relabel a selected subset with stronger teacher settings, add tactical and
+   endgame coverage, and keep binpack WDL out of MPE targets until its result
+   convention is proven.
+4. Run small pilots on the improved target set first. A pilot must improve
+   source-separated validation without replay damage before any long SPRT.
+5. Scale only after a pilot has a realistic chance of at least `+5 Elo`;
+   otherwise the SPRT cost is mostly noise measurement.
