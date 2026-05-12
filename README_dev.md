@@ -41,10 +41,15 @@
 - When attention is needed, send a ping notification to `https://ntfy.wahlman.no/ping`.
 - Before sending authenticated notifications, run `source ~/.ntfy` to set `LICHESS_NTFY_AUTH`.
 - SPRT notifications should use `https://ntfy.wahlman.no/sprt`.
+- Every non-interactive command launched for Codex in tmux must notify on
+  completion. Do this in the command line itself, not later by manual polling.
 - For long-running local or remote tasks, add a completion callback with:
 
 ```sh
-~/scripts/notifai.sh "task finished: <short status>" <codex_tmux_session>
+cmd
+rc=$?
+~/scripts/notifai.sh "task finished: <short status> rc=$rc" <codex_tmux_session>
+exit $rc
 ```
 
 - `notifai.sh` sends a message into the Codex tmux session, so use it to report
@@ -52,6 +57,11 @@
 - If the Codex session is omitted, `notifai.sh` defaults to `codex_1`.
 - Use both `notifai.sh` and ntfy for important long-running jobs: `notifai.sh`
   wakes the local agent loop, ntfy wakes the human.
+- For multi-phase pipelines, trigger `notifai.sh` as the first action when a
+  phase completes, before packing, replay, SPRT, or other follow-up work starts.
+- For remote jobs, make sure the callback targets the actual Codex tmux session.
+  If the remote host cannot reach that session, run a local watcher with
+  `notifai.sh` rather than relying on remote tmux.
 
 ## Development Location
 
