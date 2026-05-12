@@ -898,7 +898,9 @@ void search_position(Worker & worker)
             const int uci_inc  = si.board.side == white
                 ? (si.winc != -1 ? si.winc : 0)
                 : (si.binc != -1 ? si.binc : 0);
-            const bool enough_time = uci_time >= 10 * uci_inc + 1000;
+            const bool enough_time = uci_inc > 0
+                ? uci_time >= 10 * uci_inc + 1000
+                : uci_time >= 5000;
             const bool may_extend =
                    (bestmove_changed_last_iter || score_swung_last_iter)
                 && enough_time
