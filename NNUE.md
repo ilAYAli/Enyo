@@ -166,6 +166,27 @@ Takeaway: source-aware controls work technically, but this target mix is not
 enough to produce a stronger net. The blocker is now target/data quality, not
 the trainer mechanics.
 
+Active depth-16 bucketed teacher run:
+
+```sh
+/home/petter/tmp/run_nnue_bucket_d16_20260512.sh
+/home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554
+```
+
+Purpose:
+
+- sample 1M unique Enyo-reached positions from the 20M self-play pool;
+- balance the sample by absolute Stockfish depth-12 score buckets:
+  `0-50`, `50-100`, `100-300`, `300-800`, `800-1600`;
+- relabel those positions with Stockfish depth 16 using 16 single-threaded
+  shards;
+- train small Huber pilots from the current external init net;
+- run source metrics and replay gates before any SPRT.
+
+Rationale: the previous 30M mixed target created safe, near-neutral nets. This
+run spends teacher time on a smaller but higher-quality and less draw-dominated
+target set, so a pilot has a better chance of producing a real Elo signal.
+
 ## Validation
 
 Every candidate is evaluated against:
@@ -205,13 +226,11 @@ again.
 
 ## Next Steps
 
-1. Keep `all_lr2e8_e2` archived, but do not make it the main reference yet.
-2. Stop rerunning small optimizer variations on the same 30M target mix.
-3. Build a better target set before training again:
-   relabel a selected subset with stronger teacher settings, add tactical and
-   endgame coverage, and keep binpack WDL out of MPE targets until its result
-   convention is proven.
-4. Run small pilots on the improved target set first. A pilot must improve
-   source-separated validation without replay damage before any long SPRT.
-5. Scale only after a pilot has a realistic chance of at least `+5 Elo`;
+1. Let the depth-16 bucketed run finish labeling and pilot training.
+2. Start SPRT only if the pilot improves depth-16 validation and does not add
+   replay issues.
+3. If the pilot is neutral, scale the same idea to more depth-16/depth-18
+   labels rather than rerunning optimizer tweaks on the old 30M mix.
+4. Keep binpack WDL out of MPE targets until its result convention is proven.
+5. Promote only candidates with a realistic chance of at least `+5 Elo`;
    otherwise the SPRT cost is mostly noise measurement.
