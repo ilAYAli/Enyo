@@ -21,16 +21,37 @@
 - Primary remote test machine: `petter@pwa-5090`.
 - Secondary deployment/test machine: `pwa-win`.
 - Remote Enyo checkout: `~/code/cpp/chess/enyo`.
-- Run tests and SPRTs on `pwa-5090` in tmux session `ai`.
+- Run tests and SPRTs on `pwa-5090` in the tmux sessions listed below.
 - Do not detach from the tmux session after a test completes; leave the window open with the final output visible.
 - Durable temporary files belong under `~/tmp/`.
 - Remove temporary files when they are no longer needed.
+
+## Tmux Sessions
+
+- Prefer separate tmux sessions over multiple windows.
+- Reuse existing tmux sessions instead of creating new ones.
+- On `pwa-5090`, use these NNUE sessions:
+  - `nnue_test`: active long-running NNUE training, replay gates, or SPRT validation.
+  - `nnue_cmd`: short status checks, log inspection, and small helper commands.
+- Do not create extra NNUE sessions or windows unless explicitly requested.
+- Close idle sessions/windows that are no longer useful, but never kill an active training or test process unless requested.
 
 ## Notifications
 
 - When attention is needed, send a ping notification to `https://ntfy.wahlman.no/ping`.
 - Before sending authenticated notifications, run `source ~/.ntfy` to set `LICHESS_NTFY_AUTH`.
 - SPRT notifications should use `https://ntfy.wahlman.no/sprt`.
+- For long-running local or remote tasks, add a completion callback with:
+
+```sh
+~/scripts/notifai.sh "task finished: <short status>" <codex_tmux_session>
+```
+
+- `notifai.sh` sends a message into the Codex tmux session, so use it to report
+  completion/failure without polling.
+- If the Codex session is omitted, `notifai.sh` defaults to `codex_1`.
+- Use both `notifai.sh` and ntfy for important long-running jobs: `notifai.sh`
+  wakes the local agent loop, ntfy wakes the human.
 
 ## Development Location
 
@@ -59,10 +80,10 @@ cp ./build/enyo ../assets/engines/enyo_<githash>
 
 ## Test On pwa-5090
 
-Use this tmux session for tests:
+Use the appropriate tmux session for tests:
 
 ```sh
-ssh -t petter@pwa-5090 tmux -2u new -As ai
+ssh -t petter@pwa-5090 tmux -2u new -As nnue_test
 ```
 
 In the remote checkout:
@@ -100,4 +121,3 @@ After a successful SPRT:
    - `pwa-win`
 5. Copy the rebuilt engine to `../assets/engines/enyo_<githash>`.
 6. If this engine is accepted as the new reference, update the reference engine according to the project script/workflow.
-

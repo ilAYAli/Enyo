@@ -1,165 +1,204 @@
-# Enyo NNUE Plan
+# Enyo NNUE Training
 
 ## Goal
 
-Build an Enyo-owned network that is stronger than the current shipped network.
-The network should improve Enyo's move choices in Enyo's search, not merely
-imitate another evaluator on static positions.
+Build an Enyo-owned NNUE2 network that is stronger than the current borrowed
+Berserk-format network when used inside Enyo search.
 
-## Current Runtime Architecture
+Training loss is not enough. A candidate must survive replay gates and then
+SPRT before it can become the new reference.
 
-Enyo supports two evaluation paths:
+## Runtime Architecture
 
-- `nnue_file`: the original 512-hidden Enyo NNUE format.
-- `nnue2_file`: Berserk-format 1024-hidden network loaded from a `.nn` file.
+The active strong evaluator is `nnue2_file`, a Berserk-format `.nn` network:
 
-The active strong path is NNUE2:
-
-- Feature transformer: king-bucketed sparse accumulator.
+- Sparse king-bucketed feature transformer.
 - Hidden width: 1024 per perspective.
 - Concatenated accumulator: `us[1024] + them[1024]`.
-- Head: 2048 -> 16 -> 32 -> 1.
-- Loader format: Berserk `.nn`.
-- Runtime: incremental accumulators, refresh tables, and SIMD paths for ARM
-  NEON and x86 AVX2/AVX-512.
+- Head: `2048 -> 16 -> 32 -> 1`.
+- Runtime: incremental accumulators with NEON and AVX2/AVX-512 SIMD paths.
 
-This architecture is already strong enough to use externally trained Berserk
-networks. The next step is replacing the borrowed weights with Enyo-owned
-weights.
+This can already load strong external Berserk networks. The current training
+work is about replacing those weights without losing strength.
 
-## Competitive Network Path
+## Data Strategy
 
-Generate games with the current strongest Enyo, record root search scores, and
-train on those positions.
+Use multiple data sources, but validate them separately:
 
-This is the chosen path because:
+- Enyo self-play positions labeled by Stockfish depth 12.
+- Lichess eval positions.
+- Stockfish binpack positions.
 
-- labels come from Enyo's own search;
-- data distribution is shaped by positions Enyo actually reaches;
-- accepted networks can generate the next dataset;
-- the result is Enyo-specific instead of a generic Lichess net.
+The current risk is overfitting one source or damaging tactical behavior while
+improving aggregate MAE. That is why validation is split by source and replay
+gates are mandatory.
 
-The self-play row does not assert that the played move is objectively best. The
-move advances the game and shapes the position distribution. The label is the
-root search score for the position before the move, so training teaches the net
-to approximate Enyo's searched position value.
+## Current Data
 
-Move quality is validated after training with replay, root-child audits, deeper
-search, Stockfish checks where useful, and SPRT. A net is only useful if the
-learned evaluator improves move choice inside Enyo's search.
+On `pwa-5090`:
 
-## Pipeline
+- Mixed packed training set:
+  `/home/petter/tmp/enyo_teacher/mixed_20m_selfplay_5m_lichess_5m_binpack_20260512/packed`
+- Self-play validation:
+  `/home/petter/tmp/enyo_teacher/sf_d12_20m_20260510_115338/labeled_packed`
+- Lichess eval JSONL:
+  `/home/petter/tmp/enyo_teacher/lichess_eval_d18_standard/lichess_eval.jsonl`
+- Binpack validation:
+  `/home/petter/tmp/enyo_teacher/binpack_test79_cp1600_5m_20260512/packed`
+- Current external init net:
+  `/home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn`
 
-1. Generate self-play PGNs with `fastchess`.
-   - Use the current strongest Enyo binary.
-   - Use the current strongest NNUE2 file.
-   - Use fixed depth first, usually depth 8-10.
-   - Store PGNs under `~/tmp/enyo_selfplay/...`.
+## Latest Results
 
-2. Convert PGN to JSONL training rows.
-   - `fen`: position before the searched move.
-   - `score`: root score in centipawns, side-to-move perspective.
-   - `wdl`: game result from side-to-move perspective.
-   - Keep depth, ply, move, and source metadata for audit.
-
-3. Validate the dataset.
-   - Verify sign convention on sample positions.
-   - Check score distribution.
-   - Check WDL distribution.
-   - Check duplicate rate.
-   - Drop mate-score rows and extreme tails for pilots.
-
-4. Train NNUE2.
-   - Initialize from the current strong Berserk-format net.
-   - Objective: MPE25.
-   - Start with `wdl-lambda` around `0.75`.
-   - Pilot mode: train only the float head first.
-   - Scale mode: train all layers once the pipeline is proven.
-
-5. Export to `.nn`.
-   - Roundtrip-test loader/exporter.
-   - Load via `setoption name nnue2_file value nnue/<candidate>.nn`.
-
-6. Gate the candidate.
-   - Replay known bad games.
-   - Run dataset eval metrics.
-   - Run fixed-depth sanity games if useful.
-   - Run SPRT against the current reference.
-
-7. Iterate only if the candidate is neutral or positive.
-   - Candidate becomes new generator only after it is accepted.
-   - Otherwise keep the generator fixed and improve data/training.
-
-## First Milestone
-
-Create a 1M-row self-play dataset and train a pilot net with the command in
-the Scripts section.
-
-Expected first result: not necessarily stronger. The useful result is a
-validated end-to-end process that can be scaled to 10M, 50M, then 100M+ rows.
-
-## Acceptance Standard
-
-A network is not accepted because training loss improved. It must satisfy:
-
-- Loads cleanly in Enyo.
-- Replays known bug games without new obvious failures.
-- Does not regress speed enough to dominate Elo.
-- SPRT against the current reference is neutral or positive.
-
-Only accepted networks may become the next self-play generator.
-
-## Scripts
-
-The self-play and NNUE2 training scripts live on the `nnue/own-net-pipeline`
-branch until the pipeline is proven:
-
-- `tools/selfplay/pilot.sh`: end-to-end pilot runner.
-- `tools/selfplay/run_selfplay.sh`: runs Enyo-vs-Enyo fixed-depth games with
-  `fastchess`.
-- `tools/selfplay/pgn_to_jsonl.py`: converts annotated PGN to JSONL rows.
-- `tools/selfplay/audit_jsonl.py`: fails bad training data before training.
-- `tools/nnue2/eval_dataset.py`: validates dataset shape and score statistics.
-- `tools/nnue2/train.py`: trains an NNUE2 candidate.
-- `tools/nnue2/export.py`: exports a Berserk-format `.nn`.
-- `tools/nnue2/roundtrip.py`: verifies exported loader compatibility.
-
-Current pwa-5090 pilot command:
+Primary tmux sessions on `pwa-5090`:
 
 ```sh
-cd ~/tmp/enyo-own-net-pipeline
-
-tools/selfplay/pilot.sh \
-  --python ~/.venv/bin/python \
-  --runner ~/source/fastchess/fastchess \
-  --engine ./build/enyo \
-  --nnue2-file ~/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn \
-  --games 7000 \
-  --shard-games 1000 \
-  --concurrency 6 \
-  --threads 4 \
-  --depth 8 \
-  --epochs 5 \
-  --trainable float-head \
-  --max-rows 0 \
-  --val-rows 50000 \
-  --max-abs-cp 2000 \
-  --batch-size 4096 \
-  --device cuda \
-  --out-dir ~/tmp/enyo_selfplay/pilot_d8_1m_$(date +%Y%m%d_%H%M%S)
+tmux attach -t nnue_test
+tmux attach -t nnue_cmd
 ```
 
-The pilot drops mate-score rows and saturated `±2045` eval-cap rows. It then
-runs `audit_jsonl.py`; training does not start unless the JSONL has legal FENs,
-legal moves, correct side-to-move metadata, expected depth, enough rows, low
-duplicate rate, no capped-score leakage, and sane WDL/score ordering.
-
-Run it in tmux and tee the log:
+Recent controlled run:
 
 ```sh
-tmux new-window -t ai -n ownnet-pilot
-
-cd ~/tmp/enyo-own-net-pipeline
-set -o pipefail
-tools/selfplay/pilot.sh ... 2>&1 | tee ~/tmp/enyo_ownnet_pilot.log
+/home/petter/tmp/enyo_teacher/controlled_30m_20260512_105006
 ```
+
+Results:
+
+- `output_lr1e5`: replay-clean relative to baseline, but sign/slope
+  distortion was too large. Not SPRT tested.
+- `float_head_lr1e7`: replay-clean relative to baseline, but SPRT was neutral
+  (`~+1 Elo` after `1779/2000` games). Not promoted.
+
+Recent all-layer low-LR run:
+
+```sh
+/home/petter/tmp/run_nnue_all_lowlr_20260512.sh
+/home/petter/tmp/enyo_teacher/all_lowlr_30m_20260512_155610
+```
+
+Candidate:
+
+```sh
+all_lr2e8_e2
+```
+
+Configuration:
+
+- all weights trainable;
+- Huber loss;
+- learning rate `2e-8`;
+- 2 epochs;
+- initialized from the current external net.
+
+SPRT result:
+
+```text
+[2000/2000] Elo   2.4 +/-   9.9 | LLR -0.21/2.94 ( -7%) | LOS 68.5% | draw  58.0%
+Finished match
+Total Time: 03:13:03
+```
+
+Takeaway: `all_lr2e8_e2` is replay-clean and should be archived as a candidate,
+but it is not strong enough evidence to promote as the new reference. The point
+estimate is positive, but the error bar is much larger than the gain and the
+LLR is slightly negative versus the SPRT target.
+
+Earlier self-play plus Lichess-only Huber run:
+
+```sh
+/home/petter/tmp/enyo_teacher/mixed_20m_selfplay_5m_lichess_standard_20260512/huber_lr1e-7_e5_from_berserk/model.nn
+```
+
+SPRT result:
+
+```text
+[2000/2000] Elo  -1.39 +/- 9.96, LOS 39.23 %, draw 57.20 %
+```
+
+Takeaway: removing binpack and improving static validation loss was still not
+enough. The current approach can produce safe near-neutral nets, but not a
+meaningfully stronger net.
+
+Target audit finding:
+
+- Packed binpack WDL is strongly skewed (`mean ~= 0.30`, median `0.0`).
+- That matters for future MPE/WDL training.
+- It does not explain the latest neutral Huber run, because Huber ignores WDL.
+- Before using binpack in MPE/WDL training, confirm result POV and either use a
+  source-specific `wdl_lambda` or train binpack as CP-only.
+
+Active source-aware run:
+
+```sh
+/home/petter/tmp/run_nnue_source_aware_20260512.sh
+/home/petter/tmp/enyo_teacher/source_aware_30m_20260512_201907
+```
+
+Purpose:
+
+- repack the 30M mix with `source_id.npy` and `source_map.json`;
+- train `src_mpe_wdl75_bin35_lr1e6_e2` first;
+- if that fails gates, train `src_huber_bin35_lr3e8_e2`;
+- compare source-separated metrics against the init net;
+- run replay gates before any SPRT;
+- start SPRT only if replay has no new issues and metrics remain sane.
+
+This run uses the source-aware trainer commit:
+
+```text
+6814334 tools/nnue2: add source-aware training controls
+```
+
+## Validation
+
+Every candidate is evaluated against:
+
+- self-play validation MAE/sign/bias/correlation;
+- lichess validation MAE/sign/bias/correlation;
+- binpack validation MAE/sign/bias/correlation;
+- forced replay gates on known bad games.
+
+Replay gate logs are written under each candidate directory:
+
+```sh
+replay_gates_force/replay.log
+replay_gates_force/summary.txt
+```
+
+Current replay gate games:
+
+- `EnyoBot vs Lynx_BOT - jjThVRPN.log`
+- `Hypersion vs EnyoBot - npmgxvIO.log`
+- `JustinBot15 vs EnyoBot - JZaA98Uv.log`
+- `EnyoBot vs stage270 - 2DRMYfOm_oot.log`
+- `stage270 vs EnyoBot - kp3inZBb.log`
+
+## Acceptance
+
+A candidate may proceed to SPRT only if:
+
+- it loads cleanly in Enyo;
+- source-separated metrics are not clearly worse than baseline;
+- replay gates do not introduce new serious blunders;
+- search speed is not materially worse.
+
+If SPRT is neutral or positive, the net can become the new generator/reference.
+If replay fails, discard the net and improve target/data quality before trying
+again.
+
+## Next Steps
+
+1. Keep `all_lr2e8_e2` archived, but do not make it the main reference yet.
+2. Stop rerunning small optimizer variations on the same 30M target mix.
+3. Improve the pipeline before the next expensive run:
+   keep source identity in packed data, support source-specific loss weights,
+   and validate each source independently.
+4. Improve the targets:
+   use deeper or higher-node teacher labels for selected Enyo positions,
+   add tactical/endgame coverage, and avoid using biased game-result WDL as a
+   global target.
+5. Train only small pilots until one improves source-separated validation
+   without replay damage.
+6. Scale to a large run only after a pilot has a realistic chance of at least
+   `+5 Elo`; otherwise the SPRT cost is mostly noise measurement.
