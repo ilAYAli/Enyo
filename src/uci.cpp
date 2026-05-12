@@ -572,7 +572,7 @@ void Uci::position(std::istringstream& iss)
             b.set(fen);
         }
     } else {
-        eventlog::log<Log::error>("Error, unknown position type: {}\n", token);
+        eventlog::log<Log::error>("unknown position type: {}\n", token);
         return;
     }
 
@@ -683,13 +683,13 @@ void Uci::go(std::istringstream & iss)
         const auto& moves = si.has_searchmoves ? si.searchmoves : legal;
         if (moves.empty()) {
             eventlog::log<eventlog::Log::warning>(
-                "EMERGENCY_MOVE: no legal move clock={} threshold={}\n",
+                "emergency move: no legal move clock={} threshold={}\n",
                 active_clock,
                 last_resort_move_ms);
             ucilog("bestmove 0000\n");
         } else {
             eventlog::log<eventlog::Log::warning>(
-                "EMERGENCY_MOVE: clock={} threshold={} move={}\n",
+                "emergency move: clock={} threshold={} move={}\n",
                 active_clock,
                 last_resort_move_ms,
                 moves[0]);
@@ -717,7 +717,7 @@ void Uci::go(std::istringstream & iss)
                 if (std::chrono::high_resolution_clock::now() >= deadline) {
                     thread::pool.stop = true;
                     eventlog::log<eventlog::Log::error>(
-                        "WATCHDOG: fired at deadline ({}ms budget)\n", hard_ms);
+                        "watchdog fired at deadline ({}ms budget)\n", hard_ms);
                     return;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));

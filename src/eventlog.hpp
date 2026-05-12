@@ -8,6 +8,7 @@
 #include <sstream>
 #include <mutex>
 #include <atomic>
+#include <string_view>
 
 
 namespace eventlog {
@@ -102,9 +103,16 @@ inline void init() {
 template <Log level = Log::info, typename... T>
 inline void log(fmt::format_string<T...> fmtStr, T&&... args) {
     if constexpr (level >= defaultLogLevel) {
+        const auto s = fmt::format(fmtStr, std::forward<T>(args)...);
         std::lock_guard lock(logMutex);
         if (logFile.is_open()) {
-            auto s = fmt::format(fmtStr, std::forward<T>(args)...);
+            if constexpr (level == Log::error) {
+                constexpr std::string_view prefix = "ERROR: ";
+                logFile.write(prefix.data(), static_cast<std::streamsize>(prefix.size()));
+            } else if constexpr (level == Log::warning) {
+                constexpr std::string_view prefix = "WARNING: ";
+                logFile.write(prefix.data(), static_cast<std::streamsize>(prefix.size()));
+            }
             logFile.write(s.data(), static_cast<std::streamsize>(s.size()));
             if constexpr (level >= Log::warning)
                 logFile.flush();

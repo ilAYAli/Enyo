@@ -171,7 +171,7 @@ int main(int argc, char **argv)
     }
 
     eventlog::init();
-    eventlog::log<eventlog::Log::warning>("id {}\n", g_version);
+    eventlog::log<eventlog::Log::info>("id {}\n", g_version);
 
     if (!fen.empty())
         uci(fmt::format("position fen {}", fen));
@@ -201,7 +201,7 @@ int main(int argc, char **argv)
     if (!cfgmgr.syzygy_path.empty()) {
         if (!syzygy::init(cfgmgr.syzygy_path)) {
             eventlog::log<eventlog::Log::warning>(
-                "info string warning: failed to initialize tablebases at '{}'\n",
+                "failed to initialize tablebases at '{}'\n",
                 cfgmgr.syzygy_path);
         }
     }

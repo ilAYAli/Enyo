@@ -822,7 +822,7 @@ void search_position(Worker & worker)
     worker.pvline.clear();
 
     if (worker.id == 0) {
-        eventlog::log<eventlog::Log::error>(
+        eventlog::log<eventlog::Log::debug>(
             "search_position start: fen={}, legal_moves={}, legal[0]={}\n",
             board.fen(),
             legal_fallback.size(),
@@ -998,7 +998,7 @@ void search_position(Worker & worker)
             prev_iter_value = value;
         } else {
             eventlog::log<eventlog::Log::error>(
-                "ERROR: pvbm empty at depth {}. pv_str='{}' len[0]={} table[0][0]={} prev_bestmove={} score={} fen={}\n",
+                "pvbm empty at depth {}. pv_str='{}' len[0]={} table[0][0]={} prev_bestmove={} score={} fen={}\n",
                 depth,
                 worker.pvline.str(),
                 static_cast<int>(worker.pvline.len[0]),
@@ -1010,7 +1010,7 @@ void search_position(Worker & worker)
 
         if (!is_legal_root_move(worker.bestmove)) {
             eventlog::log<eventlog::Log::error>(
-                "ERROR: worker.bestmove={} is NOT legal at root, depth={}. pvbm={} prev_bestmove={} pv_str='{}' len[0]={} fen={}\n",
+                "worker.bestmove={} is NOT legal at root, depth={}. pvbm={} prev_bestmove={} pv_str='{}' len[0]={} fen={}\n",
                 worker.bestmove,
                 depth,
                 pvbm,
@@ -1050,7 +1050,7 @@ void search_position(Worker & worker)
 
         if (!is_legal_root_move(out) && !legal_fallback.empty()) {
             eventlog::log<eventlog::Log::error>(
-                "ERROR: bestmove fallback fired. pre_fallback_out={} worker.bestmove={} shortest_mate.move={} "
+                "bestmove fallback fired. pre_fallback_out={} worker.bestmove={} shortest_mate.move={} "
                 "pvline.bestmove()={} pv_str='{}' len[0]={} legal_fallback[0]={} fen={}\n",
                 out,
                 worker.bestmove,
