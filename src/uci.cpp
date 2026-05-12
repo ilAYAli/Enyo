@@ -87,14 +87,16 @@ void cap_clock_managed_allocation(TimeAllocation & alloc, int uci_time, int uci_
     alloc.soft = std::min(alloc.soft, alloc.hard);
 }
 
+constexpr int emergency_move_threshold_ms(int uci_inc)
+{
+    return uci_inc > 0 ? 200 : 2000;
+}
+
 // Compute soft/hard time budgets for one move.
 //
-// Sudden-death (no movestogo): allocate ~1/30 of remaining time as the soft
-//   budget; hard cap = min(time/6, soft*3). The tighter hard (previously
-//   min(time/5, soft*5)) keeps a single move from spending so much clock
-//   that a later one flags at fast TCs — see tm-base-rate-v1 SPRT which
-//   observed 16 time-loss games out of 112 when the cap was time/5.
-//   Increment is spent at 3/4 rate since it's replenished next move.
+// Sudden-death (no movestogo): no-increment games must be much more
+// conservative because every move has GUI/network overhead and there is no
+// refill. With increment, spend part of the increment because it returns.
 // Classical (movestogo): divide remaining time across the mandated moves plus
 //   a small buffer; the hard budget is 4x soft, capped at time/4.
 // Both branches reserve move overhead: 50ms with increment, 250ms without.
@@ -104,7 +106,7 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
 {
     using namespace std::chrono;
 
-    constexpr milliseconds min_time(100);
+    const milliseconds min_time(uci_inc > 0 ? 100 : 20);
     const milliseconds lag(clock_move_overhead_ms(uci_inc));
 
     if (si.movetime != -1) {
@@ -114,7 +116,7 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
     if (uci_time == -1) {
         return { milliseconds(-1), milliseconds(-1) };
     }
-    if (uci_time <= lag.count()) {
+    if (uci_time <= emergency_move_threshold_ms(uci_inc)) {
         return { milliseconds(0), milliseconds(0) };
     }
 
@@ -131,13 +133,10 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
         const int per_move = time_budget / (si.movestogo + 2) + uci_inc;
         soft = milliseconds(per_move);
         hard = std::min(milliseconds(time_budget / 4), soft * 4);
+    } else if (uci_inc == 0) {
+        soft = milliseconds(time_budget / 100);
+        hard = std::min(milliseconds(time_budget / 12), soft * 2);
     } else {
-        // Sudden-death: keep the soft base rate at time/30 + 3/4*inc
-        // (proven fine at short tc — see tm-base-rate-v1 SPRT which
-        // flagged in 16/112 games when soft was widened). Tighten the
-        // hard cap to min(time/6, soft*3): a single move can still
-        // spend ~3× the soft target in an unstable position, but not
-        // ~5× which was enough to flag games at 10+0.1.
         soft = milliseconds(time_budget / 30 + uci_inc * 3 / 4);
         hard = std::min(milliseconds(time_budget / 6), soft * 3);
     }
@@ -667,7 +666,7 @@ void Uci::go(std::istringstream & iss)
     }
 
     const auto active_clock = active_clock_ms(b, si);
-    const auto emergency_move_ms = clock_move_overhead_ms(active_increment_ms(b, si));
+    const auto emergency_move_ms = emergency_move_threshold_ms(active_increment_ms(b, si));
     if (si.movetime == -1 && si.depth == MAX_PLY && active_clock >= 0 && active_clock <= emergency_move_ms) {
         const auto& moves = si.has_searchmoves ? si.searchmoves : legal;
         if (moves.empty()) {
