@@ -7,6 +7,12 @@
   Watch her play live at <a href="https://lichess.org/@/EnyoBot/tv" target="Lichess">Lichess</a>
 </p>
 
+<h3>Engine</h3>
+Enyo is a C++23 UCI chess engine built around iterative deepening negamax/PVS
+alpha-beta search and NNUE evaluation.<br>
+Enyo's NNUE training work has used self-play positions and deeper offline teacher
+labels, public evaluation data, and curated engine-training positions.<br>
+
 <h3>Board representation</h3>
 <br>
 <pre>
@@ -62,7 +68,9 @@ Root tablebase move selection when Syzygy DTZ is available<br>
 <h3>Evaluation</h3>
 <a href="https://www.chessprogramming.org/NNUE" rel="nofollow">NNUE</a><br>
 Embedded 512-hidden Enyo NNUE evaluator<br>
-Optional Berserk-format 1024-hidden NNUE2 evaluator via UCI <code>nnue2_file</code><br>
+Optional 1024-hidden NNUE2 evaluator via UCI <code>nnue2_file</code><br>
+The NNUE2 path uses sparse king-relative features, 1024 hidden values per
+perspective, incremental accumulators, and a compact fully connected head.<br>
 Incremental NNUE and NNUE2 accumulators with refresh-table support<br>
 NNUE2 SIMD paths for ARM NEON and x86 AVX2/AVX-512 where available<br>
 Classical fallback evaluation for debugging<br>
@@ -72,7 +80,7 @@ Classical fallback evaluation for debugging<br>
 Syzygy WDL/DTZ probing<br>
 UCI interface with configurable <code>Threads</code>, <code>Hash</code>, <code>SyzygyPath</code>, <code>nnue_file</code> and <code>nnue2_file</code><br>
 Replay tooling for lichess logs and Stockfish validation<br>
-NNUE2 trainer/exporter skeleton for Berserk-format 1024-hidden networks<br>
+NNUE2 trainer/exporter tooling for 1024-hidden networks<br>
 
 <h3>Acknowledgments</h3>
 Bluefever Software: Chess Engine In C <a href="https://github.com/bluefeversoft/vice" rel="nofollow">Vice</a><br>
@@ -80,7 +88,6 @@ Chess Programming <a href="https://www.youtube.com/playlist?list=PLmN0neTso3Jxh8
 
 <h3>Inspired by</h3>
 * Stockfish<br>
-* Berserk<br>
 * Rice<br>
 * Smallbrain<br>
 * Various open source engines.<br>
