@@ -73,53 +73,35 @@ inline __attribute__((always_inline)) void prefetch(const void *addr) {
 #endif
 }
 
-static inline constexpr square_t h1_to_a1[64] = {
-    a1, b1, c1, d1, e1, f1, g1, h1,
-    a2, b2, c2, d2, e2, f2, g2, h2,
-    a3, b3, c3, d3, e3, f3, g3, h3,
-    a4, b4, c4, d4, e4, f4, g4, h4,
-    a5, b5, c5, d5, e5, f5, g5, h5,
-    a6, b6, c6, d6, e6, f6, g6, h6,
-    a7, b7, c7, d7, e7, f7, g7, h7,
-    a8, b8, c8, d8, e8, f8, g8, h8 /* A8 */
-};
-
-static inline constexpr square_t a1_to_h1[64] = {
-    a1, b1, c1, d1, e1, f1, g1, h1,
-    a2, b2, c2, d2, e2, f2, g2, h2,
-    a3, b3, c3, d3, e3, f3, g3, h3,
-    a4, b4, c4, d4, e4, f4, g4, h4,
-    a5, b5, c5, d5, e5, f5, g5, h5,
-    a6, b6, c6, d6, e6, f6, g6, h6,
-    a7, b7, c7, d7, e7, f7, g7, h7,
-    a8, b8, c8, d8, e8, f8, g8, h8 /* A8 */
-};
-
+static inline constexpr square_t flip_file(square_t sq)
+{
+    return static_cast<square_t>(sq ^ 7U);
+}
 
 static inline constexpr square_t sqconv(square_t sq)
 {
-    return h1_to_a1[sq];
+    return flip_file(sq);
 }
 
 static inline constexpr square_t h1a1(square_t sq)
 {
-    return h1_to_a1[sq];
+    return flip_file(sq);
 }
 
 static inline constexpr square_t a1h1(square_t sq)
 {
-    return a1_to_h1[sq];
+    return flip_file(sq);
 }
 
 static inline constexpr uint64_t bbconv(uint64_t bb)
 {
-    uint64_t converted_bb = 0;
-    while (bb) {
-        const auto sq = pop_lsb(bb);
-        constexpr auto & conversion = h1_to_a1;
-        converted_bb |= 1ULL << conversion[sq];
-    }
-    return converted_bb;
+    bb = ((bb & 0x5555555555555555ULL) << 1)
+       | ((bb >> 1) & 0x5555555555555555ULL);
+    bb = ((bb & 0x3333333333333333ULL) << 2)
+       | ((bb >> 2) & 0x3333333333333333ULL);
+    bb = ((bb & 0x0F0F0F0F0F0F0F0FULL) << 4)
+       | ((bb >> 4) & 0x0F0F0F0F0F0F0F0FULL);
+    return bb;
 }
 
 constexpr inline int pt2p(Color c, PieceType pt) {
