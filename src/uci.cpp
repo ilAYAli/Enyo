@@ -345,7 +345,7 @@ int Uci::operator()(const std::string& command)
             fmt::print("nnue inc {} full {}\n", inc, full);
         } else if (token == "eval2") {
             // Phase 4 (arch port): evaluate the current board through
-            // the new 1024-hidden Berserk-compatible NNUE, fresh accumulators.
+            // the new 1024-hidden NNUE, fresh accumulators.
             // Requires a .nn loaded via `setoption name nnue2_file value ...`
             // or the `eval2 load` subcommand. Emits a one-line result.
             std::string sub;
@@ -467,7 +467,7 @@ void Uci::setoption(std::istringstream& iss)
     if (lower_name == "logfile" || lower_name == "debug log file")
         eventlog::reopen_logfile(cfgmgr.logfile, true);
     if (lower_name == "nnue2_file") {
-        // Auto-load the Berserk-arch network when the UCI option is set.
+        // Auto-load the NNUE2 network when the UCI option is set.
         // Empty string disables routing and falls back to the embedded
         // 512-hidden net. Used by cutechess / lichess to select NNUE2
         // without having to send a custom `eval2 load` command.
