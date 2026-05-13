@@ -119,6 +119,21 @@
         required before a network can be called stronger.
       </p>
       <pre><code>positions -&gt; teacher labels -&gt; packed tensors -&gt; PyTorch training -&gt; .nn export -&gt; replay gates -&gt; SPRT</code></pre>
+      <p class="small">
+        Glossary links:
+        <a href="#vocab-fen">FEN</a>,
+        <a href="#vocab-jsonl">JSONL</a>,
+        <a href="#vocab-feature">feature</a>,
+        <a href="#vocab-weight">weight</a>,
+        <a href="#vocab-teacher">teacher</a>,
+        <a href="#vocab-label">label</a>,
+        <a href="#vocab-tensor">tensor</a>,
+        <a href="#vocab-pytorch">PyTorch</a>,
+        <a href="#vocab-pack">packed dataset</a>,
+        <a href="#vocab-quantization">.nn export</a>,
+        <a href="#vocab-replay">replay gate</a>,
+        <a href="#vocab-sprt">SPRT</a>.
+      </p>
     </header>
 
     <section>
@@ -126,8 +141,9 @@
       <p>
         Enyo search needs an evaluation for leaf positions. The NNUE is a fast
         function that turns a chess position into one centipawn score. Training
-        changes the function's weights so its score is closer to a stronger
-        teacher's score.
+        adjusts the stored numeric <a href="#vocab-weight">weights</a> inside
+        that function so its score is closer to a stronger
+        <a href="#vocab-teacher">teacher</a>'s score.
       </p>
 
       <pre><code>FEN position
@@ -139,9 +155,10 @@
 
       <p>
         A training row does not say "play this move." It says "in this position,
-        the teacher thinks the side to move is worth this many centipawns." If
-        the network predicts too high or too low, training nudges the weights
-        attached to the active features.
+        the <a href="#vocab-teacher">teacher</a> thinks the side to move is
+        worth this many centipawns." If the network predicts too high or too
+        low, training nudges the <a href="#vocab-weight">weights</a> attached
+        to the active <a href="#vocab-feature">features</a>.
       </p>
 
       <div class="note">
@@ -221,8 +238,9 @@
       <p>
         The short pipeline line is accurate, but each arrow hides an important
         file format and validation step. The current Enyo pipeline is built
-        around JSONL position rows until packing; after packing, training uses
-        dense NumPy arrays loaded as PyTorch tensors.
+        around <a href="#vocab-jsonl">JSONL</a> position rows until packing;
+        after packing, training uses dense NumPy arrays loaded as
+        <a href="#vocab-pytorch">PyTorch</a> <a href="#vocab-tensor">tensors</a>.
       </p>
 
       <h3>1. Positions</h3>
@@ -260,10 +278,11 @@
       </table>
 
       <p>
-        A position row is stored as JSONL. The key field is <code>fen</code>,
-        a FEN string describing the board, side to move, castling rights,
-        en-passant square, and counters. The row also keeps context from the
-        game so the data can be audited later.
+        A position row is stored as <a href="#vocab-jsonl">JSONL</a>. The key
+        field is <code>fen</code>, a <a href="#vocab-fen">FEN</a> string
+        describing the board, side to move, castling rights, en-passant square,
+        and counters. The row also keeps context from the game so the data can
+        be audited later.
       </p>
 
       <pre><code>{
@@ -295,10 +314,11 @@
 
       <h3>2. Teacher Labels</h3>
       <p>
-        Teacher labeling asks a stronger engine, currently Stockfish, to evaluate
-        each FEN at a fixed depth. The output is another JSONL file with the same
-        row shape, but the training target <code>score</code> is replaced by the
-        teacher's centipawn score.
+        <a href="#vocab-teacher">Teacher</a> labeling asks a stronger engine,
+        currently Stockfish, to evaluate each <a href="#vocab-fen">FEN</a> at a
+        fixed depth. The output is another <a href="#vocab-jsonl">JSONL</a> file
+        with the same row shape, but the training target <code>score</code> is
+        replaced by the teacher's centipawn score.
       </p>
 
       <pre><code>source_bucketed.jsonl row
@@ -327,9 +347,10 @@ labeled.jsonl row
 }</code></pre>
 
       <p>
-        Labels are sharded so many Stockfish processes can work in parallel.
-        The depth-16 bucket run used 16 one-thread Stockfish workers with small
-        per-worker hash. Each shard writes:
+        <a href="#vocab-label">Labels</a> are <a href="#vocab-shard">sharded</a>
+        so many Stockfish processes can work in parallel. The depth-16 bucket
+        run used 16 one-thread Stockfish workers with small per-worker hash.
+        Each shard writes:
       </p>
 
       <pre><code>shards/label.0.jsonl
@@ -346,9 +367,11 @@ shards/label.15.jsonl</code></pre>
 
       <h3>3. Packed Tensors</h3>
       <p>
-        JSONL is readable but slow for training. Packing converts FEN strings
-        into Enyo NNUE feature indices once, writes numeric arrays, and lets
-        PyTorch train without reparsing chess text every epoch.
+        <a href="#vocab-jsonl">JSONL</a> is readable but slow for training.
+        Packing converts <a href="#vocab-fen">FEN</a> strings into Enyo NNUE
+        <a href="#vocab-feature">feature</a> indices once, writes numeric
+        arrays, and lets <a href="#vocab-pytorch">PyTorch</a> train without
+        reparsing chess text every <a href="#vocab-epoch">epoch</a>.
       </p>
 
       <p>The current packed directory contains:</p>
@@ -379,17 +402,18 @@ shards/label.15.jsonl</code></pre>
 }</code></pre>
 
       <p>
-        "Packed tensors" means these arrays are the dataset representation
-        PyTorch consumes. They are not the trained network. They are simply the
-        preprocessed input rows plus target arrays.
+        "Packed <a href="#vocab-tensor">tensors</a>" means these arrays are the
+        dataset representation <a href="#vocab-pytorch">PyTorch</a> consumes.
+        They are not the trained network. They are simply the preprocessed input
+        rows plus target arrays.
       </p>
 
       <h3>4. PyTorch Training</h3>
       <p>
         <code>train.py</code> loads the packed arrays, builds the same NNUE
         architecture Enyo uses at runtime, initializes from an existing
-        <code>.nn</code> file when requested, and optimizes the weights with
-        PyTorch.
+        <code>.nn</code> file when requested, and optimizes the
+        <a href="#vocab-weight">weights</a> with <a href="#vocab-pytorch">PyTorch</a>.
       </p>
 
       <pre><code>packed arrays
@@ -414,9 +438,11 @@ common objective: Huber loss
 example beta: 200 cp</code></pre>
 
       <p>
-        A lower training loss means the net fits the teacher labels better. It
-        does not automatically mean higher Elo. That is why static metrics,
-        replay gates, and SPRT are separate stages.
+        A lower training <a href="#vocab-loss">loss</a> means the net fits the
+        teacher <a href="#vocab-label">labels</a> better. It does not
+        automatically mean higher Elo. That is why static metrics,
+        <a href="#vocab-replay">replay gates</a>, and <a href="#vocab-sprt">SPRT</a>
+        are separate stages.
       </p>
 
       <h3>5. <code>.nn</code> Export</h3>
@@ -429,8 +455,9 @@ model.nn  = Enyo runtime network, loaded by UCI option nnue2_file</code></pre>
 
       <p>
         The exported <code>.nn</code> follows the runtime layout loaded by Enyo's
-        NNUE2 evaluator. The file has no JSON wrapper; it is raw binary arrays
-        in the exact order the engine expects:
+        NNUE2 evaluator. This is the <a href="#vocab-quantization">quantized</a>
+        runtime file. It has no JSON wrapper; it is raw binary arrays in the
+        exact order the engine expects:
       </p>
 
       <pre><code>input_weights  int16  [12288, 1024]
@@ -450,10 +477,11 @@ output_bias    float32 [1]</code></pre>
 
       <h3>6. Replay Gates</h3>
       <p>
-        Replay gates answer a different question than static metrics: if this
-        network is inserted into Enyo search, does it make known bad positions
-        worse? The gate replays real logged games and compares candidate behavior
-        against the known baseline/reference analysis.
+        <a href="#vocab-replay">Replay gates</a> answer a different question
+        than static metrics: if this network is inserted into Enyo search, does
+        it make known bad positions worse? The gate replays real logged games
+        and compares candidate behavior against the known baseline/reference
+        analysis.
       </p>
 
       <pre><code>known Enyo problem log
@@ -472,9 +500,10 @@ output_bias    float32 [1]</code></pre>
 
       <h3>7. SPRT</h3>
       <p>
-        SPRT is the final arbiter. It runs candidate-vs-reference games with the
-        same Enyo executable and different <code>nnue2_file</code> values. This
-        isolates the network change from unrelated engine changes.
+        <a href="#vocab-sprt">SPRT</a> is the final arbiter. It runs
+        candidate-vs-reference games with the same Enyo executable and different
+        <code>nnue2_file</code> values. This isolates the network change from
+        unrelated engine changes.
       </p>
 
       <pre><code>candidate engine = Enyo executable + candidate model.nn
@@ -909,6 +938,12 @@ replay_gates/enyo.log</code></pre>
 
         <dt id="vocab-pack">Packed dataset</dt>
         <dd>Binary arrays generated from JSONL so PyTorch can train without reparsing FEN text during every epoch.</dd>
+
+        <dt id="vocab-tensor">Tensor</dt>
+        <dd>A numeric array used by PyTorch. In this pipeline, packed NumPy arrays become tensors during training.</dd>
+
+        <dt id="vocab-pytorch">PyTorch</dt>
+        <dd>The Python machine-learning library used to run forward passes, compute loss, backpropagate errors, and update NNUE weights.</dd>
 
         <dt id="vocab-batch">Batch</dt>
         <dd>A group of rows trained together in one optimizer step.</dd>
