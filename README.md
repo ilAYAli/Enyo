@@ -80,7 +80,7 @@ Classical fallback evaluation for debugging<br>
 Syzygy WDL/DTZ probing<br>
 UCI interface with configurable <code>Threads</code>, <code>Hash</code>, <code>SyzygyPath</code>, <code>nnue_file</code> and <code>nnue2_file</code><br>
 Replay tooling for lichess logs and Stockfish validation<br>
-NNUE2 trainer/exporter tooling for 1024-hidden networks<br>
+NNUE2 training and exporter tooling lives in the sibling <code>nnue</code> repo<br>
 
 <h3>Acknowledgments</h3>
 Bluefever Software: Chess Engine In C <a href="https://github.com/bluefeversoft/vice" rel="nofollow">Vice</a><br>

@@ -2,7 +2,8 @@
 
 This document tracks the process for building a competitive Enyo-owned NNUE.
 It is a roadmap and status file, not the detailed training explainer. The
-training mechanics and script details live in `README_nnue_training.html`.
+training mechanics and script details live in the sibling `nnue` repo:
+`../nnue/README_nnue_training.html`.
 
 ## Goal
 
@@ -196,5 +197,5 @@ ssh petter@pwa-5090 'ps -eo pid,etime,pcpu,pmem,comm,args --sort=-pcpu | head -3
 Detailed explanation of how training works:
 
 ```text
-README_nnue_training.html
+../nnue/README_nnue_training.html
 ```

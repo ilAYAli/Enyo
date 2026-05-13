@@ -21,6 +21,7 @@
 - Primary remote test machine: `petter@pwa-5090`.
 - Secondary deployment/test machine: `pwa-win`.
 - Remote Enyo checkout: `~/code/cpp/chess/enyo`.
+- Remote NNUE training checkout: `~/code/cpp/chess/nnue`.
 - Run tests and SPRTs on `pwa-5090` in the tmux sessions listed below.
 - Do not detach from the tmux session after a test completes; leave the window open with the final output visible.
 - Durable temporary files belong under `~/tmp/`.
