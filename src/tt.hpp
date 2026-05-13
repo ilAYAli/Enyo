@@ -161,7 +161,10 @@ public:
     }
 
     int get_hashfull() const {
-        return static_cast<int>(ceil((new_write * 1000.0) / static_cast<double>(buckets)));
+        if (buckets == 0)
+            return 0;
+        const int hashfull = static_cast<int>(ceil((new_write * 1000.0) / static_cast<double>(buckets)));
+        return hashfull > 1000 ? 1000 : hashfull;
     }
 
     void prepare() {
