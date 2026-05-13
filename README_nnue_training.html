@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Enyo NNUE Training</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f7f4;
+      --fg: #202124;
+      --muted: #5f6368;
+      --panel: #ffffff;
+      --border: #d9d9d2;
+      --code-bg: #111827;
+      --code-fg: #f3f4f6;
+      --accent: #0f766e;
+      --warn: #b45309;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111315;
+        --fg: #e8eaed;
+        --muted: #a5a8ad;
+        --panel: #191c20;
+        --border: #34383f;
+        --code-bg: #05070a;
+        --code-fg: #e5e7eb;
+        --accent: #5eead4;
+        --warn: #fbbf24;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(980px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 48px 0 72px;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+    }
+
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 16px; }
+    h1 { font-size: clamp(2rem, 5vw, 3.2rem); }
+    h2 { border-top: 1px solid var(--border); font-size: 1.55rem; margin-top: 40px; padding-top: 28px; }
+    h3 { font-size: 1.12rem; margin-top: 28px; }
+    p { margin: 0 0 18px; }
+    a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    ul, ol { padding-left: 24px; }
+    li { margin: 6px 0; }
+
+    dl {
+      display: grid;
+      gap: 14px 22px;
+      grid-template-columns: minmax(160px, 230px) 1fr;
+      margin: 20px 0 28px;
+    }
+
+    dt { color: var(--accent); font-weight: 700; }
+    dd { margin: 0; }
+    dt:target { background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 4px; padding: 2px 4px; }
+
+    table { border-collapse: collapse; margin: 20px 0 28px; width: 100%; }
+    th, td { border-bottom: 1px solid var(--border); padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 0.88rem; font-weight: 700; text-transform: uppercase; }
+
+    code {
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      padding: 0.12em 0.28em;
+    }
+
+    pre {
+      background: var(--code-bg);
+      border-radius: 8px;
+      color: var(--code-fg);
+      margin: 18px 0 24px;
+      overflow-x: auto;
+      padding: 18px;
+    }
+
+    pre code { background: transparent; border-radius: 0; color: inherit; display: block; font-size: 0.92rem; line-height: 1.55; padding: 0; }
+
+    .lead { color: var(--muted); font-size: 1.08rem; max-width: 800px; }
+    .note { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; margin: 24px 0; padding: 18px; }
+    .warning { border-left-color: var(--warn); }
+    .small { color: var(--muted); font-size: 0.94rem; }
+
+    @media (max-width: 700px) {
+      dl { grid-template-columns: 1fr; }
+      th, td { padding: 8px 6px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Enyo NNUE Training</h1>
+      <p class="lead">
+        This document explains how Enyo NNUE training works: what the network
+        represents, what a training row means, how teacher labels become weight
+        updates, which scripts transform the data, and why replay plus SPRT are
+        required before a network can be called stronger.
+      </p>
+      <pre><code>positions -&gt; teacher labels -&gt; packed tensors -&gt; PyTorch training -&gt; .nn export -&gt; replay gates -&gt; SPRT</code></pre>
+    </header>
+
+    <section>
+      <h2>The Core Idea</h2>
+      <p>
+        Enyo search needs an evaluation for leaf positions. The NNUE is a fast
+        function that turns a chess position into one centipawn score. Training
+        changes the function's weights so its score is closer to a stronger
+        teacher's score.
+      </p>
+
+      <pre><code>FEN position
+  -&gt; active sparse NNUE features
+  -&gt; current network prediction
+  -&gt; compare with teacher score
+  -&gt; backprop updates weights
+  -&gt; exported .nn used by Enyo search</code></pre>
+
+      <p>
+        A training row does not say "play this move." It says "in this position,
+        the teacher thinks the side to move is worth this many centipawns." If
+        the network predicts too high or too low, training nudges the weights
+        attached to the active features.
+      </p>
+
+      <div class="note">
+        The roadmap, completed checklist, and changing run status belong in
+        <code>NNUE.md</code>. This file explains the training pipeline itself.
+      </div>
+    </section>
+
+    <section>
+      <h2>Training Data Flow</h2>
+      <p>
+        Training data moves through several representations. Each step has a
+        specific job: choose useful positions, create stronger labels, make the
+        data cheap for PyTorch, train a candidate, then reject anything that does
+        not survive engine validation.
+      </p>
+
+      <table>
+        <thead>
+          <tr><th>Step</th><th>Why it exists</th><th>Script/tool</th><th>Output</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Choose positions</td>
+            <td>A huge source pool is too large and usually badly distributed. Sampling chooses a smaller set with the score mix we want.</td>
+            <td><code>sample_buckets.py</code></td>
+            <td><code>source_bucketed.jsonl</code></td>
+          </tr>
+          <tr>
+            <td>Create targets</td>
+            <td>The net needs target scores. A stronger engine is used as the teacher.</td>
+            <td><code>label_with_uci.py</code></td>
+            <td><code>shards/label.*.jsonl</code></td>
+          </tr>
+          <tr>
+            <td>Audit</td>
+            <td>Bad labels waste GPU time and can train a worse net. Audit checks distribution and sanity.</td>
+            <td><code>audit_targets.py</code></td>
+            <td><code>audit_targets.log</code></td>
+          </tr>
+          <tr>
+            <td>Pack</td>
+            <td>Parsing FEN text during every epoch is slow. Packing converts rows into arrays.</td>
+            <td><code>pack_dataset.py</code></td>
+            <td><code>packed/</code></td>
+          </tr>
+          <tr>
+            <td>Train</td>
+            <td>PyTorch changes weights so predictions move closer to teacher labels.</td>
+            <td><code>train.py</code></td>
+            <td><code>model.pt</code> and <code>model.nn</code></td>
+          </tr>
+          <tr>
+            <td>Static eval</td>
+            <td>Reject obviously distorted nets before spending hours on games.</td>
+            <td><code>eval_dataset.py</code></td>
+            <td>MAE, sign, bias, corr, slope, bucket metrics</td>
+          </tr>
+          <tr>
+            <td>Replay gate</td>
+            <td>Static eval is not enough. Replay checks search behavior in known problem games.</td>
+            <td><code>replay</code></td>
+            <td>move changes, blunders, timeouts, regressions</td>
+          </tr>
+          <tr>
+            <td>SPRT</td>
+            <td>The final question is Elo, not loss. SPRT tests the candidate in engine games.</td>
+            <td><code>sprt</code></td>
+            <td>Elo result in actual engine games</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Sample Shape</h2>
+      <p>
+        Score-bucket sampling is used so the net sees more than only quiet
+        equal-ish positions. A random self-play sample is usually dominated by
+        positions near equality, while search also needs useful evals in small
+        edges, clear advantages, and tactical positions.
+      </p>
+
+      <pre><code>source labeled rows
+  -&gt; keep unique FENs
+  -&gt; group by abs(score)
+  -&gt; sample a requested number from each bucket
+  -&gt; source_bucketed.jsonl</code></pre>
+
+      <table>
+        <thead>
+          <tr><th>Bucket</th><th>Reason</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>0-50 cp</code></td><td>Quiet equal-ish positions where calibration near zero matters.</td></tr>
+          <tr><td><code>50-100 cp</code></td><td>Small edges where move choice can drift if the net is noisy.</td></tr>
+          <tr><td><code>100-300 cp</code></td><td>Normal advantage positions that occur frequently in real games.</td></tr>
+          <tr><td><code>300-800 cp</code></td><td>Tactical or clearly better positions where compression can hurt conversion.</td></tr>
+          <tr><td><code>800-1600 cp</code></td><td>Large but non-mate scores, kept limited so they do not dominate training.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        Bucket balance is not an Elo guarantee. It is a way to avoid wasting
+        teacher time on a distribution that teaches the net almost nothing about
+        decisive positions.
+      </div>
+    </section>
+
+    <section>
+      <h2>Architecture Being Trained</h2>
+      <p>
+        The active evaluator is <code>nnue2_file</code>. It loads a quantized
+        <code>.nn</code> file and evaluates positions incrementally inside Enyo's
+        alpha-beta search.
+      </p>
+
+      <table>
+        <thead><tr><th>Part</th><th>Value</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>King buckets</td><td><code>16</code></td><td>The king square is mapped to one of 16 broad regions.</td></tr>
+          <tr><td>Piece/color types</td><td><code>12</code></td><td>6 piece types times 2 colors, represented relative to perspective.</td></tr>
+          <tr><td>Squares</td><td><code>64</code></td><td>Piece square after runtime mirroring/index conversion.</td></tr>
+          <tr><td>Input features</td><td><code>16 * 12 * 64 = 12288</code></td><td>Only features for pieces on the board are active.</td></tr>
+          <tr><td>Accumulator width</td><td><code>1024</code> per perspective</td><td>Each active feature adds a row of 1024 input weights.</td></tr>
+          <tr><td>Search input</td><td><code>us[1024] + them[1024] = 2048</code></td><td>Side-to-move and opponent accumulator views are concatenated.</td></tr>
+          <tr><td>Head</td><td><code>2048 -&gt; 16 -&gt; 32 -&gt; 1</code></td><td>Produces one centipawn score.</td></tr>
+          <tr><td>Output</td><td>centipawns</td><td>Side-to-move perspective, consumed by search.</td></tr>
+        </tbody>
+      </table>
+
+      <p>The runtime feature index is the packed board fact:</p>
+      <pre><code>feature_index =
+    king_bucket * 12 * 64
+  + relative_piece_type * 64
+  + mirrored_piece_square</code></pre>
+
+      <p>
+        A feature becomes active because the board actually contains that piece.
+        Training does not decide which features are active; it decides the weights
+        attached to those features.
+      </p>
+
+      <pre><code>for each piece on the board:
+    feature = FeatureIdx(piece_type, piece_color, square, king_square, perspective)
+    accumulator[perspective][0..1023] += input_weights[feature][0..1023]</code></pre>
+
+      <h3>Why this architecture</h3>
+      <table>
+        <thead><tr><th>Choice</th><th>Reason</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Sparse piece-square features</td>
+            <td>Only pieces that exist on the board do work. This makes evaluation fast and makes incremental updates possible after a move.</td>
+          </tr>
+          <tr>
+            <td>King buckets</td>
+            <td>Piece values depend heavily on king location. Buckets add king context without needing a separate full input table for all 64 king squares.</td>
+          </tr>
+          <tr>
+            <td>Relative perspective</td>
+            <td>The same pattern can be learned from either side's point of view instead of treating White and Black as unrelated problems.</td>
+          </tr>
+          <tr>
+            <td>1024-wide accumulators</td>
+            <td>Wide enough to store many learned patterns, but still small enough to update inside search.</td>
+          </tr>
+          <tr>
+            <td><code>us</code> and <code>them</code> inputs</td>
+            <td>The head receives side-to-move features first and opponent features second, so the output is naturally side-to-move centipawns.</td>
+          </tr>
+          <tr>
+            <td>Small dense head</td>
+            <td><code>2048 -&gt; 16 -&gt; 32 -&gt; 1</code> adds interaction capacity while staying cheap enough for millions of search evals.</td>
+          </tr>
+          <tr>
+            <td>Quantized runtime file</td>
+            <td>Training uses floats, but the engine needs compact weights for speed and cache behavior.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>How Training Is Performed</h2>
+      <p>
+        Training is supervised learning. Each row gives the trainer a position
+        and a target score. The trainer asks the current neural net to predict a
+        score, compares that prediction to the target, and adjusts weights to
+        reduce the error.
+      </p>
+
+      <ol>
+        <li><strong>Read a FEN.</strong> The row describes one chess position.</li>
+        <li><strong>Build sparse features.</strong> The FEN is converted to active Enyo NNUE feature indices.</li>
+        <li><strong>Forward pass.</strong> The model sums feature weights, applies clipped activations, runs the head, and predicts centipawns.</li>
+        <li><strong>Compute loss.</strong> The trainer compares the predicted score with the teacher centipawn target, usually clamped to avoid extreme labels dominating.</li>
+        <li><strong>Backpropagate.</strong> PyTorch computes which weights caused the error.</li>
+        <li><strong>Optimizer step.</strong> Weights are nudged by the learning rate.</li>
+        <li><strong>Repeat by batch and epoch.</strong> A batch is many rows trained together; an epoch is one pass through the training set.</li>
+        <li><strong>Export.</strong> The trained float weights are quantized and written as <code>model.nn</code>.</li>
+      </ol>
+
+      <p>A row after teacher labeling is conceptually:</p>
+      <pre><code>{
+  "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+  "score": 42,
+  "wdl": 0.5,
+  "source_score": 18,
+  "teacher": "stockfish",
+  "teacher_depth": 16
+}</code></pre>
+
+      <p>
+        <code>score</code> is the target being learned. <code>source_score</code>
+        is the previous score before relabeling and is kept so target changes
+        can be audited.
+      </p>
+
+      <h3>One row, concretely</h3>
+      <p>
+        Suppose a row has a teacher target of <code>+80 cp</code>, but the
+        current net predicts <code>+20 cp</code>. The prediction is too low by
+        <code>60 cp</code>. Backpropagation computes how to raise the output for
+        this row.
+      </p>
+
+      <pre><code>target score       = +80 cp
+current prediction = +20 cp
+error              = prediction - target = -60 cp
+training direction = raise this position's predicted eval</code></pre>
+
+      <p>
+        Only the active feature rows for this position receive direct input-weight
+        updates. If there is no knight on f5, the "knight on f5" feature row is
+        not touched by this row. Across millions of rows, the same feature appears
+        in many contexts, so its weights become a compromise that helps many
+        positions instead of a memorized answer for one FEN.
+      </p>
+
+      <p>
+        The dense head is also updated because it decides how accumulator values
+        become the final centipawn score. Training therefore adjusts both concrete
+        piece-square knowledge and higher-level interactions.
+      </p>
+
+      <h3>Why Huber loss</h3>
+      <p>
+        Huber loss behaves like squared error for small mistakes and like absolute
+        error for very large mistakes. That makes it less likely that a few noisy
+        or extreme labels dominate the entire run.
+      </p>
+
+      <pre><code>small error: optimize like MSE
+large error: optimize closer to MAE
+example beta: 200 cp</code></pre>
+
+      <h3>What training does not do</h3>
+      <ul>
+        <li>It does not imitate the move played in a PGN.</li>
+        <li>It does not prove a position is won or lost by itself.</li>
+        <li>It does not directly optimize Elo.</li>
+        <li>It does not replace search; it changes the evaluation used by search.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Pipeline Scripts</h2>
+      <p>Training tools are in:</p>
+      <pre><code>/home/petter/tmp/enyo-own-net-pipeline/tools/nnue2</code></pre>
+
+      <table>
+        <thead><tr><th>Script</th><th>Pipeline role</th><th>Why it matters</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>sample_buckets.py</code></td>
+            <td>Sampling</td>
+            <td>Builds a score-balanced set so teacher time is not spent almost entirely on near-zero positions.</td>
+          </tr>
+          <tr>
+            <td><code>label_with_uci.py</code></td>
+            <td>Teacher labeling</td>
+            <td>Turns positions into supervised targets by asking a stronger engine for centipawn scores.</td>
+          </tr>
+          <tr>
+            <td><code>audit_targets.py</code></td>
+            <td>Target audit</td>
+            <td>Catches broken distributions, missing scores, overlarge labels, or suspicious target drift.</td>
+          </tr>
+          <tr>
+            <td><code>pack_dataset.py</code></td>
+            <td>Dataset packing</td>
+            <td>Moves expensive FEN parsing out of the training loop, making epochs much faster.</td>
+          </tr>
+          <tr>
+            <td><code>train.py</code></td>
+            <td>Training/export</td>
+            <td>Optimizes the weights and writes both a PyTorch checkpoint and an engine-loadable net.</td>
+          </tr>
+          <tr>
+            <td><code>eval_dataset.py</code></td>
+            <td>Static validation</td>
+            <td>Measures whether the candidate tracks targets without obvious bias, compression, or source-specific damage.</td>
+          </tr>
+          <tr>
+            <td><code>mix_jsonl.py</code></td>
+            <td>Mixed-source experiments</td>
+            <td>Combines sources when testing whether self-play, public evals, and curated engine positions complement each other.</td>
+          </tr>
+          <tr>
+            <td><code>import_lichess_eval.py</code></td>
+            <td>Lichess input preparation</td>
+            <td>Converts public evaluated positions into the same row format as Enyo self-play data.</td>
+          </tr>
+          <tr>
+            <td><code>binpack_to_jsonl.cpp</code></td>
+            <td>Binpack input preparation</td>
+            <td>Brings curated Stockfish training positions into the Enyo pipeline for validation or future training.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Example Commands</h2>
+      <h3>Sampling</h3>
+      <pre><code>python tools/nnue2/sample_buckets.py \
+  --input source_labeled.jsonl \
+  --output source_bucketed.jsonl \
+  --score-field score \
+  --unique-fen \
+  --seed 20260512 \
+  --bucket q0050:0:50:250000 \
+  --bucket q0100:50:100:180000 \
+  --bucket q0300:100:300:300000 \
+  --bucket q0800:300:800:250000 \
+  --bucket q1600:800:1600:20000</code></pre>
+
+      <h3>One label shard</h3>
+      <pre><code>python tools/nnue2/label_with_uci.py \
+  --input source_bucketed.jsonl \
+  --output shards/label.0.jsonl \
+  --engine /usr/games/stockfish \
+  --depth 16 \
+  --threads 1 \
+  --hash 128 \
+  --shard-count 16 \
+  --shard-index 0 \
+  --max-abs-cp 1600</code></pre>
+
+      <h3>Packing</h3>
+      <pre><code>python tools/nnue2/pack_dataset.py \
+  --input labeled.jsonl \
+  --out-dir packed</code></pre>
+
+      <h3>Train</h3>
+      <pre><code>python tools/nnue2/train.py \
+  --data packed \
+  --out model.pt \
+  --out-nn model.nn \
+  --init-from-nn starting.nn \
+  --objective huber \
+  --huber-beta 200 \
+  --select-metric mae \
+  --epochs 4 \
+  --lr 1e-7 \
+  --batch-size 8192 \
+  --target-clamp 1600 \
+  --device cuda</code></pre>
+    </section>
+
+    <section>
+      <h2>Validation Gates</h2>
+      <p>
+        The script evaluates the starting net and each candidate on several held-out
+        sets, then runs replay gates. SPRT starts only if a candidate has no new
+        replay issues and passes metric sanity checks.
+      </p>
+
+      <table>
+        <thead><tr><th>Validation set</th><th>Path</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>Same-distribution holdout</td><td><code>packed</code></td><td>Checks the target distribution the run trained on.</td></tr>
+          <tr><td>Self-play depth-12 validation</td><td><code>/home/petter/tmp/enyo_teacher/sf_d12_20m_20260510_115338/labeled_packed</code></td><td>Checks against the broader self-play pool.</td></tr>
+          <tr><td>Lichess eval validation</td><td><code>/home/petter/tmp/enyo_teacher/controlled_30m_20260512_105006/val/lichess_tail100k</code></td><td>Checks public-eval distribution.</td></tr>
+          <tr><td>Binpack validation</td><td><code>/home/petter/tmp/enyo_teacher/binpack_test79_cp1600_5m_20260512/packed</code></td><td>Checks curated engine-training positions.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Replay gate games</h3>
+      <ul>
+        <li><code>EnyoBot vs Lynx_BOT - jjThVRPN.log</code></li>
+        <li><code>Hypersion vs EnyoBot - npmgxvIO.log</code></li>
+        <li><code>JustinBot15 vs EnyoBot - JZaA98Uv.log</code></li>
+        <li><code>EnyoBot vs stage270 - 2DRMYfOm_oot.log</code></li>
+        <li><code>stage270 vs EnyoBot - kp3inZBb.log</code></li>
+      </ul>
+
+      <p>Replay outputs are written under each candidate directory:</p>
+      <pre><code>replay_gates_force/replay.log
+replay_gates_force/summary.txt
+replay_gates_force/enyo.log</code></pre>
+
+      <h3>SPRT command if gates pass</h3>
+      <pre><code>sprt   --candidate /home/petter/code/cpp/chess/assets/engines/enyo_206059e   --reference /home/petter/code/cpp/chess/assets/engines/enyo_206059e   --candidate-option "nnue2_file=$RUN/&lt;candidate&gt;/model.nn"   --reference-option "nnue2_file=/home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn"   --book /home/petter/code/cpp/chess/assets/books/UHO_Lichess_4852_v1.epd   --games 2000   --concurrency 6   --threads 4   --tc "10+0.1"</code></pre>
+    </section>
+
+    <section>
+      <h2>Metrics</h2>
+      <table>
+        <thead><tr><th>Metric</th><th>Meaning</th><th>How to use it</th></tr></thead>
+        <tbody>
+          <tr><td><code>MAE</code></td><td>Mean absolute error in centipawns.</td><td>Lower is better; good first filter.</td></tr>
+          <tr><td><code>MSE</code></td><td>Mean squared error.</td><td>Penalizes large misses strongly; noisy with outliers.</td></tr>
+          <tr><td><code>RMSE</code></td><td>Square root of MSE.</td><td>Same units as centipawns.</td></tr>
+          <tr><td><code>sign</code></td><td>How often prediction and target agree on which side is better.</td><td>Useful sanity check, but not enough alone.</td></tr>
+          <tr><td><code>bias</code></td><td>Average prediction minus target.</td><td>Shows optimistic or pessimistic drift.</td></tr>
+          <tr><td><code>corr</code></td><td>Correlation between prediction and target.</td><td>Shows whether the net tracks target ordering.</td></tr>
+          <tr><td><code>slope</code></td><td>Calibration slope.</td><td>Low slope means compressed evals; high slope means exaggerated evals.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note warning">
+        Static metrics can reject a bad network, but cannot prove a good one.
+        A network can improve MAE and still lose Elo if search interacts badly
+        with its calibration, move ordering, or tactical blind spots.
+      </div>
+    </section>
+
+    <section>
+      <h2>Why Better Targets Might Help</h2>
+      <p>
+        The neutral 20M/30M attempts suggest that simply training longer or mixing
+        more sources is not enough. This run changes the target quality and data
+        shape instead:
+      </p>
+      <ul>
+        <li>deeper Stockfish labels: depth 16 instead of depth 12;</li>
+        <li>balanced centipawn buckets instead of mostly quiet positions;</li>
+        <li>unique FENs to avoid repeatedly training on duplicates;</li>
+        <li>explicit validation by source so one distribution cannot hide damage in another;</li>
+        <li>strict replay gates before spending time on SPRT.</li>
+      </ul>
+
+      <p>
+        If a high-quality target run is neutral too, the next useful step is
+        probably scaling the same target idea to more rows or depth 18, not another blind
+        learning-rate tweak on the old mixed set.
+      </p>
+    </section>
+
+    <section>
+      <h2>Vocabulary</h2>
+      <dl>
+        <dt id="vocab-fen">FEN</dt>
+        <dd>A text description of one chess position: pieces, side to move, castling rights, en-passant square, and counters.</dd>
+
+        <dt id="vocab-jsonl">JSONL</dt>
+        <dd>One JSON object per line. Enyo training rows are stored this way before packing.</dd>
+
+        <dt id="vocab-feature">Feature</dt>
+        <dd>A concrete board fact used as network input: perspective, king bucket, piece/color type, and piece square.</dd>
+
+        <dt id="vocab-king-bucket">King bucket</dt>
+        <dd>A fixed category for king location. Enyo maps the king square to one of 16 regions so the same piece square can have different weights depending on king placement.</dd>
+
+        <dt id="vocab-accumulator">Accumulator</dt>
+        <dd>The summed hidden values before the network head. Each active feature adds a 1024-wide row of input weights into the accumulator.</dd>
+
+        <dt id="vocab-perspective">Perspective</dt>
+        <dd>Enyo keeps accumulator values from both sides' point of view. At eval time, side-to-move values are treated as <code>us</code> and the other side as <code>them</code>.</dd>
+
+        <dt id="vocab-weight">Weight</dt>
+        <dd>A learned number. Training changes weights so predicted evals move closer to teacher evals.</dd>
+
+        <dt id="vocab-bias">Bias</dt>
+        <dd>A learned constant added to a layer's output.</dd>
+
+        <dt id="vocab-relu">ReLU / clipped activation</dt>
+        <dd>A non-linear clipping step. NNUE uses clipped accumulator values so the head can model interactions better than one flat linear formula.</dd>
+
+        <dt id="vocab-teacher">Teacher</dt>
+        <dd>The source of target scores, usually a stronger engine such as Stockfish.</dd>
+
+        <dt id="vocab-label">Label</dt>
+        <dd>The target value attached to a FEN. Here it means the Stockfish centipawn score written into <code>score</code>.</dd>
+
+        <dt id="vocab-shard">Shard</dt>
+        <dd>One slice of a labeling job. Sharding lets several teacher-engine processes label rows in parallel.</dd>
+
+        <dt id="vocab-pack">Packed dataset</dt>
+        <dd>Binary arrays generated from JSONL so PyTorch can train without reparsing FEN text during every epoch.</dd>
+
+        <dt id="vocab-batch">Batch</dt>
+        <dd>A group of rows trained together in one optimizer step.</dd>
+
+        <dt id="vocab-epoch">Epoch</dt>
+        <dd>One pass through the training rows.</dd>
+
+        <dt id="vocab-loss">Loss</dt>
+        <dd>The training error PyTorch minimizes.</dd>
+
+        <dt id="vocab-huber">Huber loss</dt>
+        <dd>A loss that is squared-error-like near zero and absolute-error-like for large mistakes, reducing sensitivity to extreme labels.</dd>
+
+        <dt id="vocab-quantization">Quantization</dt>
+        <dd>Converting training-time floating-point weights into the integer/compact runtime <code>.nn</code> format.</dd>
+
+        <dt id="vocab-replay">Replay gate</dt>
+        <dd>A validation step that runs the candidate through known games and checks for changed moves, regressions, blunders, and timeouts.</dd>
+
+        <dt id="vocab-sprt">SPRT</dt>
+        <dd>The engine match test that decides whether a candidate is likely stronger in actual play.</dd>
+      </dl>
+    </section>
+  </main>
+</body>
+</html>
