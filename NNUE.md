@@ -23,33 +23,34 @@ Target for promotion:
 
 ## Current Status
 
-The depth-16 bucketed 1M run finished and did not produce a promoted net.
+The first source-mix smoke test found a small positive signal from public
+binpack-only training, but it did not prove a `+10 Elo` gain.
 
 Run artifacts on `pwa-5090`:
 
 ```text
-run:     /home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554
-script:  /home/petter/tmp/run_nnue_bucket_d16_20260512.sh
-labels:  988632 Stockfish depth-16 rows
-sweep:   /home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554/static_sweep_20260513_083803
-tmux:    nnue_cmd for active gates/tests
-status:  float-head candidates rejected; next test is all_huber_lr1e6_e8
+run:    /home/petter/tmp/enyo_teacher/source_mix_1m_20260513_142124
+script: /home/petter/code/cpp/chess/nnue/tools/nnue2/run_source_mix_1m_pwa.sh
+net:    /home/petter/tmp/enyo_teacher/source_mix_1m_20260513_142124/binpack1m_all_huber_lr1e6_e8/model.nn
+tmux:   nnue_cmd
+status: binpack-only candidate is promising but unproven
 ```
 
 Outcome:
 
-- `float_head_huber_lr1e5_e8`: large static metric improvement, rejected before
-  SPRT because replay introduced serious tactical issues.
-- `float_head_huber_lr3e6_e8`: replay-safe enough, but SPRT trended negative.
-  Stopped around:
+- `binpack1m_all_huber_lr1e6_e8`: replay-clean on serious issues and finished:
 
 ```text
-[1478/2000] Elo  -1.4 +/-  11.2 | LLR -0.88/2.94 (-30%) | LOS 40.3% | draw  59.8%
+[2000/2000] Elo   4.3 +/-  10.0 | LLR  0.27/2.94 (  9%) | LOS 80.2% | draw  56.8%
 ```
 
-Conclusion: depth-16 relabeling is technically valid, but these float-head
-training variants did not create Elo. Do not repeat this exact recipe as another
-long run.
+- `mix_d16_500k_binpack_500k_all_huber_lr1e6_e8`: static metrics improved, but
+  replay added a serious Lynx blunder and was rejected before SPRT.
+
+Conclusion: public/binpack-only training produced the first useful positive
+NNUE signal, but it is too small for the `elo1=10` SPRT to accept. Confirm it
+with a smaller-H1 test before promotion. Mixing in the current d16 self-play
+subset is suspect and should not be scaled without fixing replay behavior.
 
 ## Completed Work
 
@@ -72,12 +73,21 @@ long run.
 - [x] 1M bucket-balanced depth-16 relabeling completed.
 - [x] Aggressive float-head d16 run rejected by replay gates.
 - [x] Mild float-head d16 run rejected by SPRT trend.
+- [x] Source-mix smoke test completed.
+- [x] Binpack-only 1M candidate finished `+4.3 +/- 10.0 Elo`; archived as promising, not promoted.
+- [x] D16+binpack 1M candidate rejected by replay gate.
 
 ## Active Goal: Find A Training Signal That Converts To Elo
 
 The current hypothesis is narrower than before: the pipeline works, and static
 metrics can improve, but those gains are not reliably becoming stronger moves.
 The next useful work is controlled candidate gating, not another blind long run.
+
+Current confirmatory test:
+
+- [ ] Run the binpack-only candidate with a smaller H1, e.g. `elo1=5`.
+- [ ] If it stays positive, run a second replay suite and a longer fixed match.
+- [ ] Promote only if the confirmatory result is clearly positive and replay-clean.
 
 Depth-16 bucket run stages:
 
@@ -88,9 +98,9 @@ Depth-16 bucket run stages:
 - [x] Evaluate the starting net on all validation sets.
 - [x] Train and reject `float_head_huber_lr1e5_e8`.
 - [x] Train and reject `float_head_huber_lr3e6_e8`.
-- [ ] Gate `all_huber_lr1e6_e8`.
-- [ ] Start SPRT for `all_huber_lr1e6_e8` only if replay adds no serious issues.
-- [ ] If neutral/negative, stop this d16 bucket1m family and change the data/target plan.
+- [x] Gate `all_huber_lr1e6_e8`.
+- [x] Reject `all_huber_lr1e6_e8` by SPRT trend.
+- [x] Stop this d16 bucket1m family and change the data/target plan.
 
 Expected outputs:
 
@@ -108,6 +118,8 @@ Do not repeat:
 
 - `float_head_huber_lr1e5_e8`: static metrics looked good, replay got worse.
 - `float_head_huber_lr3e6_e8`: replay was acceptable, SPRT was not positive.
+- `all_huber_lr1e6_e8`: replay-safe but SPRT was negative/neutral.
+- `mix_d16_500k_binpack_500k_all_huber_lr1e6_e8`: replay added a serious tactical regression.
 - Long training based only on better MAE/sign numbers without replay and SPRT.
 
 ## Decision Rules
