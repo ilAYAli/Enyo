@@ -22,25 +22,33 @@ Target for promotion:
 
 ## Current Status
 
-Active run on `pwa-5090`:
+The depth-16 bucketed 1M run finished and did not produce a promoted net.
+
+Run artifacts on `pwa-5090`:
 
 ```text
 run:     /home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554
 script:  /home/petter/tmp/run_nnue_bucket_d16_20260512.sh
-tmux:    nnue_test
-phase:   Stockfish depth-16 labeling
-status:  510741 / 1000000 labels, about 51.1% at 2026-05-13 01:41 CEST
-workers: 16 Stockfish processes, one thread each
+labels:  988632 Stockfish depth-16 rows
+sweep:   /home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554/static_sweep_20260513_083803
+tmux:    nnue_cmd for active gates/tests
+status:  float-head candidates rejected; next test is all_huber_lr1e6_e8
 ```
 
-Purpose of the active run:
+Outcome:
 
-- sample 1M unique Enyo-reached positions from the 20M self-play pool;
-- balance the sample by absolute eval bucket;
-- relabel with Stockfish depth 16;
-- train two Huber-loss pilots from the current starting net;
-- gate candidates with source-separated metrics and replay;
-- start SPRT only if a candidate is worth testing.
+- `float_head_huber_lr1e5_e8`: large static metric improvement, rejected before
+  SPRT because replay introduced serious tactical issues.
+- `float_head_huber_lr3e6_e8`: replay-safe enough, but SPRT trended negative.
+  Stopped around:
+
+```text
+[1478/2000] Elo  -1.4 +/-  11.2 | LLR -0.88/2.94 (-30%) | LOS 40.3% | draw  59.8%
+```
+
+Conclusion: depth-16 relabeling is technically valid, but these float-head
+training variants did not create Elo. Do not repeat this exact recipe as another
+long run.
 
 ## Completed Work
 
@@ -60,26 +68,28 @@ Purpose of the active run:
 - [x] Stockfish binpack data converted for validation.
 - [x] Mixed 20M/30M experiments completed and judged mostly Elo-neutral.
 - [x] Replay-clean neutral candidate tested to `+2.4 +/- 9.9 Elo`; archived, not promoted.
+- [x] 1M bucket-balanced depth-16 relabeling completed.
+- [x] Aggressive float-head d16 run rejected by replay gates.
+- [x] Mild float-head d16 run rejected by SPRT trend.
 
-## Active Goal: Higher-Quality Targets
+## Active Goal: Find A Training Signal That Converts To Elo
 
-The current hypothesis is that neutral results are caused more by target/data
-quality than by trainer mechanics. The next useful experiment is therefore the
-current depth-16 bucketed run.
+The current hypothesis is narrower than before: the pipeline works, and static
+metrics can improve, but those gains are not reliably becoming stronger moves.
+The next useful work is controlled candidate gating, not another blind long run.
 
-Current run stages:
+Depth-16 bucket run stages:
 
 - [x] Sample 1M bucket-balanced unique rows.
-- [ ] Relabel those rows with Stockfish depth 16.
-- [ ] Audit target distribution and source-score disagreement.
-- [ ] Pack the relabeled data.
-- [ ] Evaluate the starting net on all validation sets.
-- [ ] Train `d16_bucket_huber_lr1e7_e4`.
-- [ ] Run static metrics and replay gates for `d16_bucket_huber_lr1e7_e4`.
-- [ ] Start SPRT for `d16_bucket_huber_lr1e7_e4` if gates pass.
-- [ ] If rejected, train `d16_bucket_huber_lr3e8_e4`.
-- [ ] Run static metrics and replay gates for `d16_bucket_huber_lr3e8_e4`.
-- [ ] Start SPRT for `d16_bucket_huber_lr3e8_e4` if gates pass.
+- [x] Relabel those rows with Stockfish depth 16.
+- [x] Audit target distribution and source-score disagreement.
+- [x] Pack the relabeled data.
+- [x] Evaluate the starting net on all validation sets.
+- [x] Train and reject `float_head_huber_lr1e5_e8`.
+- [x] Train and reject `float_head_huber_lr3e6_e8`.
+- [ ] Gate `all_huber_lr1e6_e8`.
+- [ ] Start SPRT for `all_huber_lr1e6_e8` only if replay adds no serious issues.
+- [ ] If neutral/negative, stop this d16 bucket1m family and change the data/target plan.
 
 Expected outputs:
 
@@ -88,9 +98,16 @@ Expected outputs:
 /home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554/audit_targets.log
 /home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554/packed/
 /home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554/baseline/eval/
-/home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554/d16_bucket_huber_lr1e7_e4/model.nn
-/home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554/d16_bucket_huber_lr3e8_e4/model.nn
+/home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554/static_sweep_20260513_083803/float_head_huber_lr1e5_e8/model.nn
+/home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554/static_sweep_20260513_083803/float_head_huber_lr3e6_e8/model.nn
+/home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554/static_sweep_20260513_083803/all_huber_lr1e6_e8/model.nn
 ```
+
+Do not repeat:
+
+- `float_head_huber_lr1e5_e8`: static metrics looked good, replay got worse.
+- `float_head_huber_lr3e6_e8`: replay was acceptable, SPRT was not positive.
+- Long training based only on better MAE/sign numbers without replay and SPRT.
 
 ## Decision Rules
 
@@ -109,10 +126,10 @@ After each candidate:
 
 Neutral candidates are not promoted. They are kept as experiment artifacts.
 
-## If The Current Run Is Neutral
+## If The D16 Bucket1m Family Is Neutral
 
-Do not keep trying random low-learning-rate variants of the same old mix.
-The next steps should improve training signal quality:
+Do not keep trying random low-learning-rate variants of the same 1M d16 bucket
+set. The next steps should improve training signal quality:
 
 - [ ] Scale the depth-16 bucketed approach beyond 1M rows.
 - [ ] Consider depth-18 labels for a smaller high-value subset.
@@ -158,10 +175,10 @@ Possible future work:
 
 ## Operational Notes
 
-Watch current training:
+Watch current gates/tests:
 
 ```sh
-ssh -t petter@pwa-5090 tmux attach -t nnue_test
+ssh -t petter@pwa-5090 tmux attach -t nnue_cmd
 ```
 
 Tail the active log:
