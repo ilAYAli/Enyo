@@ -1,4 +1,4 @@
-// Phase 4 engine integration for the Berserk-architecture NNUE port.
+// Engine integration for NNUE2.
 // Links nnue2's forward-pass primitives to enyo::Board. Kept in a
 // separate TU so the Phase-2/3 tests can compile nnue2.cpp without
 // pulling in board.hpp / fmt / etc.
@@ -13,7 +13,7 @@
 namespace NNUE2 {
 
 // enumerate_pieces — walk `board.pt_bb` for both colors and emit
-// (berserk-packed-code, enyo-sq) entries. Order doesn't matter since
+// (packed-piece-code, enyo-sq) entries. Order doesn't matter since
 // ApplyDelta's add path is commutative.
 size_t enumerate_pieces(const enyo::Board& b, PieceEntry* out) {
     size_t n = 0;
@@ -22,7 +22,6 @@ size_t enumerate_pieces(const enyo::Board& b, PieceEntry* out) {
             enyo::bitboard_t bb = b.pt_bb[color][pt];
             while (bb) {
                 const auto sq = static_cast<enyo::square_t>(enyo::pop_lsb(bb));
-                // Berserk packed piece = (pt-1)<<1 | color.
                 const int piece_code = ((pt - 1) << 1) | color;
                 out[n++] = {piece_code, sq};
             }

@@ -1,19 +1,7 @@
 #pragma once
-// Berserk-architecture NNUE — Phase 1: constants + feature indexing.
-//
-// This file is the start of the port described in ARCH_PORT_SPEC.md.
-// It intentionally lives alongside nnue.hpp (the old 512-hidden layer)
-// so we can parity-test the new layer against Berserk's output before
-// ripping out the old one.
-//
-// Coordinate convention:
-//   - Enyo: h1=0, g1=1, ..., a1=7, h2=8, ...  (h1-indexed)
-//   - Berserk: a1=0, b1=1, ..., h1=7, a2=8, ... (a1-indexed)
-//   Every Berserk formula that touches a square expects a1-indexed input;
-//   we convert with `to_berserk_sq(sq) = sq ^ 7`.
-//
-// Berserk's KING_BUCKETS[64] and FeatureIdx are reproduced verbatim from
-// berserk/src/board.{c,h} (GPL-3.0, compatible with Enyo's GPL-3.0).
+// NNUE2 uses a Berserk v13-compatible network layout and feature indexing.
+// KING_BUCKETS and the feature-index formula are derived from Berserk
+// (GPL-3.0), adapted to Enyo's square and piece conventions.
 
 #include "types.hpp"
 
@@ -33,7 +21,7 @@ namespace enyo { class Board; }
 namespace NNUE2 {
 
 // ---------------------------------------------------------------------
-// Architecture constants — match Berserk exactly.
+// Architecture constants.
 // ---------------------------------------------------------------------
 inline constexpr int N_KING_BUCKETS = 16;
 inline constexpr int N_PIECE_TYPES  = 12;               // 6 types × 2 colors
@@ -46,10 +34,8 @@ inline constexpr int N_L3           = 32;
 inline constexpr int N_OUTPUT       = 1;
 
 // ---------------------------------------------------------------------
-// Berserk's KING_BUCKETS[64] table, indexed by a1-indexed square.
-// Same table Berserk uses for both its feature-indexing and its
-// bucket-crossing refresh logic. Do NOT reshuffle this; every formula
-// downstream is calibrated against this exact layout.
+// Network king buckets. Do not reshuffle this; feature indexing and
+// bucket-crossing refresh logic are calibrated against this exact layout.
 // ---------------------------------------------------------------------
 inline constexpr std::array<uint16_t, 64> KING_BUCKETS = {
     15, 15, 14, 14, 14, 14, 15, 15,
@@ -63,43 +49,34 @@ inline constexpr std::array<uint16_t, 64> KING_BUCKETS = {
 };
 
 // ---------------------------------------------------------------------
-// h1-indexed Enyo square → a8-indexed Berserk square.
+// h1-indexed Enyo square -> a8-indexed network square.
 //
 // Enyo:    h1 = 0, g1 = 1, ..., a1 = 7, h2 = 8, ... a8 = 63
-// Berserk: a8 = 0, b8 = 1, ..., h8 = 7, a7 = 8, ... h1 = 63
+// Network: a8 = 0, b8 = 1, ..., h8 = 7, a7 = 8, ... h1 = 63
 //
-// The relationship is simply `berserk_sq = 63 - enyo_sq` — equivalent
+// The relationship is simply `net_sq = 63 - enyo_sq` -- equivalent
 // to `enyo_sq ^ 63`, which flips both rank AND file bits. Equivalent
 // to a 180-degree board rotation.
 // ---------------------------------------------------------------------
-inline constexpr int to_berserk_sq(int enyo_sq) {
+inline constexpr int to_net_sq(int enyo_sq) {
     return enyo_sq ^ 63;
 }
 
 // ---------------------------------------------------------------------
-// Berserk piece encoding: `Piece(pt, c) = (pt << 1) | c`, where
+// Network piece encoding: `Piece(pt, c) = (pt << 1) | c`, where
 // pt ∈ {PAWN=0..KING=5}, c ∈ {WHITE=0, BLACK=1}.
 // So WHITE_PAWN=0, BLACK_PAWN=1, WHITE_KNIGHT=2, ..., BLACK_KING=11.
 //
 // Enyo's PieceType has pawn=1..king=6 (no_piece_type=0). Bridge here.
 // ---------------------------------------------------------------------
-inline constexpr int to_berserk_piece(enyo::PieceType pt, enyo::Color c) {
-    // enyo pt values 1..6 -> berserk 0..5
+inline constexpr int to_net_piece(enyo::PieceType pt, enyo::Color c) {
     const int bpt = static_cast<int>(pt) - 1;
     return (bpt << 1) | static_cast<int>(c);
 }
 
 // ---------------------------------------------------------------------
-// FeatureIdx — Berserk's feature-index formula, ported to Enyo conventions.
-// Berserk's original (board.h:93):
-//   int oP  = 6 * ((piece ^ view) & 0x1) + PieceType(piece);
-//   int oK  = (7 * !(kingsq & 4)) ^ (56 * view) ^ kingsq;
-//   int oSq = (7 * !(kingsq & 4)) ^ (56 * view) ^ sq;
-//   return KING_BUCKETS[oK] * 12 * 64 + oP * 64 + oSq;
-//
 // Enyo-side wrapper: takes (piece_type, piece_color, sq, king_sq, view)
-// in Enyo's native representation and forwards to Berserk's formula
-// after converting squares to a1-indexing.
+// in Enyo's native representation and converts to the network layout.
 //
 // - `view` is the perspective (white or black); feature indices are
 //   always computed from the mover's side of the board.
@@ -119,8 +96,8 @@ inline constexpr int FeatureIdxFormula(int pt,
         return 0;
 
     const int piece    = ((pt - 1) << 1) | piece_color;
-    const int sq       = to_berserk_sq(enyo_sq);
-    const int kingsq   = to_berserk_sq(enyo_kingsq);
+    const int sq       = to_net_sq(enyo_sq);
+    const int kingsq   = to_net_sq(enyo_kingsq);
 
     const int oP  = 6 * ((piece ^ view) & 0x1) + (piece >> 1);
     const int oK  = (7 * !(kingsq & 4)) ^ (56 * view) ^ kingsq;
@@ -175,13 +152,12 @@ inline int FeatureIdx(enyo::PieceType pt,
 }
 
 // ---------------------------------------------------------------------
-// MoveRequiresRefresh — per Berserk, a king move triggers a
-// full accumulator refresh when either:
+// A king move triggers a full accumulator refresh when either:
 //   (a) the king crosses the center file (file bit 2 changes), OR
 //   (b) the king moves to a different KING_BUCKETS value.
 //
-// Takes Enyo (h1-indexed) squares. Berserk checks the king move after
-// transforming the squares into the requested perspective.
+// Takes Enyo h1-indexed squares and transforms them into the requested
+// network perspective.
 // ---------------------------------------------------------------------
 inline constexpr bool MoveRequiresRefresh(enyo::PieceType pt,
                                           enyo::square_t enyo_from,
@@ -191,8 +167,8 @@ inline constexpr bool MoveRequiresRefresh(enyo::PieceType pt,
     if (pt != enyo::king)
         return false;
 
-    const int from = to_berserk_sq(enyo_from) ^ (56 * static_cast<int>(view));
-    const int to   = to_berserk_sq(enyo_to) ^ (56 * static_cast<int>(view));
+    const int from = to_net_sq(enyo_from) ^ (56 * static_cast<int>(view));
+    const int to   = to_net_sq(enyo_to) ^ (56 * static_cast<int>(view));
 
     // Bit 2 of the a1-indexed square is the center-file crossing.
     if ((from & 4) != (to & 4))
@@ -203,22 +179,11 @@ inline constexpr bool MoveRequiresRefresh(enyo::PieceType pt,
 }
 
 // ---------------------------------------------------------------------
-// Phase 2: accumulator structs + scalar apply routines.
-// ---------------------------------------------------------------------
-//
-// Weights and biases are external — Phase 3 will load them from the
-// .nn file. For Phase 2 parity tests we can point them at a mock
-// network of known values (see tools/selfplay/test_accumulator.cpp).
-//
 // `Accumulator` holds the live hidden-layer state for both perspectives
-// plus enough metadata (move, captured, correct flag) for Berserk's
-// lazy-update scheme. We'll pack this alongside the engine's move
-// history in Phase 4 integration.
+// plus enough metadata for lazy updates.
 //
 // `AccumulatorKingState` caches the accumulator for a given
-// (perspective, file_half, king_bucket) tuple. Berserk's refresh table
-// has 2 × 2 × 16 = 64 entries (perspective × file_half × 16 buckets),
-// 1024 int16 values each plus 12 bitboards of occupancy tracking.
+// (perspective, file_half, king_bucket) tuple.
 // ---------------------------------------------------------------------
 
 using acc_t = int16_t;
@@ -247,7 +212,7 @@ struct alignas(64) AccumulatorKingState {
 // Weight storage. Phase 3 fills these from the `.nn` blob; Phase 2
 // tests inject a mock network by calling SetWeights().
 //
-// Layout matches Berserk v13 exactly — the post-L0 path uses float32
+// Layout matches the v13-compatible .nn format. The post-L0 path uses float32
 // for L2/L3/output (different from the post-v13 main-branch code,
 // which is all int16):
 //
@@ -280,8 +245,8 @@ extern uint64_t       NETWORK_GENERATION;
 // accumulator calls.
 void SetWeights(const acc_t* weights, const acc_t* biases);
 
-// Phase 3: load a full `.nn` blob from disk. Returns true on success.
-// The blob layout must match Berserk v13 (NETWORK_SIZE below). Weight
+// Load a full `.nn` blob from disk. Returns true on success.
+// The blob layout must match NETWORK_SIZE below. Weight
 // pointers are updated to reference internal storage owned by nnue2.cpp.
 bool LoadNetwork(const char* path);
 
@@ -299,7 +264,7 @@ inline constexpr size_t NETWORK_SIZE =
 
 // ---------------------------------------------------------------------
 // Delta: up to 32 features to add and 32 to remove between two
-// accumulator states. Matches Berserk's typedef.
+// accumulator states.
 // ---------------------------------------------------------------------
 struct Delta {
     uint8_t r = 0;
@@ -309,10 +274,9 @@ struct Delta {
 };
 
 // ---------------------------------------------------------------------
-// ApplyDelta — Berserk's accumulator update, with SIMD fast paths.
 // Applies `-INPUT_WEIGHTS[rem[i]*N_HIDDEN ..]` and
 // `+INPUT_WEIGHTS[add[i]*N_HIDDEN ..]` to a 1024-wide accumulator row.
-// `dest` and `src` may alias (Berserk uses this for in-place refresh).
+// `dest` and `src` may alias for in-place refresh.
 //
 // SIMD variants process 8 (NEON) / 16 (AVX2) / 32 (AVX-512) int16 lanes
 // per iteration. Scalar fallback is the literal definition.
@@ -500,18 +464,14 @@ inline void ResetRefreshTable(AccumulatorKingState* refreshTable) {
 }
 
 // ---------------------------------------------------------------------
-// Board "piece list" contract: the caller supplies the occupied squares
-// as a (piece_code, square) array where piece_code is Berserk's packed
-// (pt<<1)|color in 0..11 and square is **a1-indexed** for direct use
-// with FeatureIdx(). Keeps nnue2 independent of enyo::Board until the
-// Phase-4 integration step.
+// Board "piece list" contract: the caller supplies occupied Enyo squares
+// and packed 0..11 piece codes for FeatureIdx().
 // ---------------------------------------------------------------------
 struct PieceEntry {
-    int piece_code;      // Berserk packed 0..11
+    int piece_code;
     enyo::square_t sq;   // Enyo h1-indexed square
 };
 
-// ResetAccumulator — scalar port of berserk accumulator.c:78.
 // Starts from bias, adds feature weights for every piece on the board.
 // `king_enyo_sq` is the side-to-move's king square (h1-indexed).
 inline void ResetAccumulator(Accumulator* dest, enyo::Color view,
@@ -539,7 +499,7 @@ inline void ResetAccumulator(Accumulator* dest, enyo::Color view,
 }
 
 // ---------------------------------------------------------------------
-// Phase 4 integration helper: walk a Board and emit the (piece, sq)
+// Integration helper: walk a Board and emit the (piece, sq)
 // entries that ResetAccumulator expects. Forward-declared here so the
 // header stays decoupled from board.hpp; implemented in nnue2.cpp.
 //
@@ -560,7 +520,7 @@ int EvaluateFromScratch(const enyo::Board& b);
 extern bool enabled;
 
 // ---------------------------------------------------------------------
-// Phase 3 forward pass (scalar, ports of Berserk v13's fallback paths).
+// Forward pass.
 // ---------------------------------------------------------------------
 //
 // Full chain, given a live Accumulator and side-to-move:
@@ -1156,8 +1116,7 @@ inline void L2AffineReLU(float* dest, const float* src) {
 #endif
 }
 
-// L3Transform — dot product to scalar. Result is in "post-shift" units,
-// Berserk divides by 32 at the caller to get centipawns.
+// L3Transform returns post-shift units; Propagate divides by 32.
 inline float L3Transform(const float* src) {
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
     float32x4_t acc = vdupq_n_f32(0.0f);

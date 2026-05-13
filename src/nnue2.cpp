@@ -1,6 +1,6 @@
-// Phase 3 scaffolding for the Berserk-arch NNUE port.
+// NNUE2 weight storage and network loading.
 // Defines the extern storage for weight pointers declared in nnue2.hpp
-// and implements LoadNetwork for Berserk v13's .nn binary layout.
+// and implements LoadNetwork for the v13-compatible .nn binary layout.
 //
 // This TU is intentionally independent of the engine's Board type so
 // Phase 2/3 parity tests can compile it directly. The Board-aware bits
@@ -159,7 +159,7 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
 }
 
 // ---------------------------------------------------------------------
-// LoadNetwork — parse a Berserk v13-format .nn file into the internal
+// LoadNetwork — parse a v13-compatible .nn file into the internal
 // weight arrays and repoint the externs.
 //
 // File layout (tightly packed, little-endian; total NETWORK_SIZE bytes):

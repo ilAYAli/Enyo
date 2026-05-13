@@ -57,7 +57,7 @@ void invalidate_nnue2_eval(NNUE2::Accumulator & accumulator)
 
 size_t nnue2_refresh_table_index(enyo::square_t king_square, enyo::Color side)
 {
-    const int ksq = NNUE2::to_berserk_sq(king_square)
+    const int ksq = NNUE2::to_net_sq(king_square)
         ^ (56 * static_cast<int>(side));
     const int file_half = (ksq & 4) ? 1 : 0;
     const auto bucket = static_cast<size_t>(
