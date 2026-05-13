@@ -217,6 +217,281 @@
     </section>
 
     <section>
+      <h2>Pipeline Steps In Detail</h2>
+      <p>
+        The short pipeline line is accurate, but each arrow hides an important
+        file format and validation step. The current Enyo pipeline is built
+        around JSONL position rows until packing; after packing, training uses
+        dense NumPy arrays loaded as PyTorch tensors.
+      </p>
+
+      <h3>1. Positions</h3>
+      <p>
+        Positions are gathered from actual chess games, not from random board
+        generators. The main Enyo-owned source so far is Enyo self-play created
+        by <code>fastchess</code> from opening books, then converted from PGN
+        into one JSON object per useful position.
+      </p>
+
+      <table>
+        <thead><tr><th>Source</th><th>Used for</th><th>Example path</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Enyo self-play</td>
+            <td>Main owned training source. These are positions Enyo search actually reaches.</td>
+            <td><code>/home/petter/tmp/enyo_selfplay/d8_plus120k_20260510_115338/selfplay*.pgn</code></td>
+          </tr>
+          <tr>
+            <td>Lichess eval data</td>
+            <td>Validation and possible future training source. Useful because it is broader than Enyo self-play.</td>
+            <td><code>/home/petter/code/cpp/chess/assets/lichess_db_eval.jsonl.zst</code></td>
+          </tr>
+          <tr>
+            <td>Stockfish/binpack data</td>
+            <td>Validation and possible future training source. Useful because it comes from engine-training distributions.</td>
+            <td><code>/home/petter/code/cpp/chess/assets/*.binpack</code></td>
+          </tr>
+          <tr>
+            <td>Real Enyo loss logs</td>
+            <td>Replay gates, not bulk training. These catch tactical and time-management regressions.</td>
+            <td><code>/home/petter/code/cpp/chess/enyo/bugs/*.log</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        A position row is stored as JSONL. The key field is <code>fen</code>,
+        a FEN string describing the board, side to move, castling rights,
+        en-passant square, and counters. The row also keeps context from the
+        game so the data can be audited later.
+      </p>
+
+      <pre><code>{
+  "fen": "8/p7/3n1p1p/P1k5/2p2KPP/8/8/1B6 w - - 9 55",
+  "move": "a6",
+  "move_uci": "a5a6",
+  "score": -259,
+  "wdl": 1.0,
+  "result": "1-0",
+  "side": "white",
+  "ply": 96,
+  "fullmove": 55,
+  "depth": 8,
+  "time_s": 0.006,
+  "mate_ply": null,
+  "game_id": "107",
+  "termination": "normal",
+  "source": "/home/petter/tmp/enyo_selfplay/d8_plus120k_20260510_115338/selfplay.pgn",
+  "source_score": -386,
+  "teacher": "stockfish",
+  "teacher_depth": 12
+}</code></pre>
+
+      <p>
+        The move fields are context, not the thing being learned. The NNUE learns
+        the target <code>score</code> for the FEN. It does not learn to copy
+        <code>move_uci</code>.
+      </p>
+
+      <h3>2. Teacher Labels</h3>
+      <p>
+        Teacher labeling asks a stronger engine, currently Stockfish, to evaluate
+        each FEN at a fixed depth. The output is another JSONL file with the same
+        row shape, but the training target <code>score</code> is replaced by the
+        teacher's centipawn score.
+      </p>
+
+      <pre><code>source_bucketed.jsonl row
+  score        = previous target, for example Stockfish depth 12
+  source_score = older score, if one existed
+
+label_with_uci.py --depth 16
+  asks Stockfish for this FEN
+  writes new score from Stockfish depth 16
+  stores the previous score in source_score
+
+labeled.jsonl row
+  score        = new training target
+  source_score = previous target for audit
+  teacher      = "stockfish"
+  teacher_depth = 16</code></pre>
+
+      <p>For the same real row after depth-16 relabeling:</p>
+
+      <pre><code>{
+  "fen": "8/p7/3n1p1p/P1k5/2p2KPP/8/8/1B6 w - - 9 55",
+  "score": -288,
+  "source_score": -259,
+  "teacher": "stockfish",
+  "teacher_depth": 16
+}</code></pre>
+
+      <p>
+        Labels are sharded so many Stockfish processes can work in parallel.
+        The depth-16 bucket run used 16 one-thread Stockfish workers with small
+        per-worker hash. Each shard writes:
+      </p>
+
+      <pre><code>shards/label.0.jsonl
+shards/label.0.log
+shards/label.0.jsonl.stats.json
+...
+shards/label.15.jsonl</code></pre>
+
+      <p>
+        Mate scores, missing scores, unknown results, and extreme centipawns are
+        filtered or clamped depending on the run. This matters because a few bad
+        targets can damage the net more than thousands of normal rows help it.
+      </p>
+
+      <h3>3. Packed Tensors</h3>
+      <p>
+        JSONL is readable but slow for training. Packing converts FEN strings
+        into Enyo NNUE feature indices once, writes numeric arrays, and lets
+        PyTorch train without reparsing chess text every epoch.
+      </p>
+
+      <p>The current packed directory contains:</p>
+
+      <table>
+        <thead><tr><th>File</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>white_features.npy</code></td><td>Active feature indices from White's perspective.</td></tr>
+          <tr><td><code>black_features.npy</code></td><td>Active feature indices from Black's perspective.</td></tr>
+          <tr><td><code>counts.npy</code></td><td>How many feature slots are valid for each row. The current max is 32.</td></tr>
+          <tr><td><code>stm.npy</code></td><td>Side to move, used to order <code>us</code> and <code>them</code>.</td></tr>
+          <tr><td><code>score.npy</code></td><td>Teacher centipawn target.</td></tr>
+          <tr><td><code>wdl.npy</code></td><td>Game-result or WDL context when present.</td></tr>
+          <tr><td><code>phase_scale.npy</code></td><td>Material-phase scaling value derived from the pieces.</td></tr>
+          <tr><td><code>source_id.npy</code></td><td>Numeric source id so validation can be separated by origin.</td></tr>
+          <tr><td><code>meta.json</code></td><td>Row count, source path, max features, and source map.</td></tr>
+        </tbody>
+      </table>
+
+      <pre><code>{
+  "source": "/home/petter/tmp/enyo_teacher/sf_d16_bucket1m_20260512_225554/labeled.jsonl",
+  "rows": 988632,
+  "max_features": 32,
+  "max_features_seen": 32,
+  "source_map": {
+    "stockfish": 0
+  }
+}</code></pre>
+
+      <p>
+        "Packed tensors" means these arrays are the dataset representation
+        PyTorch consumes. They are not the trained network. They are simply the
+        preprocessed input rows plus target arrays.
+      </p>
+
+      <h3>4. PyTorch Training</h3>
+      <p>
+        <code>train.py</code> loads the packed arrays, builds the same NNUE
+        architecture Enyo uses at runtime, initializes from an existing
+        <code>.nn</code> file when requested, and optimizes the weights with
+        PyTorch.
+      </p>
+
+      <pre><code>packed arrays
+  -&gt; dataset.py loads rows
+  -&gt; model.py / enyo_nnue2.py build the NNUE model
+  -&gt; optional init-from-nn loads the starting runtime net
+  -&gt; forward pass predicts centipawns
+  -&gt; Huber/MSE/MPE loss compares prediction to score.npy
+  -&gt; AdamW optimizer updates weights
+  -&gt; validation rows choose the best checkpoint</code></pre>
+
+      <p>
+        In the depth-16 bucket run, the final 50k rows were reserved for
+        validation and the rest were used for training:
+      </p>
+
+      <pre><code>total rows: 988632
+train rows: 938632
+validation rows: 50000
+optimizer: AdamW
+common objective: Huber loss
+example beta: 200 cp</code></pre>
+
+      <p>
+        A lower training loss means the net fits the teacher labels better. It
+        does not automatically mean higher Elo. That is why static metrics,
+        replay gates, and SPRT are separate stages.
+      </p>
+
+      <h3>5. <code>.nn</code> Export</h3>
+      <p>
+        Training writes a PyTorch checkpoint and an engine-loadable runtime file:
+      </p>
+
+      <pre><code>model.pt  = PyTorch checkpoint, useful for resuming or inspecting training
+model.nn  = Enyo runtime network, loaded by UCI option nnue2_file</code></pre>
+
+      <p>
+        The exported <code>.nn</code> follows the runtime layout loaded by Enyo's
+        NNUE2 evaluator. The file has no JSON wrapper; it is raw binary arrays
+        in the exact order the engine expects:
+      </p>
+
+      <pre><code>input_weights  int16  [12288, 1024]
+input_biases   int16  [1024]
+l1_weights     int8   [16, 2048]
+l1_biases      int32  [16]
+l2_weights     float32 [32, 16]
+l2_biases      float32 [32]
+output_weights float32 [32]
+output_bias    float32 [1]</code></pre>
+
+      <p>
+        The current runtime file size is about 25 MB. Enyo loads it with:
+      </p>
+
+      <pre><code>setoption name nnue2_file value /path/to/model.nn</code></pre>
+
+      <h3>6. Replay Gates</h3>
+      <p>
+        Replay gates answer a different question than static metrics: if this
+        network is inserted into Enyo search, does it make known bad positions
+        worse? The gate replays real logged games and compares candidate behavior
+        against the known baseline/reference analysis.
+      </p>
+
+      <pre><code>known Enyo problem log
+  -&gt; replay reconstructs each go command
+  -&gt; candidate Enyo runs with candidate nnue2_file
+  -&gt; reference analysis marks best moves and centipawn losses
+  -&gt; gate compares candidate issues against baseline-known issues
+  -&gt; reject if candidate adds serious new blunders, timeouts, or crashes</code></pre>
+
+      <p>
+        Replay is cached by an analysis key that includes engine identity,
+        effective UCI options, log content, and net file hash. Because of that,
+        normal gates should not use <code>--force</code>; forcing replay wastes
+        time and bypasses the cache safety we want.
+      </p>
+
+      <h3>7. SPRT</h3>
+      <p>
+        SPRT is the final arbiter. It runs candidate-vs-reference games with the
+        same Enyo executable and different <code>nnue2_file</code> values. This
+        isolates the network change from unrelated engine changes.
+      </p>
+
+      <pre><code>candidate engine = Enyo executable + candidate model.nn
+reference engine = same Enyo executable + current reference net
+book             = UHO_Lichess_4852_v1.epd
+time control     = usually 10+0.1 for net testing on pwa-5090
+host defaults    = --concurrency 6 --threads 4 on pwa-5090</code></pre>
+
+      <p>
+        A candidate is promoted only if the game result is meaningfully positive.
+        The d16 run showed why: <code>float_head_huber_lr3e6_e8</code> improved
+        static metrics and passed replay, but SPRT trended negative, so it was
+        rejected.
+      </p>
+    </section>
+
+    <section>
       <h2>Sample Shape</h2>
       <p>
         Score-bucket sampling is used so the net sees more than only quiet
@@ -541,9 +816,9 @@ example beta: 200 cp</code></pre>
       </ul>
 
       <p>Replay outputs are written under each candidate directory:</p>
-      <pre><code>replay_gates_force/replay.log
-replay_gates_force/summary.txt
-replay_gates_force/enyo.log</code></pre>
+      <pre><code>replay_gates/replay.log
+replay_gates/summary.txt
+replay_gates/enyo.log</code></pre>
 
       <h3>SPRT command if gates pass</h3>
       <pre><code>sprt   --candidate /home/petter/code/cpp/chess/assets/engines/enyo_206059e   --reference /home/petter/code/cpp/chess/assets/engines/enyo_206059e   --candidate-option "nnue2_file=$RUN/&lt;candidate&gt;/model.nn"   --reference-option "nnue2_file=/home/petter/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn"   --book /home/petter/code/cpp/chess/assets/books/UHO_Lichess_4852_v1.epd   --games 2000   --concurrency 6   --threads 4   --tc "10+0.1"</code></pre>
