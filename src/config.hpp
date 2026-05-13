@@ -102,7 +102,7 @@ inline constexpr int mate_in_moves(int v)
 class ConfigManager {
 public:
     int num_threads         = 1;
-    int hash_size           = 64;
+    int hash_size           = 1024;
     bool use_chess_960      = false;
     bool use_tt             = true;
     bool use_tt_exact_cutoff = true;
