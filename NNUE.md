@@ -11,11 +11,12 @@ Build an Enyo-owned network that is clearly stronger in Enyo search than the
 current starting net.
 
 A candidate is not accepted because it has nicer static metrics. It is accepted
-only if it passes replay gates and shows useful Elo in SPRT.
+only if it shows useful Elo in SPRT. Replay gates are diagnostic while `replay`
+is being changed, and must not block or promote NNUE candidates until replay is
+stable again.
 
 Target for promotion:
 
-- replay gates do not introduce serious new issues;
 - static metrics are sane on source-separated validation sets;
 - SPRT shows a meaningful positive signal, ideally at least `+5 Elo`;
 - search speed is not materially worse;
@@ -23,34 +24,62 @@ Target for promotion:
 
 ## Current Status
 
-The first source-mix smoke test found a small positive signal from public
-binpack-only training, but it did not prove a `+10 Elo` gain.
+The first source-mix smoke test found a small positive signal, but repeated
+larger tests have not proven a keeper yet. The latest cp800/source-mix candidate
+looked good in a 1000-game screen, then failed to reproduce in a clean 4000-game
+run, so it is archived as noisy/inconclusive.
 
 Run artifacts on `pwa-5090`:
 
 ```text
-run:    /home/petter/tmp/enyo_teacher/source_mix_1m_20260513_142124
-script: /home/petter/code/cpp/chess/nnue/tools/nnue2/run_source_mix_1m_pwa.sh
-net:    /home/petter/tmp/enyo_teacher/source_mix_1m_20260513_142124/binpack1m_all_huber_lr1e6_e8/model.nn
-tmux:   nnue_cmd
-status: binpack-only candidate is promising but unproven
+run:    /home/petter/tmp/enyo_teacher/objective_sweep_cp800_5m_20260514_080450
+script: /home/petter/code/cpp/chess/nnue/tools/nnue2/run_cp800_5m_sweep_pwa.sh
+net:    /home/petter/tmp/enyo_teacher/objective_sweep_cp800_5m_20260514_080450/mix1m_huber_cp800_lr1e6_e8/model.nn
+tmux:   nnue_test
+status: noisy/inconclusive; not promoted
 ```
 
 Outcome:
 
-- `binpack1m_all_huber_lr1e6_e8`: replay-clean on serious issues and finished:
+- `source_mix_1m/binpack1m_all_huber_lr1e6_e8` finished:
 
 ```text
 [2000/2000] Elo   4.3 +/-  10.0 | LLR  0.27/2.94 (  9%) | LOS 80.2% | draw  56.8%
 ```
 
-- `mix_d16_500k_binpack_500k_all_huber_lr1e6_e8`: static metrics improved, but
-  replay added a serious Lynx blunder and was rejected before SPRT.
+- `objective_cp800_huber_vs_refnet_e5_screen` finished:
 
-Conclusion: public/binpack-only training produced the first useful positive
-NNUE signal, but it is too small for the `elo1=10` SPRT to accept. Confirm it
-with a smaller-H1 test before promotion. Mixing in the current d16 self-play
-subset is suspect and should not be scaled without fixing replay behavior.
+```text
+[1000/1000] Elo  13.9 +/-  13.9 | LLR  0.79/2.94 ( 27%) | LOS 97.5% | draw  58.2%
+```
+
+- The clean follow-up `objective_cp800_huber_vs_refnet_e5_official4k` was stopped
+  after it turned negative:
+
+```text
+[953/4000] about -5.5 Elo, LOS about 23%, draw about 55%
+```
+
+Conclusion: the current cp800/source-mix family is not a keeper. Do not repeat
+it without changing the data source or objective.
+
+Important data finding:
+
+- The imported Stockfish binpack contains many rows where `score=0` but
+  Stockfish depth-10 evaluates the same positions around `+/-600` to `+/-1000`
+  cp. Training on those zero labels is harmful.
+- `tools/nnue2/binpack_to_jsonl.cpp` now supports `--min-abs-cp`; the active
+  run filters out small/zero binpack scores and uses binpack only as tactical
+  nonzero data.
+
+Active run:
+
+```text
+run:    /home/petter/tmp/enyo_teacher/nonzero_binpack_sweep_20260514_164049
+script: /home/petter/code/cpp/chess/nnue/tools/nnue2/run_nonzero_binpack_sweep_pwa.sh
+tmux:   nnue_test
+plan:   d16 + lichess eval + filtered nonzero binpack, no replay gates, static gate, then 4000-game SPRT if static passes
+```
 
 ## Completed Work
 
@@ -76,6 +105,9 @@ subset is suspect and should not be scaled without fixing replay behavior.
 - [x] Source-mix smoke test completed.
 - [x] Binpack-only 1M candidate finished `+4.3 +/- 10.0 Elo`; archived as promising, not promoted.
 - [x] D16+binpack 1M candidate rejected by replay gate.
+- [x] cp800/source-mix 5M candidate screened positive but failed clean reproduction; archived, not promoted.
+- [x] Binpack zero-score label problem identified.
+- [x] Binpack converter gained `--min-abs-cp` filtering.
 
 ## Active Goal: Find A Training Signal That Converts To Elo
 
@@ -83,11 +115,15 @@ The current hypothesis is narrower than before: the pipeline works, and static
 metrics can improve, but those gains are not reliably becoming stronger moves.
 The next useful work is controlled candidate gating, not another blind long run.
 
-Current confirmatory test:
+Current run:
 
-- [ ] Run the binpack-only candidate with a smaller H1, e.g. `elo1=5`.
-- [ ] If it stays positive, run a second replay suite and a longer fixed match.
-- [ ] Promote only if the confirmatory result is clearly positive and replay-clean.
+- [x] Stop treating imported binpack zero scores as valid centipawn labels.
+- [ ] Convert filtered binpack rows with `--min-abs-cp 50`.
+- [ ] Mix `900k` d16 rows, `2.5M` Lichess eval rows, and `1.6M` filtered binpack rows.
+- [ ] Train conservative Huber/MPE candidates from the starting net.
+- [ ] Reject candidates with source-separated static metric distortion.
+- [ ] Run one `4000` game SPRT only if static metrics pass.
+- [ ] Promote only if SPRT is meaningfully positive.
 
 Depth-16 bucket run stages:
 
@@ -120,6 +156,8 @@ Do not repeat:
 - `float_head_huber_lr3e6_e8`: replay was acceptable, SPRT was not positive.
 - `all_huber_lr1e6_e8`: replay-safe but SPRT was negative/neutral.
 - `mix_d16_500k_binpack_500k_all_huber_lr1e6_e8`: replay added a serious tactical regression.
+- `objective_cp800_huber_vs_refnet_e5`: 1000-game screen was positive, clean follow-up was negative.
+- Imported binpack rows with `score=0`: many are not equal positions; do not train on them as CP labels.
 - Long training based only on better MAE/sign numbers without replay and SPRT.
 
 ## Decision Rules
@@ -132,12 +170,12 @@ After each candidate:
    - Lichess eval validation;
    - binpack validation.
 2. Reject immediately if metrics are distorted or worse across important sources.
-3. Run replay gates on known bad games.
-4. Reject if replay adds serious new issues.
-5. Start SPRT only if both metrics and replay are acceptable.
-6. Promote only if SPRT is meaningfully positive.
+3. While replay is WIP, skip replay gates for NNUE promotion decisions.
+4. Start SPRT only if source-separated metrics are acceptable.
+5. Promote only if SPRT is meaningfully positive.
 
 Neutral candidates are not promoted. They are kept as experiment artifacts.
+Once replay is stable again, replay gates return as a required safety check.
 
 ## If The D16 Bucket1m Family Is Neutral
 
