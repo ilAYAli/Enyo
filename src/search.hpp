@@ -70,6 +70,7 @@ struct SearchInfo {
 
     uint64_t tbhits = 0; //
     uint64_t nodes {};
+    uint64_t nodes_limit {};
 };
 
 
