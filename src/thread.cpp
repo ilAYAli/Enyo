@@ -13,7 +13,10 @@ using namespace enyo;
     if (id != 0)
         return false;
 
-    if (si.time_expired()) {
+    const bool out_of_time = si.time_expired();
+    const bool out_of_nodes =
+        si.nodes_limit != 0 && thread::pool.get_nodes() >= si.nodes_limit;
+    if (out_of_time || out_of_nodes) {
         thread::pool.stop = true;
         return true;
     }

@@ -179,6 +179,12 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
 
 TimeAllocation handle_time_management(Board& b, SearchInfo & si)
 {
+    if (si.nodes_limit != 0) {
+        si.stoptime      = std::chrono::high_resolution_clock::time_point::max();
+        si.soft_stoptime = std::chrono::high_resolution_clock::time_point::max();
+        return { std::chrono::milliseconds(-1), std::chrono::milliseconds(-1) };
+    }
+
     bool have_time_limit = si.wtime != -1 || si.btime != -1 || si.movetime != -1;
     if (!have_time_limit) {
         si.stoptime      = std::chrono::high_resolution_clock::time_point::max();
@@ -660,6 +666,10 @@ void Uci::go(std::istringstream & iss)
         } else if (token == "binc" && (iss >> si.binc)) {
         } else if (token == "movetime" && (iss >> si.movetime)) {
         } else if (token == "movestogo" && (iss >> si.movestogo)) {
+        } else if (token == "nodes") {
+            int64_t nodes = 0;
+            if (iss >> nodes && nodes > 0)
+                si.nodes_limit = static_cast<uint64_t>(nodes);
         } else if (token == "perft" && (iss >> si.depth)) {
             perft<true>(b, si.depth);
             return;
@@ -695,7 +705,11 @@ void Uci::go(std::istringstream & iss)
 
     const auto active_clock = active_clock_ms(b, si);
     const auto last_resort_move_ms = last_resort_move_threshold_ms(active_clock, active_increment_ms(b, si));
-    if (si.movetime == -1 && si.depth == MAX_PLY && active_clock >= 0 && active_clock <= last_resort_move_ms) {
+    if (si.nodes_limit == 0
+        && si.movetime == -1
+        && si.depth == MAX_PLY
+        && active_clock >= 0
+        && active_clock <= last_resort_move_ms) {
         const auto& moves = si.has_searchmoves ? si.searchmoves : legal;
         if (moves.empty()) {
             eventlog::log<eventlog::Log::warning>(
@@ -720,8 +734,20 @@ void Uci::go(std::istringstream & iss)
     si.nnue.refresh(si.board);
 
 #if 1
-    fmt::print("info string threads:{},soft:{},hard:{},movetime:{},wtime:{},btime:{},winc:{},binc:{},movestogo:{},depth:{}\n",
-        cfgmgr.num_threads, alloc.soft.count(), alloc.hard.count(), si.movetime, si.wtime, si.btime, si.winc, si.binc, si.movestogo, si.depth);
+    fmt::print(
+        "info string threads:{},soft:{},hard:{},movetime:{},wtime:{},btime:{},"
+        "winc:{},binc:{},movestogo:{},depth:{},nodes:{}\n",
+        cfgmgr.num_threads,
+        alloc.soft.count(),
+        alloc.hard.count(),
+        si.movetime,
+        si.wtime,
+        si.btime,
+        si.winc,
+        si.binc,
+        si.movestogo,
+        si.depth,
+        si.nodes_limit);
 #endif
 
     thread::pool.init_threads(std::move(si), cfgmgr.num_threads);
