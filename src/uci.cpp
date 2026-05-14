@@ -60,19 +60,28 @@ struct TimeAllocation {
     std::chrono::milliseconds hard{-1};  // maximum — emergency stop
 };
 
-constexpr int clock_move_overhead_ms(int uci_inc)
+constexpr bool is_no_increment_low_clock(int uci_time, int uci_inc)
 {
-    return uci_inc > 0 ? 50 : 250;
+    return uci_inc == 0 && uci_time >= 0 && uci_time <= 60'000;
 }
 
-constexpr int last_resort_move_threshold_ms(int uci_inc)
+constexpr int clock_move_overhead_ms(int uci_time, int uci_inc)
 {
-    return clock_move_overhead_ms(uci_inc);
+    if (uci_inc > 0)
+        return 50;
+    return is_no_increment_low_clock(uci_time, uci_inc) ? 500 : 250;
+}
+
+constexpr int last_resort_move_threshold_ms(int uci_time, int uci_inc)
+{
+    if (uci_inc > 0)
+        return 50;
+    return is_no_increment_low_clock(uci_time, uci_inc) ? 1000 : 250;
 }
 
 std::chrono::milliseconds safe_clock_hard_cap(int uci_time, int uci_inc)
 {
-    return std::chrono::milliseconds(std::max(0, uci_time - clock_move_overhead_ms(uci_inc)));
+    return std::chrono::milliseconds(std::max(0, uci_time - clock_move_overhead_ms(uci_time, uci_inc)));
 }
 
 std::chrono::milliseconds clock_managed_hard_cap(int uci_time, int uci_inc)
@@ -106,7 +115,8 @@ void cap_clock_managed_allocation(TimeAllocation & alloc, int uci_time, int uci_
 // refill. With increment, spend part of the increment because it returns.
 // Classical (movestogo): divide remaining time across the mandated moves plus
 //   a small buffer; the hard budget is 4x soft, capped at time/4.
-// Both branches reserve move overhead: 50ms with increment, 250ms without.
+// Both branches reserve move overhead: 50ms with increment, 250ms without,
+// or 500ms when no-increment clock is low and lichess round-trip cost dominates.
 // The hard budget is always capped to the current clock minus move overhead:
 // increment is useful for the long-term spending rate, but it is only added
 // after this move is made.
@@ -114,8 +124,9 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
 {
     using namespace std::chrono;
 
-    const milliseconds min_time(uci_inc > 0 ? 100 : 20);
-    const milliseconds lag(clock_move_overhead_ms(uci_inc));
+    const bool no_increment_low_clock = is_no_increment_low_clock(uci_time, uci_inc);
+    const milliseconds min_time(no_increment_low_clock ? 5 : (uci_inc > 0 ? 100 : 20));
+    const milliseconds lag(clock_move_overhead_ms(uci_time, uci_inc));
 
     if (si.movetime != -1) {
         auto t = std::max(min_time, milliseconds(si.movetime) - milliseconds(50));
@@ -124,7 +135,7 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
     if (uci_time == -1) {
         return { milliseconds(-1), milliseconds(-1) };
     }
-    if (uci_time <= last_resort_move_threshold_ms(uci_inc)) {
+    if (uci_time <= last_resort_move_threshold_ms(uci_time, uci_inc)) {
         return { milliseconds(0), milliseconds(0) };
     }
 
@@ -142,8 +153,13 @@ TimeAllocation calculate_time_allocation(const SearchInfo & si, int uci_time, in
         soft = milliseconds(per_move);
         hard = std::min(milliseconds(time_budget / 4), soft * 4);
     } else if (uci_inc == 0) {
-        soft = milliseconds(time_budget / 100);
-        hard = std::min(milliseconds(time_budget / 12), soft * 2);
+        if (no_increment_low_clock) {
+            soft = milliseconds(time_budget / 150);
+            hard = std::min(milliseconds(time_budget / 30), soft * 2);
+        } else {
+            soft = milliseconds(time_budget / 100);
+            hard = std::min(milliseconds(time_budget / 12), soft * 2);
+        }
     } else {
         soft = milliseconds(time_budget / 30 + uci_inc * 3 / 4);
         hard = std::min(milliseconds(time_budget / 6), soft * 3);
@@ -678,7 +694,7 @@ void Uci::go(std::istringstream & iss)
     }
 
     const auto active_clock = active_clock_ms(b, si);
-    const auto last_resort_move_ms = last_resort_move_threshold_ms(active_increment_ms(b, si));
+    const auto last_resort_move_ms = last_resort_move_threshold_ms(active_clock, active_increment_ms(b, si));
     if (si.movetime == -1 && si.depth == MAX_PLY && active_clock >= 0 && active_clock <= last_resort_move_ms) {
         const auto& moves = si.has_searchmoves ? si.searchmoves : legal;
         if (moves.empty()) {
