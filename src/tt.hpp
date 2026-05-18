@@ -3,6 +3,7 @@
 #include "types.hpp"
 
 #include <cstdlib>
+#include <new>
 
 #if defined(_WIN32)
     #ifndef NOMINMAX
@@ -97,16 +98,9 @@ public:
 
     void free_table() {
         if (!hash_table) return;
-        if constexpr (use_aligned_alloc) {
-            #if defined(_WIN32)
-                _aligned_free(hash_table);
-            #else
-                std::free(hash_table);
-            #endif
-        } else {
-            delete[] hash_table;
-        }
+        release_table(hash_table);
         hash_table = nullptr;
+        size_megabytes = 0;
         buckets = 0;
     }
 
@@ -181,25 +175,17 @@ public:
         cut = 0;
     }
 
-    // Exposed so UCI `setoption name Hash value N` and settings.json
-    // load can actually change the TT size. Do NOT call during a live
-    // search — frees the old table and re-allocates. UCI protocol
-    // requires setoption only between `isready` exchanges, so the
-    // constraint is easy to honour from callers. No-op when the
-    // requested size already matches the current allocation (guards
-    // against redundant resize on every setoption).
-    void set_size(int megabytes) {
-        const auto requested_buckets =
-            static_cast<size_t>(megabytes * 1024 * 1024) / sizeof(SMPentry);
+    bool set_size(int megabytes) {
+        const auto requested_buckets = bucket_count_for(megabytes);
+        if (requested_buckets == 0)
+            return false;
         if (requested_buckets == buckets)
-            return;
-        free_table();
-        resize(megabytes);
-        new_write = 0;
-        over_write = 0;
-        cut = 0;
-        hit = 0;
-        current_age = 0;
+            return true;
+        return replace_table(megabytes);
+    }
+
+    int size_mb() const {
+        return size_megabytes;
     }
 
     SMPentry * hash_table { nullptr };
@@ -209,14 +195,33 @@ public:
     int over_write {};
     int cut {};
     int hit {};
+    int size_megabytes {};
     size_t buckets {};
 
 private:
     Transposition() {
-        resize(enyo::cfgmgr.hash_size);
+        const int requested = enyo::cfgmgr.hash_size;
+        if (replace_table(requested))
+            return;
+
+        for (const int fallback : fallback_sizes) {
+            if (requested > 0 && fallback >= requested)
+                continue;
+            if (!replace_table(fallback))
+                continue;
+
+            enyo::cfgmgr.hash_size = fallback;
+            fmt::print("info string WARNING: failed to allocate {} MB hash; using {} MB\n",
+                requested,
+                fallback);
+            return;
+        }
+
+        fmt::print("ERROR: failed to allocate hash table\n");
+        std::exit(EXIT_FAILURE);
     }
 
-    [[maybe_unused]] size_t get_page_size() {
+    [[maybe_unused]] static size_t get_page_size() {
         #if defined(_WIN32)
             SYSTEM_INFO system_info;
             GetSystemInfo(&system_info);
@@ -236,28 +241,85 @@ private:
         #endif
     }
 
-    void resize(int megabytes) {
-        const auto bytes = static_cast<size_t>(megabytes * 1024 * 1024);
+    static constexpr size_t bytes_in_megabyte = 1024ULL * 1024ULL;
+    static constexpr int fallback_sizes[] = { 1024, 512, 256, 128, 64, 16 };
+
+    struct TableAllocation {
+        SMPentry * table {};
+        size_t buckets {};
+    };
+
+    static size_t byte_count_for(int megabytes) {
+        if (megabytes <= 0)
+            return 0;
+        return static_cast<size_t>(megabytes) * bytes_in_megabyte;
+    }
+
+    static size_t bucket_count_for(int megabytes) {
+        return byte_count_for(megabytes) / sizeof(SMPentry);
+    }
+
+    static void release_table(SMPentry * table) {
         if constexpr (use_aligned_alloc) {
-            buckets = bytes / sizeof(SMPentry);
-            size_t alloc_size = buckets * sizeof(SMPentry);
+            #if defined(_WIN32)
+                _aligned_free(table);
+            #else
+                std::free(table);
+            #endif
+        } else {
+            delete[] table;
+        }
+    }
+
+    static TableAllocation allocate_table(int megabytes) {
+        const auto bytes = byte_count_for(megabytes);
+        const auto requested_buckets = bytes / sizeof(SMPentry);
+        if (requested_buckets == 0)
+            return {};
+
+        if constexpr (use_aligned_alloc) {
+            size_t alloc_size = requested_buckets * sizeof(SMPentry);
             size_t alignment = get_page_size();
             alloc_size = ((alloc_size + alignment - 1) / alignment) * alignment;
 
             #if defined(_WIN32)
-                hash_table = static_cast<SMPentry*>(_aligned_malloc(alloc_size, alignment));
+                auto * table = static_cast<SMPentry*>(_aligned_malloc(alloc_size, alignment));
             #else
-                hash_table = static_cast<SMPentry*>(std::aligned_alloc(alignment, alloc_size));
+                auto * table = static_cast<SMPentry*>(std::aligned_alloc(alignment, alloc_size));
             #endif
-            if (!hash_table) {
-                fmt::print("Failed to allocate hash table\n");
-                std::exit(EXIT_FAILURE);
-            }
-            std::fill(hash_table, hash_table + buckets, SMPentry{});
+
+            if (!table)
+                return {};
+            std::fill(table, table + requested_buckets, SMPentry{});
+            return { table, requested_buckets };
         } else {
-            buckets = bytes / sizeof(SMPentry);
-            hash_table = new SMPentry[buckets];
+            auto * table = new (std::nothrow) SMPentry[requested_buckets];
+            if (!table)
+                return {};
+            std::fill(table, table + requested_buckets, SMPentry{});
+            return { table, requested_buckets };
         }
+    }
+
+    bool replace_table(int megabytes) {
+        const auto allocation = allocate_table(megabytes);
+        if (!allocation.table)
+            return false;
+
+        free_table();
+        hash_table = allocation.table;
+        buckets = allocation.buckets;
+        size_megabytes = megabytes;
+        reset_stats();
+        return true;
+    }
+
+    void reset_stats() {
+        new_write = 0;
+        over_write = 0;
+        cut = 0;
+        hit = 0;
+        current_age = 0;
     }
 
 };

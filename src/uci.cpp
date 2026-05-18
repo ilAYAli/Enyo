@@ -511,8 +511,14 @@ void Uci::setoption(std::istringstream& iss)
         // from the default, so the requested size never took effect.
         // Now we resize in-place. UCI spec requires setoption only
         // between go commands, so this is always idle-time safe.
-        tt::ttable.set_size(cfgmgr.hash_size);
-        ucilog("info string hash table resized to {} MB\n", cfgmgr.hash_size);
+        if (tt::ttable.set_size(cfgmgr.hash_size)) {
+            ucilog("info string hash table resized to {} MB\n", tt::ttable.size_mb());
+        } else {
+            ucilog("info string WARNING: failed to resize hash table to {} MB; keeping {} MB\n",
+                cfgmgr.hash_size,
+                tt::ttable.size_mb());
+            cfgmgr.hash_size = tt::ttable.size_mb();
+        }
     }
     if (lower_name == "nnue_file") {
         // Re-init the NNUE module-level weights from the new path.
