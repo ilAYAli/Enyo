@@ -11,6 +11,10 @@
 #include <nlohmann/json.hpp>
 #include "fmt/format.h"
 
+#ifndef ENYO_USE_SYZYGY
+#define ENYO_USE_SYZYGY 0
+#endif
+
 
 #ifdef Release
     #define BREAKPOINT(message)
@@ -49,7 +53,7 @@ namespace Constexpr {
     // depth-unguarded qsearch cut is the source of warm-TT depth-1 blowups in
     // check-rich endgames (see odonata-bot vs EnyoBot JCKXOwix move 60).
     static constexpr bool use_qsearch_tt_cut         = true;
-    static constexpr bool use_syzygy                 = true;
+    static constexpr bool use_syzygy                 = ENYO_USE_SYZYGY != 0;
     // testing:
     static constexpr bool use_iir                    = true; //
     // looses elo:
@@ -108,6 +112,7 @@ public:
     bool use_tt_exact_cutoff = true;
     bool use_tt_lower_cutoff = false;
     bool use_tt_upper_cutoff = false;
+    bool use_syzygy         = true;
     bool use_lmr            = false;
     std::string nnue_file   = "nn-eba324f53044.nnue";
     std::string nnue2_file  = "";  // empty = disabled (use embedded nnue)
@@ -140,6 +145,7 @@ public:
             concat("use_tt_exact_cutoff", "check", use_tt_exact_cutoff) +
             concat("use_tt_lower_cutoff", "check", use_tt_lower_cutoff) +
             concat("use_tt_upper_cutoff", "check", use_tt_upper_cutoff) +
+            concat("use_syzygy",    "check", use_syzygy) +
             //concat("UCI_Chess960",  "check", use_chess_960) +
             concat("nnue_file",     "string", nnue_file) +
             concat("nnue2_file",    "string", nnue2_file) +
@@ -168,6 +174,8 @@ public:
             use_tt_lower_cutoff = (value == "true");
         else if (lc == "use_tt_upper_cutoff")
             use_tt_upper_cutoff = (value == "true");
+        else if (lc == "use_syzygy")
+            use_syzygy = (value == "true");
         else if (lc == "nnue_file")
             nnue_file = value;
         else if (lc == "nnue2_file")
@@ -203,12 +211,13 @@ private:
             nnue_file   = c.value("nnue_file", nnue_file);
             nnue2_file  = c.value("nnue2_file", nnue2_file);
             logfile     = c.value("logfile",   logfile);
-            syzygy_path = c.value("syzygy_path", syzygy_path);
+            syzygy_path = c.value("syzygy_path", c.value("SyzygyPath", syzygy_path));
 
             use_tt              = t.value("use_tt",              use_tt);
             use_tt_exact_cutoff = t.value("use_tt_exact_cutoff", use_tt_exact_cutoff);
             use_tt_lower_cutoff = t.value("use_tt_lower_cutoff", use_tt_lower_cutoff);
             use_tt_upper_cutoff = t.value("use_tt_upper_cutoff", use_tt_upper_cutoff);
+            use_syzygy          = t.value("use_syzygy",          use_syzygy);
             use_lmr             = t.value("use_lmr",             use_lmr);
 
             uci_options.clear();

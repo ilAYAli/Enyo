@@ -4,6 +4,9 @@
 #endif
 
 #include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <vector>
 
 #include "board.hpp"
 #include "config.hpp"
@@ -13,16 +16,107 @@ using namespace enyo;
 
 namespace {
 bool initialized = false;
+
+#ifdef _WIN32
+constexpr char path_separator = ';';
+#else
+constexpr char path_separator = ':';
+#endif
+
+std::string expand_home_path(std::string path)
+{
+    if (path == "~" || path.starts_with("~/")) {
+        if (const char * home = std::getenv("HOME")) {
+            if (path.size() == 1)
+                return home;
+            return std::string(home) + path.substr(1);
+        }
+    }
+    return path;
+}
+
+std::vector<std::string> split_path_list(const std::string & path)
+{
+    std::vector<std::string> parts;
+    size_t begin = 0;
+    while (begin <= path.size()) {
+        const auto end = path.find(path_separator, begin);
+        parts.emplace_back(path.substr(begin, end == std::string::npos ? end : end - begin));
+        if (end == std::string::npos)
+            break;
+        begin = end + 1;
+    }
+    return parts;
+}
+
+bool has_tablebase_files(const std::filesystem::path & path)
+{
+    std::error_code ec;
+    if (!std::filesystem::is_directory(path, ec))
+        return false;
+    for (std::filesystem::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec))
+            continue;
+        const auto ext = it->path().extension();
+        if (ext == ".rtbw" || ext == ".rtbz")
+            return true;
+    }
+    return false;
+}
+
+void append_unique(std::vector<std::string> & paths, const std::filesystem::path & path)
+{
+    const auto str = path.string();
+    if (std::find(paths.begin(), paths.end(), str) == paths.end())
+        paths.push_back(str);
+}
+
+std::string join_path_list(const std::vector<std::string> & paths)
+{
+    std::string out;
+    for (const auto & path : paths) {
+        if (!out.empty())
+            out += path_separator;
+        out += path;
+    }
+    return out;
+}
 }
 
 namespace syzygy {
 
+std::string resolve_path(const std::string & tb_path)
+{
+    std::vector<std::string> resolved;
+    for (const auto & segment : split_path_list(tb_path)) {
+        if (segment.empty())
+            continue;
+
+        const std::filesystem::path path(expand_home_path(segment));
+        if (has_tablebase_files(path))
+            append_unique(resolved, path);
+
+        std::error_code ec;
+        if (std::filesystem::is_directory(path, ec)) {
+            for (std::filesystem::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec)) {
+                if (it->is_directory(ec) && has_tablebase_files(it->path()))
+                    append_unique(resolved, it->path());
+            }
+        }
+
+        if (resolved.empty())
+            append_unique(resolved, path);
+    }
+    return join_path_list(resolved);
+}
+
 bool init(const std::string & tb_path)
 {
 #if ENYO_USE_SYZYGY
+    const auto resolved_path = resolve_path(tb_path);
     // tb_init returns true even when no tables were found; the real signal
     // is TB_LARGEST (max piece count of any loaded table).
-    initialized = tb_init(tb_path.c_str()) && TB_LARGEST > 0;
+    initialized = tb_init(resolved_path.c_str()) && TB_LARGEST > 0;
     return initialized;
 #else
     (void)tb_path;
@@ -111,6 +205,8 @@ std::pair<int, Move> DTZ_probe(Board & board, Status & status)
 
     auto pos = board2pos(board);
 
+    // Fathom's root DTZ probe preserves WDL. It picks the fastest winning
+    // move, and for losing positions it picks the longest legal resistance.
     unsigned TBresult =
         tb_probe_root(
             pos.white, pos.black,

@@ -530,13 +530,21 @@ void Uci::setoption(std::istringstream& iss)
         ucilog("info string nnue_file set to '{}'\n", cfgmgr.nnue_file);
     }
 #if ENYO_USE_SYZYGY
-    if (lower_name == "syzygypath" && !cfgmgr.syzygy_path.empty()) {
-        if (syzygy::init(cfgmgr.syzygy_path))
+    if (lower_name == "use_syzygy") {
+        ucilog("info string Syzygy probing {}\n", cfgmgr.use_syzygy ? "enabled" : "disabled");
+        const auto path = syzygy::resolve_path(cfgmgr.syzygy_path);
+        if (cfgmgr.use_syzygy && !path.empty() && syzygy::init(path))
             ucilog("info string Syzygy tablebases loaded from '{}' (up to {}-man)\n",
-                cfgmgr.syzygy_path, syzygy::largest());
+                path, syzygy::largest());
+    }
+    if (lower_name == "syzygypath" && cfgmgr.use_syzygy && !cfgmgr.syzygy_path.empty()) {
+        const auto path = syzygy::resolve_path(cfgmgr.syzygy_path);
+        if (syzygy::init(path))
+            ucilog("info string Syzygy tablebases loaded from '{}' (up to {}-man)\n",
+                path, syzygy::largest());
         else
             ucilog("info string warning: no Syzygy tablebases found at '{}'\n",
-                cfgmgr.syzygy_path);
+                path);
     }
 #endif
 }
