@@ -52,6 +52,46 @@ bool move_gives_check(Board & b, NNUE::Net * nnue, Move move)
     return gives_check;
 }
 
+constexpr int root_wdl_rank(syzygy::Status status)
+{
+    switch (status) {
+        case syzygy::Status::Win:  return 2;
+        case syzygy::Status::Draw: return 1;
+        case syzygy::Status::Loss: return 0;
+        default:                   return -1;
+    }
+}
+
+template <Color Us>
+Movelist filter_root_tb_loss_moves(Board & board, const Movelist & legal_moves)
+{
+    Movelist filtered;
+    int best_rank = -1;
+
+    for (const auto move : legal_moves) {
+        apply_move<Us, true, false>(board, move);
+        const auto child_status = syzygy::WDL_probe(board);
+        revert_move<Us, true, false>(board);
+
+        if (child_status == syzygy::Status::Error)
+            continue;
+
+        const auto rank = root_wdl_rank(
+            child_status == syzygy::Status::Win  ? syzygy::Status::Loss
+          : child_status == syzygy::Status::Loss ? syzygy::Status::Win
+                                                 : syzygy::Status::Draw);
+
+        if (rank > best_rank) {
+            filtered.clear();
+            best_rank = rank;
+        }
+        if (rank == best_rank)
+            filtered.emplace(move);
+    }
+
+    return filtered.empty() ? legal_moves : filtered;
+}
+
 }
 
 int lmr_reductions[MAX_PLY][MAX_MOVES];
@@ -831,11 +871,9 @@ void search_position(Worker & worker)
             legal_fallback.empty() ? Move{} : legal_fallback[0]);
     }
 
-    // Root DTZ probe: if the position is fully covered by a loaded tablebase,
-    // skip search entirely and emit the tablebase's guaranteed-progress move.
-    // This is what prevents the engine from blundering in "obviously drawn"
-    // or "obviously won" endgames — Fathom knows the DTZ-optimal move; the
-    // NNUE-driven search is blind to it once the horizon passes.
+    // Root DTZ is reliable for won/drawn tablebase positions. In lost
+    // positions it can preserve WDL while still choosing an easy practical
+    // loss, so let search pick the defensive move instead.
     if (worker.id == 0 && Constexpr::use_syzygy && cfgmgr.use_syzygy) {
         const auto num_pieces = count_bits(board.color_bb[white] | board.color_bb[black]);
         const auto tb_max = static_cast<int>(syzygy::largest());
@@ -852,8 +890,20 @@ void search_position(Worker & worker)
                   : tb_status == syzygy::Status::Loss ? "loss"
                                                       : "draw";
                 ucilog("info depth 1 score cp {} string tbhit {}\n", tb_score, verdict);
-                ucilog("bestmove {}\n", tb_move);
-                return;
+                if (tb_status != syzygy::Status::Loss) {
+                    ucilog("bestmove {}\n", tb_move);
+                    return;
+                }
+
+                const auto filtered = board.side == white
+                    ? filter_root_tb_loss_moves<white>(board, legal_fallback)
+                    : filter_root_tb_loss_moves<black>(board, legal_fallback);
+                if (!filtered.empty() && filtered.size() < legal_fallback.size()) {
+                    si.searchmoves = filtered;
+                    si.has_searchmoves = true;
+                    ucilog("info string tbhit loss filtered root moves {}/{}\n",
+                        filtered.size(), legal_fallback.size());
+                }
             }
         }
     }
