@@ -205,8 +205,8 @@ std::pair<int, Move> DTZ_probe(Board & board, Status & status)
 
     auto pos = board2pos(board);
 
-    // Fathom's root DTZ probe preserves WDL. It picks the fastest winning
-    // move, and for losing positions it picks the longest legal resistance.
+    // Fathom's root DTZ probe preserves WDL, but DTZ is not a practical
+    // defensive policy for already-lost positions.
     unsigned TBresult =
         tb_probe_root(
             pos.white, pos.black,
