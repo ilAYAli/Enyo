@@ -198,11 +198,12 @@ int main(int argc, char **argv)
         uci(fmt::format("setoption name {} value {}", name, value));
 
 #if ENYO_USE_SYZYGY
-    if (!cfgmgr.syzygy_path.empty()) {
-        if (!syzygy::init(cfgmgr.syzygy_path)) {
+    if (cfgmgr.use_syzygy && !cfgmgr.syzygy_path.empty()) {
+        const auto path = syzygy::resolve_path(cfgmgr.syzygy_path);
+        if (!syzygy::init(path)) {
             eventlog::log<eventlog::Log::warning>(
                 "failed to initialize tablebases at '{}'\n",
-                cfgmgr.syzygy_path);
+                path);
         }
     }
 #endif

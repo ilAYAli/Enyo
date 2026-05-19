@@ -330,41 +330,43 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     // tb lookup:
     if constexpr (Constexpr::use_syzygy) {
         auto & board = worker.si.board;
-        const auto num_pieces = count_bits(board.color_bb[Us] | board.color_bb[Them]);
-        const auto tb_max = static_cast<int>(syzygy::largest());
-        if (NT != NodeType::Root
-            && tb_max > 0
-            && num_pieces <= tb_max
-            && !board.gamestate.can_castle(CastlingRights::any_castling)) {
+        if (cfgmgr.use_syzygy) {
+            const auto num_pieces = count_bits(board.color_bb[Us] | board.color_bb[Them]);
+            const auto tb_max = static_cast<int>(syzygy::largest());
+            if (NT != NodeType::Root
+                && tb_max > 0
+                && num_pieces <= tb_max
+                && !board.gamestate.can_castle(CastlingRights::any_castling)) {
 
-            const auto status = syzygy::WDL_probe(board);
-            if (status != syzygy::Status::Error) {
-                Value tb_value = Value::draw;
-                auto tb_flag = tt::type::ExactBound;
-                switch (status) {
-                    case syzygy::Status::Win:
-                        tb_value = Value::tb_win_in_max_ply;
-                        tb_flag = tt::type::LowerBound;
-                        break;
-                    case syzygy::Status::Loss:
-                        tb_value = Value::tb_loss_in_max_ply;
-                        tb_flag = tt::type::UpperBound;
-                        break;
-                    default: // Draw
-                        break;
-                }
+                const auto status = syzygy::WDL_probe(board);
+                if (status != syzygy::Status::Error) {
+                    Value tb_value = Value::draw;
+                    auto tb_flag = tt::type::ExactBound;
+                    switch (status) {
+                        case syzygy::Status::Win:
+                            tb_value = Value::tb_win_in_max_ply;
+                            tb_flag = tt::type::LowerBound;
+                            break;
+                        case syzygy::Status::Loss:
+                            tb_value = Value::tb_loss_in_max_ply;
+                            tb_flag = tt::type::UpperBound;
+                            break;
+                        default: // Draw
+                            break;
+                    }
 
-                if (tb_flag == tt::type::ExactBound
-                || (tb_flag == tt::type::LowerBound && tb_value >= beta)
-                || (tb_flag == tt::type::UpperBound && tb_value <= alpha)) {
-                    tt::ttable.store(
-                        b.hash,
-                        Move{},
-                        tt::value_to(tb_value, ss->ply),
-                        tb_flag,
-                        std::min(depth + tb_max, MAX_PLY)
-                    );
-                    return tb_value;
+                    if (tb_flag == tt::type::ExactBound
+                    || (tb_flag == tt::type::LowerBound && tb_value >= beta)
+                    || (tb_flag == tt::type::UpperBound && tb_value <= alpha)) {
+                        tt::ttable.store(
+                            b.hash,
+                            Move{},
+                            tt::value_to(tb_value, ss->ply),
+                            tb_flag,
+                            std::min(depth + tb_max, MAX_PLY)
+                        );
+                        return tb_value;
+                    }
                 }
             }
         }
@@ -834,7 +836,7 @@ void search_position(Worker & worker)
     // This is what prevents the engine from blundering in "obviously drawn"
     // or "obviously won" endgames — Fathom knows the DTZ-optimal move; the
     // NNUE-driven search is blind to it once the horizon passes.
-    if (worker.id == 0 && Constexpr::use_syzygy) {
+    if (worker.id == 0 && Constexpr::use_syzygy && cfgmgr.use_syzygy) {
         const auto num_pieces = count_bits(board.color_bb[white] | board.color_bb[black]);
         const auto tb_max = static_cast<int>(syzygy::largest());
         if (tb_max > 0
