@@ -9,6 +9,7 @@ utils/
 deploy/
 create_value_tables/build/
 create_value_tables/create_value_tables
+resume.sh
 value_tables.hpp
 misc/*
 logs/*
