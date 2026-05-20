@@ -134,6 +134,13 @@ unsigned largest()
 #endif
 }
 
+static inline constexpr uint8_t fathom_ep_square(square_t ep)
+{
+    // Enyo stores "no EP" as 0. Fathom also uses 0 as its no-EP sentinel,
+    // so only convert real EP squares.
+    return ep ? sqconv(ep) : 0;
+}
+
 pos board2pos(Board & b)
 {
     assert(b.color_bb[white] & b.pt_bb[white][king]);
@@ -156,7 +163,7 @@ pos board2pos(Board & b)
         // and made DTZ score moves off a rule50 that lagged reality.
         .rule50 = static_cast<uint8_t>(std::min(255,
             b.half_moves + static_cast<int>(b.gamestate.half_moves))),
-        .ep = sqconv(b.gamestate.enpassant_square),
+        .ep = fathom_ep_square(b.gamestate.enpassant_square),
         .turn = b.side == white,
         .move = static_cast<uint16_t>(b.histply + 1),
     };
