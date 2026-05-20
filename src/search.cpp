@@ -63,7 +63,7 @@ constexpr int root_wdl_rank(syzygy::Status status)
 }
 
 template <Color Us>
-Movelist filter_root_tb_loss_moves(Board & board, const Movelist & legal_moves)
+Movelist filter_root_tb_moves(Board & board, const Movelist & legal_moves)
 {
     Movelist filtered;
     int best_rank = -1;
@@ -357,10 +357,26 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         tt::ttable.hit++;
         tt_value = tt::value_from(tte->value, ss->ply);
         tt_move = tte->move;
-        if (tt_value != Value::none && tte->depth >= depth) {
-            if (tte->flag == tt::type::ExactBound
-            || (tte->flag == tt::type::UpperBound && tt_value <= alpha)
-            || (tte->flag == tt::type::LowerBound && tt_value >= beta)) {
+        const bool can_tt_cut =
+            tt_value != Value::none
+            && tte->depth >= depth
+            && (tte->flag == tt::type::ExactBound
+             || (tte->flag == tt::type::UpperBound && tt_value <= alpha)
+             || (tte->flag == tt::type::LowerBound && tt_value >= beta));
+        if constexpr (NT == NodeType::Root) {
+            if (can_tt_cut && tt_move) {
+                const auto root_moves = !si.searchmoves.empty()
+                    ? si.searchmoves
+                    : generate_legal_moves<Us>(b);
+                if (std::ranges::find(root_moves, tt_move) != root_moves.end()) {
+                    worker.pvline.setmove(tt_move, ss->ply);
+                    worker.bestmove = tt_move;
+                    tt::ttable.cut++;
+                    return tt_value;
+                }
+            }
+        } else {
+            if (can_tt_cut) {
                 tt::ttable.cut++;
                 return tt_value;
             }
@@ -859,6 +875,21 @@ void search_position(Worker & worker)
     const auto is_legal_root_move = [&](Move move) {
         return std::ranges::find(legal_fallback, move) != legal_fallback.end();
     };
+    const auto is_active_root_move = [&](Move move) {
+        if (!is_legal_root_move(move))
+            return false;
+        return !si.has_searchmoves
+            || std::ranges::find(si.searchmoves, move) != si.searchmoves.end();
+    };
+    const auto active_root_fallback = [&]() {
+        if (si.has_searchmoves) {
+            for (const auto move : si.searchmoves) {
+                if (is_legal_root_move(move))
+                    return move;
+            }
+        }
+        return legal_fallback.empty() ? Move{} : legal_fallback[0];
+    };
 
     tt::ttable.prepare();
     worker.pvline.clear();
@@ -871,9 +902,9 @@ void search_position(Worker & worker)
             legal_fallback.empty() ? Move{} : legal_fallback[0]);
     }
 
-    // Root DTZ is reliable for won/drawn tablebase positions. In lost
-    // positions it can preserve WDL while still choosing an easy practical
-    // loss, so let search pick the defensive move instead.
+    // Root DTZ is reliable when available, but 6-man installs often have
+    // WDL without DTZ. Always use root WDL as a correctness filter so search
+    // cannot move from draw to loss just because DTZ is missing.
     if (worker.id == 0 && Constexpr::use_syzygy && cfgmgr.use_syzygy) {
         const auto num_pieces = count_bits(board.color_bb[white] | board.color_bb[black]);
         const auto tb_max = static_cast<int>(syzygy::largest());
@@ -882,27 +913,34 @@ void search_position(Worker & worker)
          && !board.gamestate.can_castle(CastlingRights::any_castling)) {
             syzygy::Status tb_status = syzygy::Status::Error;
             auto [tb_score, tb_move] = syzygy::DTZ_probe(board, tb_status);
-            if (tb_status != syzygy::Status::Error
-             && tb_move
-             && is_legal_root_move(tb_move)) {
+            if (tb_status == syzygy::Status::Error) {
+                tb_status = syzygy::WDL_probe(board);
+                tb_score =
+                    tb_status == syzygy::Status::Win  ? Value::tb_win_in_max_ply
+                  : tb_status == syzygy::Status::Loss ? Value::tb_loss_in_max_ply
+                                                      : Value::draw;
+            }
+
+            if (tb_status != syzygy::Status::Error) {
                 const char* verdict =
                     tb_status == syzygy::Status::Win  ? "win"
                   : tb_status == syzygy::Status::Loss ? "loss"
                                                       : "draw";
                 ucilog("info depth 1 score cp {} string tbhit {}\n", tb_score, verdict);
-                if (tb_status != syzygy::Status::Loss) {
+                if (tb_move && tb_status != syzygy::Status::Loss && is_active_root_move(tb_move)) {
                     ucilog("bestmove {}\n", tb_move);
                     return;
                 }
 
+                const auto& root_candidates = si.has_searchmoves ? si.searchmoves : legal_fallback;
                 const auto filtered = board.side == white
-                    ? filter_root_tb_loss_moves<white>(board, legal_fallback)
-                    : filter_root_tb_loss_moves<black>(board, legal_fallback);
-                if (!filtered.empty() && filtered.size() < legal_fallback.size()) {
+                    ? filter_root_tb_moves<white>(board, root_candidates)
+                    : filter_root_tb_moves<black>(board, root_candidates);
+                if (!filtered.empty() && filtered.size() < root_candidates.size()) {
                     si.searchmoves = filtered;
                     si.has_searchmoves = true;
-                    ucilog("info string tbhit loss filtered root moves {}/{}\n",
-                        filtered.size(), legal_fallback.size());
+                    ucilog("info string tbhit {} filtered root moves {}/{}\n",
+                        verdict, filtered.size(), root_candidates.size());
                 }
             }
         }
@@ -1098,21 +1136,23 @@ void search_position(Worker & worker)
         if (si.has_searchmoves)
             ucilog("info string forced score {}\n", value);
 
-        Move out = is_legal_root_move(shortest_mate.move) ? shortest_mate.move : worker.bestmove;
+        Move out = is_active_root_move(shortest_mate.move) ? shortest_mate.move : worker.bestmove;
 
-        if (!is_legal_root_move(out) && !legal_fallback.empty()) {
+        if (!is_active_root_move(out)) {
+            const auto fallback = active_root_fallback();
             eventlog::log<eventlog::Log::error>(
                 "bestmove fallback fired. pre_fallback_out={} worker.bestmove={} shortest_mate.move={} "
-                "pvline.bestmove()={} pv_str='{}' len[0]={} legal_fallback[0]={} fen={}\n",
+                "pvline.bestmove()={} pv_str='{}' len[0]={} legal_fallback[0]={} active_fallback={} fen={}\n",
                 out,
                 worker.bestmove,
                 shortest_mate.move,
                 worker.pvline.bestmove(),
                 worker.pvline.str(),
                 static_cast<int>(worker.pvline.len[0]),
-                legal_fallback[0],
+                legal_fallback.empty() ? Move{} : legal_fallback[0],
+                fallback,
                 board.fen());
-            out = legal_fallback[0];
+            out = fallback;
         }
 
         ucilog("bestmove {}\n", out);

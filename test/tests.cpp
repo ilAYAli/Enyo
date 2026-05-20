@@ -694,6 +694,41 @@ TEST(search, qsearch_in_check_finds_mate_in_one_at_depth_one) {
     EXPECT_GE(static_cast<int>(value), static_cast<int>(Value::mate_in_max_ply));
 }
 
+TEST(search, root_ignores_empty_tt_cutoff_move) {
+    Board b{"8/3k4/1P6/2K1P3/8/8/4b3/6B1 b - - 0 70"};
+    SearchInfo si{b, 1};
+    si.board = b;
+    si.nnue.refresh(si.board);
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    tt::ttable.prepare();
+    tt::ttable.store(
+        si.board.hash,
+        Move{},
+        tt::value_to(Value::draw, 0),
+        tt::type::ExactBound,
+        64);
+
+    Worker worker{si, 0};
+    worker.pvline.clear();
+
+    Stack stack[MAX_PLY + 5];
+    stack[0].ply = 4;
+    stack[1].ply = 3;
+    stack[2].ply = 2;
+    stack[3].ply = 1;
+    for (int i = 0; i <= MAX_PLY; i++)
+        stack[i + 4].ply = i;
+    Stack * ss = stack + 4;
+
+    (void)negamax<black, NodeType::Root>(
+        1, worker, ss, -Value::infinite, Value::infinite);
+
+    EXPECT_NE(worker.pvline.bestmove(), Move{});
+    EXPECT_GT(worker.si.nodes, 0U);
+}
+
 // --- NNUE incremental audit -----------------------------------------------
 // For each move type (quiet / capture / promotion / en-passant / castle),
 // apply the move with UpdateNNUE=true (the live incremental/refresh path),
