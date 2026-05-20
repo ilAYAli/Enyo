@@ -1548,6 +1548,13 @@ TEST(syzygy_bbconv, ep_square_conversion) {
     EXPECT_EQ(p.ep, 20u);  // e3 in A1=0 layout
 }
 
+TEST(syzygy_bbconv, no_ep_square_stays_fathom_sentinel) {
+    Board b{"startpos"};
+    auto p = syzygy::board2pos(b);
+
+    EXPECT_EQ(p.ep, 0u);
+}
+
 // --- AccumulatorCache pieces_hash regression ---------------------------------
 // The original pieces_hash used `pt << (sq + color*6)`, which collides on
 // pawn(=1)@N and knight(=2)@(N-1) — each contributes 2^N, their XORs cancel
