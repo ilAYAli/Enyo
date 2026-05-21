@@ -17,6 +17,7 @@ namespace {
 alignas(64) int16_t s_l0_weights[N_INPUTS * N_HIDDEN];
 alignas(64) int16_t s_l0_biases[N_HIDDEN];
 alignas(64) int8_t  s_l1_weights[N_OUTPUT_BUCKETS * N_L2 * N_HIDDEN];
+alignas(64) float   s_l1_weights_float[N_OUTPUT_BUCKETS * N_L2 * N_HIDDEN];
 alignas(64) float   s_l1_biases[N_OUTPUT_BUCKETS * N_L2];
 alignas(64) float   s_l2_weights[N_OUTPUT_BUCKETS * N_L3 * N_L2];
 alignas(64) float   s_l2_biases[N_OUTPUT_BUCKETS * N_L3];
@@ -173,6 +174,7 @@ bool LoadNetwork(const char* path)
     std::memset(s_l0_weights, 0, sizeof(s_l0_weights));
     std::memset(s_l0_biases, 0, sizeof(s_l0_biases));
     std::memset(s_l1_weights, 0, sizeof(s_l1_weights));
+    std::memset(s_l1_weights_float, 0, sizeof(s_l1_weights_float));
 
     bool ok = true;
     ok = ok && read_exact(fh, s_l0_weights, static_cast<size_t>(N_INPUTS) * hidden, "l0w");
@@ -202,6 +204,9 @@ bool LoadNetwork(const char* path)
     if (ok) {
         s_hidden = hidden;
         s_pairwise = hidden / 2;
+        const auto n = static_cast<size_t>(N_OUTPUT_BUCKETS) * N_L2 * s_hidden;
+        for (size_t i = 0; i < n; ++i)
+            s_l1_weights_float[i] = static_cast<float>(s_l1_weights[i]) / 64.0f;
         ++NETWORK_GENERATION;
     }
     return ok;
@@ -289,9 +294,9 @@ int Propagate(const Accumulator* acc, const enyo::Board& board)
     const size_t l1_bias_offset = static_cast<size_t>(bucket) * N_L2;
     for (int i = 0; i < N_L2; ++i) {
         float sum = s_l1_biases[l1_bias_offset + i];
-        const int8_t* weights = &s_l1_weights[l1_offset + static_cast<size_t>(i) * s_hidden];
+        const float* weights = &s_l1_weights_float[l1_offset + static_cast<size_t>(i) * s_hidden];
         for (int j = 0; j < s_hidden; ++j)
-            sum += hidden[j] * (static_cast<float>(weights[j]) / 64.0f);
+            sum += hidden[j] * weights[j];
         const float clipped = std::clamp(sum, 0.0f, 1.0f);
         l1[i] = clipped * clipped;
     }
