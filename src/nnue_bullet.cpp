@@ -23,10 +23,8 @@ alignas(64) float   s_l2_weights[N_OUTPUT_BUCKETS * N_L3 * N_L2];
 alignas(64) float   s_l2_biases[N_OUTPUT_BUCKETS * N_L3];
 alignas(64) float   s_l3_weights[N_OUTPUT_BUCKETS * N_L3];
 alignas(64) float   s_l3_biases[N_OUTPUT_BUCKETS];
-alignas(64) float   s_crelu_lookup[65536];
 
 bool s_loaded = false;
-bool s_crelu_ready = false;
 int s_hidden = N_HIDDEN;
 int s_pairwise = N_HIDDEN / 2;
 
@@ -120,19 +118,8 @@ bool read_padding(std::FILE* fh)
 
 float crelu_from_acc(int16_t value)
 {
-    return s_crelu_lookup[static_cast<int>(value) + 32768];
-}
-
-void init_crelu_lookup()
-{
-    if (s_crelu_ready)
-        return;
-
-    for (int value = -32768; value <= 32767; ++value) {
-        const int clipped = std::clamp(value, 0, 255);
-        s_crelu_lookup[value + 32768] = static_cast<float>(clipped) / 255.0f;
-    }
-    s_crelu_ready = true;
+    const int clipped = std::clamp(static_cast<int>(value), 0, 255);
+    return static_cast<float>(clipped) / 255.0f;
 }
 
 } // namespace
@@ -184,7 +171,6 @@ bool LoadNetwork(const char* path)
         return false;
     }
     std::rewind(fh);
-    init_crelu_lookup();
 
     std::memset(s_l0_weights, 0, sizeof(s_l0_weights));
     std::memset(s_l0_biases, 0, sizeof(s_l0_biases));
