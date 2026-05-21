@@ -39,7 +39,9 @@ inline constexpr size_t NetworkSizeForHidden(int hidden)
 
 inline constexpr bool IsNetworkSize(size_t size)
 {
-    return size == NetworkSizeForHidden(384)
+    return size == NetworkSizeForHidden(128)
+        || size == NetworkSizeForHidden(256)
+        || size == NetworkSizeForHidden(384)
         || size == NetworkSizeForHidden(512)
         || size == NetworkSizeForHidden(768)
         || size == NetworkSizeForHidden(1024);

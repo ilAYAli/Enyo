@@ -40,7 +40,7 @@ constexpr std::array<int, 32> INPUT_BUCKET_LAYOUT = {
 };
 
 constexpr std::array<int, 8> FILE_MIRROR = {0, 1, 2, 3, 3, 2, 1, 0};
-constexpr std::array<int, 4> SUPPORTED_HIDDEN = {384, 512, 768, 1024};
+constexpr std::array<int, 6> SUPPORTED_HIDDEN = {128, 256, 384, 512, 768, 1024};
 
 constexpr int enyo_to_bullet_square(enyo::square_t sq)
 {
@@ -165,7 +165,7 @@ bool LoadNetwork(const char* path)
     }
     if (hidden == 0) {
         std::fprintf(stderr,
-                     "bullet network: '%s' is %ld bytes, expected hidden 384/512/768/1024\n",
+                     "bullet network: '%s' is %ld bytes, expected hidden 128/256/384/512/768/1024\n",
                      path, sz);
         std::fclose(fh);
         return false;
