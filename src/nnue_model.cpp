@@ -14,6 +14,7 @@
 #include <cstring>
 #include <cerrno>
 #include <string>
+#include <vector>
 
 namespace Network {
 
@@ -52,6 +53,21 @@ uint64_t      NETWORK_GENERATION = 0;
 // Phase-6 runtime switch. Engine `evaluate()` checks this + INPUT_WEIGHTS
 // and re-routes to EvaluateFromScratch when both are set.
 bool enabled = false;
+
+void ExpandLegacyInputWeights(const int16_t* legacy_weights) {
+    constexpr size_t bucket_stride = N_PIECE_TYPES * N_SQUARES;
+    for (size_t bucket = 0; bucket < N_KING_BUCKETS; ++bucket) {
+        const size_t legacy_bucket = LEGACY_BUCKET_FOR_BUCKET[bucket];
+        for (size_t offset = 0; offset < bucket_stride; ++offset) {
+            const size_t dst_feature = bucket * bucket_stride + offset;
+            const size_t src_feature = legacy_bucket * bucket_stride + offset;
+            std::memcpy(
+                &s_input_weights[dst_feature * N_HIDDEN],
+                &legacy_weights[src_feature * N_HIDDEN],
+                sizeof(int16_t) * N_HIDDEN);
+        }
+    }
+}
 
 void InitLookupIndices() {
     std::memset(LOOKUP_INDICES, 0, sizeof(LOOKUP_INDICES));
@@ -159,7 +175,7 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
 }
 
 // ---------------------------------------------------------------------
-// LoadNetwork — parse a v13-compatible .nn file into the internal
+// LoadNetwork — parse an Enyo .nn file into the internal
 // weight arrays and repoint the externs.
 //
 // File layout (tightly packed, little-endian; total NETWORK_SIZE bytes):
@@ -172,8 +188,8 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
 //   [N_L3 * N_OUTPUT]       float  OUTPUT_WEIGHTS
 //   [1]                     float  OUTPUT_BIAS
 //
-// Any size mismatch is a hard failure (we refuse to silently load a
-// differently-sized net — that would produce garbage evaluations).
+// Legacy 16-bucket files are accepted by expanding each old bucket into its
+// new 32-bucket children. Other size mismatches are hard failures.
 // ---------------------------------------------------------------------
 bool LoadNetwork(const char* path) {
     InitLookupIndices();
@@ -192,10 +208,12 @@ bool LoadNetwork(const char* path) {
     }
     const long sz = std::ftell(fh);
     if (sz < 0) { std::fclose(fh); return false; }
-    if (static_cast<size_t>(sz) != NETWORK_SIZE) {
+    const auto file_size = static_cast<size_t>(sz);
+    const bool legacy_layout = file_size == LEGACY_NETWORK_SIZE;
+    if (file_size != NETWORK_SIZE && !legacy_layout) {
         std::fprintf(stderr,
-            "network: '%s' is %ld bytes, expected %zu\n",
-            path, sz, NETWORK_SIZE);
+            "network: '%s' is %ld bytes, expected %zu or %zu\n",
+            path, sz, LEGACY_NETWORK_SIZE, NETWORK_SIZE);
         std::fclose(fh);
         return false;
     }
@@ -209,7 +227,18 @@ bool LoadNetwork(const char* path) {
         return true;
     };
 
-    if (!read(s_input_weights,  sizeof(s_input_weights),  "INPUT_WEIGHTS")) { std::fclose(fh); return false; }
+    std::vector<int16_t> legacy_input_weights;
+    if (legacy_layout) {
+        legacy_input_weights.resize(
+            static_cast<size_t>(LEGACY_N_FEATURES) * N_HIDDEN);
+        if (!read(legacy_input_weights.data(),
+                  legacy_input_weights.size() * sizeof(int16_t),
+                  "INPUT_WEIGHTS")) { std::fclose(fh); return false; }
+        ExpandLegacyInputWeights(legacy_input_weights.data());
+    } else if (!read(s_input_weights,  sizeof(s_input_weights),  "INPUT_WEIGHTS")) {
+        std::fclose(fh);
+        return false;
+    }
     if (!read(s_input_biases,   sizeof(s_input_biases),   "INPUT_BIASES"))  { std::fclose(fh); return false; }
     if (!read(s_l1_weights,     sizeof(s_l1_weights),     "L1_WEIGHTS"))    { std::fclose(fh); return false; }
     if (!read(s_l1_biases,      sizeof(s_l1_biases),      "L1_BIASES"))     { std::fclose(fh); return false; }

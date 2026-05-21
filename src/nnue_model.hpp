@@ -1,7 +1,7 @@
 #pragma once
-// Network uses a Berserk v13-compatible network layout and feature indexing.
-// KING_BUCKETS and the feature-index formula are derived from Berserk
-// (GPL-3.0), adapted to Enyo's square and piece conventions.
+// Network uses Enyo's exported NNUE layout and feature indexing. The binary
+// file layout is compatible with the previous Berserk-format dense layers,
+// while the active feature map is Enyo-owned and may evolve independently.
 
 #include "types.hpp"
 
@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
@@ -23,10 +24,13 @@ namespace Network {
 // ---------------------------------------------------------------------
 // Architecture constants.
 // ---------------------------------------------------------------------
-inline constexpr int N_KING_BUCKETS = 16;
+inline constexpr int N_KING_BUCKETS = 32;
+inline constexpr int LEGACY_N_KING_BUCKETS = 16;
 inline constexpr int N_PIECE_TYPES  = 12;               // 6 types × 2 colors
 inline constexpr int N_SQUARES      = 64;
-inline constexpr int N_FEATURES     = N_KING_BUCKETS * N_PIECE_TYPES * N_SQUARES; // 12288
+inline constexpr int N_FEATURES     = N_KING_BUCKETS * N_PIECE_TYPES * N_SQUARES; // 24576
+inline constexpr int LEGACY_N_FEATURES =
+    LEGACY_N_KING_BUCKETS * N_PIECE_TYPES * N_SQUARES; // 12288
 inline constexpr int N_HIDDEN       = 1024;
 inline constexpr int N_L1           = 2 * N_HIDDEN;     // 2048
 inline constexpr int N_L2           = 16;
@@ -34,18 +38,26 @@ inline constexpr int N_L3           = 32;
 inline constexpr int N_OUTPUT       = 1;
 
 // ---------------------------------------------------------------------
-// Network king buckets. Do not reshuffle this; feature indexing and
-// bucket-crossing refresh logic are calibrated against this exact layout.
+// Network king buckets. Each rank has four mirrored file zones. The old
+// 16-bucket layout is coarser; LoadNetwork can expand an old net by copying
+// each new bucket from its legacy parent bucket.
 // ---------------------------------------------------------------------
 inline constexpr std::array<uint16_t, 64> KING_BUCKETS = {
-    15, 15, 14, 14, 14, 14, 15, 15,
-    15, 15, 14, 14, 14, 14, 15, 15,
-    13, 13, 12, 12, 12, 12, 13, 13,
-    13, 13, 12, 12, 12, 12, 13, 13,
-    11, 10,  9,  8,  8,  9, 10, 11,
+    31, 30, 29, 28, 28, 29, 30, 31,
+    27, 26, 25, 24, 24, 25, 26, 27,
+    23, 22, 21, 20, 20, 21, 22, 23,
+    19, 18, 17, 16, 16, 17, 18, 19,
+    15, 14, 13, 12, 12, 13, 14, 15,
     11, 10,  9,  8,  8,  9, 10, 11,
      7,  6,  5,  4,  4,  5,  6,  7,
      3,  2,  1,  0,  0,  1,  2,  3,
+};
+
+inline constexpr std::array<uint16_t, N_KING_BUCKETS> LEGACY_BUCKET_FOR_BUCKET = {
+     0,  1,  2,  3,  4,  5,  6,  7,
+     8,  9, 10, 11,  8,  9, 10, 11,
+    12, 12, 13, 13, 12, 12, 13, 13,
+    14, 14, 15, 15, 14, 14, 15, 15,
 };
 
 // ---------------------------------------------------------------------
@@ -261,6 +273,16 @@ inline constexpr size_t NETWORK_SIZE =
     + sizeof(float)   * N_L3                   // L2 biases
     + sizeof(float)   * N_L3 * N_OUTPUT        // output weights
     + sizeof(float);                           // output bias
+
+inline constexpr size_t LEGACY_NETWORK_SIZE =
+      sizeof(int16_t) * LEGACY_N_FEATURES * N_HIDDEN
+    + sizeof(int16_t) * N_HIDDEN
+    + sizeof(int8_t)  * N_L1 * N_L2
+    + sizeof(int32_t) * N_L2
+    + sizeof(float)   * N_L2 * N_L3
+    + sizeof(float)   * N_L3
+    + sizeof(float)   * N_L3 * N_OUTPUT
+    + sizeof(float);
 
 // ---------------------------------------------------------------------
 // Delta: up to 32 features to add and 32 to remove between two
@@ -506,6 +528,9 @@ inline void ResetAccumulator(Accumulator* dest, enyo::Color view,
 // Writes up to 32 entries to `out`, returns the number written.
 // ---------------------------------------------------------------------
 size_t enumerate_pieces(const enyo::Board& b, PieceEntry* out);
+void feature_indices(const enyo::Board& b,
+                     enyo::Color view,
+                     std::vector<int>& out);
 int ScaleEval(const enyo::Board& b, int score);
 
 // Convenience — full board evaluate in centipawns (stm-relative). Builds

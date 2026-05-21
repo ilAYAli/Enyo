@@ -69,7 +69,7 @@ bool load_eval_file(const std::string & value)
         return false;
     }
 
-    if (size == Network::NETWORK_SIZE) {
+    if (size == Network::NETWORK_SIZE || size == Network::LEGACY_NETWORK_SIZE) {
         if (Network::LoadNetwork(path.c_str())) {
             Network::enabled = true;
             ucilog("info string network loaded from '{}'\n", path);
@@ -77,11 +77,12 @@ bool load_eval_file(const std::string & value)
         }
         Network::enabled = false;
         NNUE::Init("");
-        ucilog("info string WARNING: nnue_file '{}' matched network size but failed to load; using embedded evaluator\n", path);
+        ucilog("info string WARNING: nnue_file '{}' matched network size but failed to load; using embedded evaluator\n",
+               path);
         return false;
     }
 
-    if (size >= NNUE::LEGACY_NETWORK_SIZE) {
+    if (size == NNUE::LEGACY_NETWORK_SIZE) {
         Network::enabled = false;
         NNUE::Init(path);
         ucilog("info string embedded evaluator loaded from '{}'\n", path);
@@ -363,10 +364,9 @@ int Uci::operator()(const std::string& command)
             iss >> side_token;
 
             // Non-UCI extension: `eval dump` emits one JSONL object
-            // with the fields needed by the Python parity test.
-            // tools/nnue/enyo_nnue.py consumes this to verify that
-            // its feature-index and forward-pass implementations
-            // match C++ byte-for-byte.
+            // with the Network feature indices needed by the Python
+            // parity test. The old embedded NNUE still supplies the
+            // scalar eval unless a Network .nn is loaded.
             //
             // `eval` is always evaluated from side-to-move's
             // perspective (the field "side" records which color that
@@ -379,8 +379,8 @@ int Uci::operator()(const std::string& command)
                 const auto score = static_cast<Value>(si.nnue.Evaluate(side));
 
                 std::vector<int> w_feats, bl_feats;
-                NNUE::feature_indices(b, white, w_feats);
-                NNUE::feature_indices(b, black, bl_feats);
+                Network::feature_indices(b, white, w_feats);
+                Network::feature_indices(b, black, bl_feats);
 
                 auto join = [](const std::vector<int> & v) {
                     std::string s;

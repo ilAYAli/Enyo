@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <vector>
 
 namespace Network {
 
@@ -28,6 +29,27 @@ size_t enumerate_pieces(const enyo::Board& b, PieceEntry* out) {
         }
     }
     return n;
+}
+
+void feature_indices(const enyo::Board& b,
+                     enyo::Color view,
+                     std::vector<int>& out)
+{
+    out.clear();
+    const enyo::square_t view_ksq =
+        view == enyo::white
+            ? static_cast<enyo::square_t>(enyo::lsb(b.pt_bb[enyo::white][enyo::king]))
+            : static_cast<enyo::square_t>(enyo::lsb(b.pt_bb[enyo::black][enyo::king]));
+
+    enyo::bitboard_t pieces = b.color_bb[enyo::white] | b.color_bb[enyo::black];
+    while (pieces) {
+        const auto sq = static_cast<enyo::square_t>(enyo::pop_lsb(pieces));
+        const enyo::PieceType pt = b.pt_mb[sq];
+        const enyo::Color pc = (b.color_bb[enyo::white] & (1ULL << sq))
+            ? enyo::white
+            : enyo::black;
+        out.push_back(FeatureIdx(pt, pc, sq, view_ksq, view));
+    }
 }
 
 int ScaleEval(const enyo::Board& b, int score) {
