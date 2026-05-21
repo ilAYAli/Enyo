@@ -133,6 +133,62 @@ bool load_eval_file(const std::string & value)
     return moves;
 }
 
+template <Color Us>
+bool bullet_parity_dfs(SearchInfo & si, int depth, int limit, int & checked, std::string & error)
+{
+    if (depth <= 0 || checked >= limit)
+        return true;
+
+    const auto legal = generate_legal_moves<Us>(si.board);
+    for (const auto move : legal) {
+        if (checked >= limit)
+            return true;
+
+        apply_move<Us, true, true>(si.board, move, &si.nnue);
+        const int inc = si.nnue.EvaluateBullet(si.board);
+        const int full = BulletNetwork::EvaluateFromScratch(si.board);
+        ++checked;
+
+        if (inc != full) {
+            error = fmt::format(
+                "move={} inc={} full={} fen={}",
+                move,
+                inc,
+                full,
+                si.board.fen());
+            revert_move<Us, true, true>(si.board, &si.nnue);
+            return false;
+        }
+
+        const bool ok = si.board.side == white
+            ? bullet_parity_dfs<white>(si, depth - 1, limit, checked, error)
+            : bullet_parity_dfs<black>(si, depth - 1, limit, checked, error);
+        revert_move<Us, true, true>(si.board, &si.nnue);
+        if (!ok)
+            return false;
+    }
+
+    return true;
+}
+
+bool bullet_parity_check(const Board & board, int depth, int limit, int & checked, std::string & error)
+{
+    SearchInfo si(board, 1);
+    const int inc = si.nnue.EvaluateBullet(si.board);
+    const int full = BulletNetwork::EvaluateFromScratch(si.board);
+    if (inc != full) {
+        error = fmt::format(
+            "root inc={} full={} fen={}",
+            inc,
+            full,
+            si.board.fen());
+        return false;
+    }
+
+    return si.board.side == white
+        ? bullet_parity_dfs<white>(si, depth, limit, checked, error)
+        : bullet_parity_dfs<black>(si, depth, limit, checked, error);
+}
 
 struct TimeAllocation {
     std::chrono::milliseconds soft{-1};  // optimum — between-iteration stop
@@ -478,6 +534,27 @@ int Uci::operator()(const std::string& command)
                 BulletNetwork::enabled = false;
                 Network::enabled = false;
                 fmt::print("evalnet disable ok (reverted to embedded net)\n");
+                return 0;
+            }
+            if (sub == "check") {
+                if (!BulletNetwork::enabled || !BulletNetwork::IsLoaded()) {
+                    fmt::print("evalnet check failed: no bullet network loaded\n");
+                    return 0;
+                }
+                int depth = 2;
+                int limit = 2000;
+                iss >> depth;
+                iss >> limit;
+                depth = std::clamp(depth, 1, 6);
+                limit = std::clamp(limit, 1, 1'000'000);
+
+                int checked = 0;
+                std::string error;
+                const bool ok = bullet_parity_check(b, depth, limit, checked, error);
+                if (ok)
+                    fmt::print("evalnet check ok depth={} checked={}\n", depth, checked);
+                else
+                    fmt::print("evalnet check fail depth={} checked={} {}\n", depth, checked, error);
                 return 0;
             }
             if (BulletNetwork::enabled && BulletNetwork::IsLoaded()) {
