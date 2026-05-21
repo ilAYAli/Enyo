@@ -35,8 +35,19 @@ inline constexpr size_t NETWORK_SIZE = PAYLOAD_SIZE + PADDING_SIZE;
 extern bool enabled;
 extern uint64_t NETWORK_GENERATION;
 
+struct alignas(64) Accumulator {
+    int32_t values[2][N_HIDDEN];
+};
+
 bool IsLoaded();
 bool LoadNetwork(const char* path);
+int FeatureIdx(enyo::PieceType pt,
+               enyo::Color pc,
+               enyo::square_t sq,
+               enyo::square_t king_sq,
+               enyo::Color view);
+void ResetAccumulator(Accumulator* acc, const enyo::Board& board, enyo::Color view);
+int Propagate(const Accumulator* acc, const enyo::Board& board);
 int EvaluateFromScratch(const enyo::Board& board);
 std::string Description();
 

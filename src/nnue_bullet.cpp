@@ -44,19 +44,19 @@ constexpr int enyo_to_bullet_square(enyo::square_t sq)
     return static_cast<int>(sq) ^ 7;
 }
 
-int normalized_square(enyo::square_t sq, enyo::Color stm)
+int normalized_square(enyo::square_t sq, enyo::Color view)
 {
     int out = enyo_to_bullet_square(sq);
-    if (stm == enyo::black)
+    if (view == enyo::black)
         out ^= 56;
     return out;
 }
 
-int normalized_piece(enyo::PieceType pt, enyo::Color pc, enyo::Color stm)
+int normalized_piece(enyo::PieceType pt, enyo::Color pc, enyo::Color view)
 {
     int out = (static_cast<int>(pc == enyo::black) << 3)
         | (static_cast<int>(pt) - 1);
-    if (stm == enyo::black)
+    if (view == enyo::black)
         out ^= 8;
     return out;
 }
@@ -112,58 +112,10 @@ bool read_padding(std::FILE* fh)
     return true;
 }
 
-float crelu_from_acc(int value)
+float crelu_from_acc(int32_t value)
 {
     const int clipped = std::clamp(value, 0, 255);
     return static_cast<float>(clipped) / 255.0f;
-}
-
-void refresh_accumulator(float* out,
-                         const enyo::Board& board,
-                         enyo::Color view)
-{
-    int acc[N_HIDDEN];
-    for (int i = 0; i < N_HIDDEN; ++i)
-        acc[i] = s_l0_biases[i];
-
-    const enyo::Color stm = board.side;
-    const enyo::Color them = static_cast<enyo::Color>(!view);
-    const enyo::square_t view_king = static_cast<enyo::square_t>(
-        enyo::lsb(board.pt_bb[view][enyo::king]));
-    const enyo::square_t other_king = static_cast<enyo::square_t>(
-        enyo::lsb(board.pt_bb[them][enyo::king]));
-
-    const int view_king_sq = view == stm
-        ? normalized_square(view_king, stm)
-        : (normalized_square(view_king, stm) ^ 56);
-    const int other_king_sq = view == stm
-        ? normalized_square(other_king, stm)
-        : (normalized_square(other_king, stm) ^ 56);
-    (void)other_king_sq;
-
-    enyo::bitboard_t pieces = board.color_bb[enyo::white] | board.color_bb[enyo::black];
-    while (pieces) {
-        const auto sq = static_cast<enyo::square_t>(enyo::pop_lsb(pieces));
-        const enyo::PieceType pt = board.pt_mb[sq];
-        const enyo::Color pc = (board.color_bb[enyo::white] & (1ULL << sq))
-            ? enyo::white
-            : enyo::black;
-
-        int piece = normalized_piece(pt, pc, stm);
-        int square = normalized_square(sq, stm);
-        if (view != stm) {
-            piece ^= 8;
-            square ^= 56;
-        }
-
-        const int feature = bullet_feature(piece, square, view_king_sq);
-        const int16_t* weights = &s_l0_weights[static_cast<size_t>(feature) * N_HIDDEN];
-        for (int i = 0; i < N_HIDDEN; ++i)
-            acc[i] += weights[i];
-    }
-
-    for (int i = 0; i < N_PAIRWISE; ++i)
-        out[i] = crelu_from_acc(acc[i]) * crelu_from_acc(acc[i + N_PAIRWISE]);
 }
 
 } // namespace
@@ -238,11 +190,49 @@ bool LoadNetwork(const char* path)
     return ok;
 }
 
-int EvaluateFromScratch(const enyo::Board& board)
+int FeatureIdx(enyo::PieceType pt,
+               enyo::Color pc,
+               enyo::square_t sq,
+               enyo::square_t king_sq,
+               enyo::Color view)
+{
+    return bullet_feature(
+        normalized_piece(pt, pc, view),
+        normalized_square(sq, view),
+        normalized_square(king_sq, view));
+}
+
+void ResetAccumulator(Accumulator* acc, const enyo::Board& board, enyo::Color view)
+{
+    for (int i = 0; i < N_HIDDEN; ++i)
+        acc->values[view][i] = s_l0_biases[i];
+
+    const auto king_sq = static_cast<enyo::square_t>(
+        enyo::lsb(board.pt_bb[view][enyo::king]));
+    enyo::bitboard_t pieces = board.color_bb[enyo::white] | board.color_bb[enyo::black];
+    while (pieces) {
+        const auto sq = static_cast<enyo::square_t>(enyo::pop_lsb(pieces));
+        const enyo::PieceType pt = board.pt_mb[sq];
+        const enyo::Color pc = (board.color_bb[enyo::white] & (1ULL << sq))
+            ? enyo::white
+            : enyo::black;
+        const int feature = FeatureIdx(pt, pc, sq, king_sq, view);
+        const int16_t* weights = &s_l0_weights[static_cast<size_t>(feature) * N_HIDDEN];
+        for (int i = 0; i < N_HIDDEN; ++i)
+            acc->values[view][i] += weights[i];
+    }
+}
+
+int Propagate(const Accumulator* acc, const enyo::Board& board)
 {
     float hidden[N_L1_INPUTS];
-    refresh_accumulator(&hidden[0], board, board.side);
-    refresh_accumulator(&hidden[N_PAIRWISE], board, static_cast<enyo::Color>(!board.side));
+    const auto them = static_cast<enyo::Color>(!board.side);
+    for (int i = 0; i < N_PAIRWISE; ++i) {
+        hidden[i] = crelu_from_acc(acc->values[board.side][i])
+            * crelu_from_acc(acc->values[board.side][i + N_PAIRWISE]);
+        hidden[N_PAIRWISE + i] = crelu_from_acc(acc->values[them][i])
+            * crelu_from_acc(acc->values[them][i + N_PAIRWISE]);
+    }
 
     const int bucket = material_bucket(board);
 
@@ -276,6 +266,14 @@ int EvaluateFromScratch(const enyo::Board& board)
         out += l2[i] * weights[i];
 
     return static_cast<int>(std::lround(400.0f * out));
+}
+
+int EvaluateFromScratch(const enyo::Board& board)
+{
+    Accumulator acc{};
+    ResetAccumulator(&acc, board, enyo::white);
+    ResetAccumulator(&acc, board, enyo::black);
+    return Propagate(&acc, board);
 }
 
 } // namespace BulletNetwork
