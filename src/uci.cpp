@@ -1,4 +1,6 @@
 #include <cstdint>
+#include <chrono>
+#include <atomic>
 #include <iostream>
 #include <sstream>
 #include <memory>
@@ -555,6 +557,36 @@ int Uci::operator()(const std::string& command)
                     fmt::print("evalnet check ok depth={} checked={}\n", depth, checked);
                 else
                     fmt::print("evalnet check fail depth={} checked={} {}\n", depth, checked, error);
+                return 0;
+            }
+            if (sub == "bench") {
+                int iterations = 100'000;
+                iss >> iterations;
+                iterations = std::clamp(iterations, 1, 100'000'000);
+
+                if (BulletNetwork::enabled && BulletNetwork::IsLoaded()) {
+                    SearchInfo si(b, 1);
+                    const auto * acc = &si.nnue.bullet_accumulator_stack[si.nnue.currentAccumulator];
+                    int (* volatile propagate)(const BulletNetwork::Accumulator*, const Board&) =
+                        &BulletNetwork::Propagate;
+                    int64_t sum = 0;
+                    const auto start = std::chrono::steady_clock::now();
+                    for (int i = 0; i < iterations; ++i) {
+                        std::atomic_signal_fence(std::memory_order_acq_rel);
+                        sum += propagate(acc, si.board);
+                    }
+                    const auto end = std::chrono::steady_clock::now();
+                    const auto us =
+                        std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+                    const double evals_per_second = us > 0
+                        ? static_cast<double>(iterations) * 1'000'000.0 / static_cast<double>(us)
+                        : 0.0;
+                    fmt::print("evalnet bench bullet iterations={} time_us={} eps={:.0f} checksum={}\n",
+                               iterations, us, evals_per_second, sum);
+                    return 0;
+                }
+
+                fmt::print("evalnet bench failed: no bullet network loaded\n");
                 return 0;
             }
             if (BulletNetwork::enabled && BulletNetwork::IsLoaded()) {
