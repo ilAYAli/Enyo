@@ -112,9 +112,9 @@ bool read_padding(std::FILE* fh)
     return true;
 }
 
-float crelu_from_acc(int32_t value)
+float crelu_from_acc(int16_t value)
 {
-    const int clipped = std::clamp(value, 0, 255);
+    const int clipped = std::clamp(static_cast<int>(value), 0, 255);
     return static_cast<float>(clipped) / 255.0f;
 }
 
@@ -219,7 +219,7 @@ void ResetAccumulator(Accumulator* acc, const enyo::Board& board, enyo::Color vi
         const int feature = FeatureIdx(pt, pc, sq, king_sq, view);
         const int16_t* weights = &s_l0_weights[static_cast<size_t>(feature) * N_HIDDEN];
         for (int i = 0; i < N_HIDDEN; ++i)
-            acc->values[view][i] += weights[i];
+            acc->values[view][i] = static_cast<int16_t>(acc->values[view][i] + weights[i]);
     }
 }
 
@@ -235,10 +235,10 @@ void UpdateFeature(Accumulator* acc,
     const int16_t* weights = &s_l0_weights[static_cast<size_t>(feature) * N_HIDDEN];
     if (add) {
         for (int i = 0; i < N_HIDDEN; ++i)
-            acc->values[view][i] += weights[i];
+            acc->values[view][i] = static_cast<int16_t>(acc->values[view][i] + weights[i]);
     } else {
         for (int i = 0; i < N_HIDDEN; ++i)
-            acc->values[view][i] -= weights[i];
+            acc->values[view][i] = static_cast<int16_t>(acc->values[view][i] - weights[i]);
     }
 }
 

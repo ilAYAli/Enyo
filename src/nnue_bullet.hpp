@@ -36,7 +36,7 @@ extern bool enabled;
 extern uint64_t NETWORK_GENERATION;
 
 struct alignas(64) Accumulator {
-    int32_t values[2][N_HIDDEN];
+    int16_t values[2][N_HIDDEN];
 };
 
 bool IsLoaded();
