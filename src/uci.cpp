@@ -586,7 +586,32 @@ int Uci::operator()(const std::string& command)
                     return 0;
                 }
 
-                fmt::print("evalnet bench failed: no bullet network loaded\n");
+                if (Network::enabled && Network::INPUT_WEIGHTS != nullptr) {
+                    SearchInfo si(b, 1);
+                    const auto * acc =
+                        &si.nnue.network_accumulator_stack[si.nnue.currentAccumulator];
+                    int (* volatile propagate)(const Network::Accumulator*, int) =
+                        &Network::Propagate;
+                    int (* volatile scale)(const Board&, int) =
+                        &Network::ScaleEval;
+                    int64_t sum = 0;
+                    const auto start = std::chrono::steady_clock::now();
+                    for (int i = 0; i < iterations; ++i) {
+                        std::atomic_signal_fence(std::memory_order_acq_rel);
+                        sum += scale(si.board, propagate(acc, static_cast<int>(si.board.side)));
+                    }
+                    const auto end = std::chrono::steady_clock::now();
+                    const auto us =
+                        std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+                    const double evals_per_second = us > 0
+                        ? static_cast<double>(iterations) * 1'000'000.0 / static_cast<double>(us)
+                        : 0.0;
+                    fmt::print("evalnet bench enyo iterations={} time_us={} eps={:.0f} checksum={}\n",
+                               iterations, us, evals_per_second, sum);
+                    return 0;
+                }
+
+                fmt::print("evalnet bench failed: no network loaded\n");
                 return 0;
             }
             if (BulletNetwork::enabled && BulletNetwork::IsLoaded()) {
