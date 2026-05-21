@@ -56,6 +56,7 @@ struct alignas(64) Accumulator {
 
 bool IsLoaded();
 bool LoadNetwork(const char* path);
+void CopyAccumulator(Accumulator* dest, const Accumulator* src);
 int FeatureIdx(enyo::PieceType pt,
                enyo::Color pc,
                enyo::square_t sq,

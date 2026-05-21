@@ -132,6 +132,13 @@ bool IsLoaded()
     return s_loaded;
 }
 
+void CopyAccumulator(Accumulator* dest, const Accumulator* src)
+{
+    const size_t bytes = sizeof(int16_t) * static_cast<size_t>(s_hidden);
+    std::memcpy(dest->values[enyo::white], src->values[enyo::white], bytes);
+    std::memcpy(dest->values[enyo::black], src->values[enyo::black], bytes);
+}
+
 std::string Description()
 {
     return "Bullet/Reckless-like 10hm->" + std::to_string(s_hidden)

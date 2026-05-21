@@ -177,9 +177,9 @@ struct Net {
 
     inline void push(bool copy_active_network = true) {
         if (BulletNetwork::enabled && BulletNetwork::IsLoaded()) {
-            std::memcpy(&bullet_accumulator_stack[currentAccumulator + 1],
-                        &bullet_accumulator_stack[currentAccumulator],
-                        sizeof(BulletNetwork::Accumulator));
+            BulletNetwork::CopyAccumulator(
+                &bullet_accumulator_stack[currentAccumulator + 1],
+                &bullet_accumulator_stack[currentAccumulator]);
         } else if (Network::enabled && Network::INPUT_WEIGHTS != nullptr) {
             if (copy_active_network) {
                 std::memcpy(&network_accumulator_stack[currentAccumulator + 1],
