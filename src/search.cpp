@@ -136,7 +136,7 @@ Value evaluate(Board & b, NNUE::Net * nnue)
 {
     if constexpr (UseNNUE) {
         if (BulletNetwork::enabled && BulletNetwork::IsLoaded()) {
-            auto const score = static_cast<Value>(BulletNetwork::EvaluateFromScratch(b));
+            auto const score = static_cast<Value>(nnue->EvaluateBullet(b));
             if constexpr (Constexpr::debug_eval)
                 fmt::print("<{}> move: {}, bullet score: {}\n", Us, b.history[b.histply -1].move, score);
             return score;

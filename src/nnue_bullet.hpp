@@ -33,6 +33,7 @@ inline constexpr size_t PADDING_SIZE = 32;
 inline constexpr size_t NETWORK_SIZE = PAYLOAD_SIZE + PADDING_SIZE;
 
 extern bool enabled;
+extern uint64_t NETWORK_GENERATION;
 
 bool IsLoaded();
 bool LoadNetwork(const char* path);

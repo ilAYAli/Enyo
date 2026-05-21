@@ -246,6 +246,7 @@ struct Net {
 
     int Evaluate(enyo::Color side);
     int Evaluate2(enyo::Board &board, enyo::Color side);
+    int EvaluateBullet(enyo::Board &board);
 
     void Benchmark();
 

@@ -169,6 +169,7 @@ void refresh_accumulator(float* out,
 } // namespace
 
 bool enabled = false;
+uint64_t NETWORK_GENERATION = 0;
 
 bool IsLoaded()
 {
@@ -232,6 +233,8 @@ bool LoadNetwork(const char* path)
 
     std::fclose(fh);
     s_loaded = ok;
+    if (ok)
+        ++NETWORK_GENERATION;
     return ok;
 }
 

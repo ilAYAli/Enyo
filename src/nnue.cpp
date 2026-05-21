@@ -1,6 +1,7 @@
 #include "nnue.hpp"
 #include "movelist.hpp"
 #include "movegen.hpp"
+#include "nnue_bullet.hpp"
 //#include "bench.h"
 
 #include <algorithm>
@@ -38,7 +39,7 @@ Net::Net() {
     std::fill(accumulator_stack.begin(), accumulator_stack.end(), Accumulator());
     network_accumulator_stack.resize(accumulator_stack.size());
     network_eval_cache.resize(network_eval_cache_size);
-    network_eval_cache_generation = Network::NETWORK_GENERATION;
+    network_eval_cache_generation = Network::NETWORK_GENERATION << 1;
     std::memset(network_accumulator_stack.data(), 0,
                 network_accumulator_stack.size() * sizeof(Network::Accumulator));
 }
@@ -74,6 +75,28 @@ void reset_network_refresh_table_if_needed(NNUE::Net & net)
 
     Network::ResetRefreshTable(net.network_refresh_table.data());
     net.network_refresh_generation = Network::NETWORK_GENERATION;
+}
+
+uint64_t network_eval_token()
+{
+    return Network::NETWORK_GENERATION << 1;
+}
+
+uint64_t bullet_eval_token()
+{
+    return (BulletNetwork::NETWORK_GENERATION << 1) | 1ULL;
+}
+
+void reset_eval_cache_if_needed(NNUE::Net & net, uint64_t token)
+{
+    if (net.network_eval_cache_generation == token)
+        return;
+
+    for (auto & entry : net.network_eval_cache) {
+        entry.hash = 0;
+        entry.valid = 0;
+    }
+    net.network_eval_cache_generation = token;
 }
 
 void refresh_network_from_table(NNUE::Net & net,
@@ -890,13 +913,7 @@ int32_t Net::Evaluate2(enyo::Board &board, enyo::Color side) {
     if (accumulator.eval_correct[side])
         return accumulator.eval[side];
 
-    if (network_eval_cache_generation != Network::NETWORK_GENERATION) {
-        for (auto & entry : network_eval_cache) {
-            entry.hash = 0;
-            entry.valid = 0;
-        }
-        network_eval_cache_generation = Network::NETWORK_GENERATION;
-    }
+    reset_eval_cache_if_needed(*this, network_eval_token());
 
     auto & entry = network_eval_cache[
         board.hash & (network_eval_cache_size - 1)];
@@ -920,6 +937,24 @@ int32_t Net::Evaluate2(enyo::Board &board, enyo::Color side) {
     entry.eval = eval;
     entry.valid = 1;
     return eval;
+}
+
+int Net::EvaluateBullet(enyo::Board &board)
+{
+    reset_eval_cache_if_needed(*this, bullet_eval_token());
+
+    auto & entry = network_eval_cache[
+        board.hash & (network_eval_cache_size - 1)];
+    if (entry.hash == board.hash && entry.valid)
+        return entry.eval;
+
+    if (entry.hash != board.hash) {
+        entry.hash = board.hash;
+        entry.valid = 0;
+    }
+    entry.eval = BulletNetwork::EvaluateFromScratch(board);
+    entry.valid = 1;
+    return entry.eval;
 }
 
 void Net::print_indexes(
