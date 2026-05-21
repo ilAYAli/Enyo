@@ -185,14 +185,9 @@ int main(int argc, char **argv)
     // config only mutated cfgmgr.hash_size and the TT stayed at the
     // 64 MB default allocated at singleton construction.
     uci(fmt::format("setoption name Hash value {}", cfgmgr.hash_size));
-    // Pass nnue_file from config. Empty or missing files fall back to
-    // the embedded default (INCBIN'd at build time from nnue/default.net);
-    // see NNUE::Init for the fallback logic. Default sentinel values
-    // like "default.net" won't exist in the cwd and silently fall
-    // through — which is the right behavior.
-    NNUE::Init(cfgmgr.nnue_file);
-    if (!cfgmgr.nnue2_file.empty())
-        uci(fmt::format("setoption name nnue2_file value {}", cfgmgr.nnue2_file));
+    NNUE::Init("");
+    if (!cfgmgr.nnue_file.empty())
+        uci(fmt::format("setoption name nnue_file value {}", cfgmgr.nnue_file));
 
     for (const auto& [name, value] : cfgmgr.configured_uci_options())
         uci(fmt::format("setoption name {} value {}", name, value));

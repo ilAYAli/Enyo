@@ -6,6 +6,7 @@
 #include <string>
 #include <limits>
 #include <cstdlib>
+#include <filesystem>
 #include <fmt/format.h>
 
 #include "config.hpp"
@@ -21,12 +22,14 @@
 #include "eventlog.hpp"
 #include "probe.hpp"
 #include "nnue.hpp"
-#include "nnue2.hpp"
+#include "nnue_model.hpp"
 
 using namespace enyo;
 using namespace eventlog;
 
 namespace {
+
+namespace fs = std::filesystem;
 
 std::string expand_home_path(std::string path)
 {
@@ -38,6 +41,57 @@ std::string expand_home_path(std::string path)
         }
     }
     return path;
+}
+
+bool load_eval_file(const std::string & value)
+{
+    if (value.empty()) {
+        Network::enabled = false;
+        NNUE::Init("");
+        ucilog("info string nnue_file empty; using embedded evaluator\n");
+        return true;
+    }
+
+    const auto path = expand_home_path(value);
+    std::error_code ec;
+    if (!fs::exists(path, ec) || ec) {
+        Network::enabled = false;
+        NNUE::Init("");
+        ucilog("info string WARNING: nnue_file '{}' not found/readable; using embedded evaluator\n", path);
+        return false;
+    }
+
+    const auto size = fs::file_size(path, ec);
+    if (ec) {
+        Network::enabled = false;
+        NNUE::Init("");
+        ucilog("info string WARNING: nnue_file '{}' size check failed; using embedded evaluator\n", path);
+        return false;
+    }
+
+    if (size == Network::NETWORK_SIZE) {
+        if (Network::LoadNetwork(path.c_str())) {
+            Network::enabled = true;
+            ucilog("info string network loaded from '{}'\n", path);
+            return true;
+        }
+        Network::enabled = false;
+        NNUE::Init("");
+        ucilog("info string WARNING: nnue_file '{}' matched network size but failed to load; using embedded evaluator\n", path);
+        return false;
+    }
+
+    if (size >= NNUE::LEGACY_NETWORK_SIZE) {
+        Network::enabled = false;
+        NNUE::Init(path);
+        ucilog("info string embedded evaluator loaded from '{}'\n", path);
+        return true;
+    }
+
+    Network::enabled = false;
+    NNUE::Init("");
+    ucilog("info string WARNING: nnue_file '{}' has invalid size {} bytes; using embedded evaluator\n", path, size);
+    return false;
 }
 
 [[maybe_unused]] std::vector<std::string> history_to_vec(const Board & b, int max_size = 0)
@@ -365,46 +419,46 @@ int Uci::operator()(const std::string& command)
             si.nnue.refresh(si.board);
             const auto full = static_cast<Value>(si.nnue.Evaluate(b.side));
             fmt::print("nnue inc {} full {}\n", inc, full);
-        } else if (token == "eval2") {
+        } else if (token == "evalnet") {
             // Phase 4 (arch port): evaluate the current board through
             // the new 1024-hidden NNUE, fresh accumulators.
-            // Requires a .nn loaded via `setoption name nnue2_file value ...`
-            // or the `eval2 load` subcommand. Emits a one-line result.
+            // Requires a .nn loaded via `setoption name nnue_file value ...`
+            // or the `evalnet load` subcommand. Emits a one-line result.
             std::string sub;
             iss >> sub;
             if (sub == "load") {
                 std::string path;
                 iss >> path;
                 const auto resolved = expand_home_path(path);
-                const bool ok = NNUE2::LoadNetwork(resolved.c_str());
+                const bool ok = Network::LoadNetwork(resolved.c_str());
                 if (ok)
-                    NNUE2::enabled = true;
-                fmt::print("eval2 load {} {}{}\n",
+                    Network::enabled = true;
+                fmt::print("evalnet load {} {}{}\n",
                            ok ? "ok" : "fail", resolved,
-                           ok ? " (search routed through nnue2)" : "");
+                           ok ? " (search routed through network)" : "");
                 return 0;
             }
             if (sub == "enable") {
-                if (NNUE2::INPUT_WEIGHTS == nullptr) {
-                    fmt::print("eval2 enable failed: no network loaded\n");
+                if (Network::INPUT_WEIGHTS == nullptr) {
+                    fmt::print("evalnet enable failed: no network loaded\n");
                     return 0;
                 }
-                NNUE2::enabled = true;
-                fmt::print("eval2 enable ok\n");
+                Network::enabled = true;
+                fmt::print("evalnet enable ok\n");
                 return 0;
             }
             if (sub == "disable") {
-                NNUE2::enabled = false;
-                fmt::print("eval2 disable ok (reverted to embedded net)\n");
+                Network::enabled = false;
+                fmt::print("evalnet disable ok (reverted to embedded net)\n");
                 return 0;
             }
-            if (NNUE2::INPUT_WEIGHTS == nullptr) {
-                fmt::print("eval2 error: no network loaded; try "
-                           "'eval2 load <path>' first\n");
+            if (Network::INPUT_WEIGHTS == nullptr) {
+                fmt::print("evalnet error: no network loaded; try "
+                           "'evalnet load <path>' first\n");
                 return 0;
             }
-            const int cp = NNUE2::EvaluateFromScratch(b);
-            fmt::print("eval2 {} cp (stm={})\n", cp,
+            const int cp = Network::EvaluateFromScratch(b);
+            fmt::print("evalnet {} cp (stm={})\n", cp,
                        b.side == white ? "white" : "black");
         } else if (token == "pgn") {
             pgn();
@@ -488,23 +542,8 @@ void Uci::setoption(std::istringstream& iss)
     std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
     if (lower_name == "logfile" || lower_name == "debug log file")
         eventlog::reopen_logfile(cfgmgr.logfile, true);
-    if (lower_name == "nnue2_file") {
-        // Auto-load the NNUE2 network when the UCI option is set.
-        // Empty string disables routing and falls back to the embedded
-        // 512-hidden net. Used by cutechess / lichess to select NNUE2
-        // without having to send a custom `eval2 load` command.
-        if (cfgmgr.nnue2_file.empty()) {
-            NNUE2::enabled = false;
-            ucilog("info string nnue2 disabled\n");
-        } else if (const auto path = expand_home_path(cfgmgr.nnue2_file);
-                   NNUE2::LoadNetwork(path.c_str())) {
-            NNUE2::enabled = true;
-            ucilog("info string nnue2 loaded from '{}'\n", path);
-        } else {
-            NNUE2::enabled = false;
-            ucilog("info string nnue2 LOAD FAILED for '{}'\n", cfgmgr.nnue2_file);
-        }
-    }
+    if (lower_name == "nnue_file")
+        load_eval_file(cfgmgr.nnue_file);
     if (lower_name == "hash") {
         // setoption previously just updated cfgmgr.hash_size; the TT
         // was allocated once at Transposition singleton construction
@@ -519,15 +558,6 @@ void Uci::setoption(std::istringstream& iss)
                 tt::ttable.size_mb());
             cfgmgr.hash_size = tt::ttable.size_mb();
         }
-    }
-    if (lower_name == "nnue_file") {
-        // Re-init the NNUE module-level weights from the new path.
-        // Any Net instances already constructed will see the new
-        // weights on next Evaluate()/refresh() since weights are
-        // module globals. Missing files silently fall through to the
-        // embedded default (see NNUE::Init).
-        NNUE::Init(cfgmgr.nnue_file);
-        ucilog("info string nnue_file set to '{}'\n", cfgmgr.nnue_file);
     }
 #if ENYO_USE_SYZYGY
     if (lower_name == "use_syzygy") {

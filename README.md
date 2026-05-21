@@ -68,19 +68,19 @@ Root tablebase move selection when Syzygy DTZ is available<br>
 <h3>Evaluation</h3>
 <a href="https://www.chessprogramming.org/NNUE" rel="nofollow">NNUE</a><br>
 Embedded 512-hidden Enyo NNUE evaluator<br>
-Optional 1024-hidden NNUE2 evaluator via UCI <code>nnue2_file</code><br>
-The NNUE2 path uses sparse king-relative features, 1024 hidden values per
+Optional 1024-hidden Network evaluator via UCI <code>nnue_file</code><br>
+The Network path uses sparse king-relative features, 1024 hidden values per
 perspective, incremental accumulators, and a compact fully connected head.<br>
-Incremental NNUE and NNUE2 accumulators with refresh-table support<br>
-NNUE2 SIMD paths for ARM NEON and x86 AVX2/AVX-512 where available<br>
+Incremental NNUE and Network accumulators with refresh-table support<br>
+Network SIMD paths for ARM NEON and x86 AVX2/AVX-512 where available<br>
 Classical fallback evaluation for debugging<br>
 
 <h3>Tools</H3>
 <a href="https://github.com/jdart1/Fathom" rel="nofollow">Fathom</a><br>
 Syzygy WDL/DTZ probing<br>
-UCI interface with configurable <code>Threads</code>, <code>Hash</code>, <code>SyzygyPath</code>, <code>nnue_file</code> and <code>nnue2_file</code><br>
+UCI interface with configurable <code>Threads</code>, <code>Hash</code>, <code>SyzygyPath</code> and <code>nnue_file</code><br>
 Replay tooling for lichess logs and Stockfish validation<br>
-NNUE2 training and exporter tooling lives in the sibling <code>nnue</code> repo<br>
+Network training and exporter tooling lives in the sibling <code>nnue</code> repo<br>
 
 <h3>Acknowledgments</h3>
 Bluefever Software: Chess Engine In C <a href="https://github.com/bluefeversoft/vice" rel="nofollow">Vice</a><br>

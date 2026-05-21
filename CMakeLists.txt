@@ -118,8 +118,8 @@ set(ENYO_ENGINE_SOURCES
     src/thread.cpp
     src/uci.cpp
     src/nnue.cpp
-    src/nnue2.cpp
-    src/nnue2_board.cpp
+    src/nnue_model.cpp
+    src/nnue_model_board.cpp
     src/search.cpp
     src/probe.cpp
 )
@@ -203,8 +203,8 @@ if(BUILD_TESTS)
         src/thread.cpp
         src/uci.cpp
         src/nnue.cpp
-        src/nnue2.cpp
-        src/nnue2_board.cpp
+        src/nnue_model.cpp
+        src/nnue_model_board.cpp
         src/search.cpp
         src/probe.cpp
     )

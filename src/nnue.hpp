@@ -2,9 +2,10 @@
 //#include "board.hpp"
 #include "simd.h"
 #include "types.hpp"
-#include "nnue2.hpp"
+#include "nnue_model.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -35,6 +36,12 @@ namespace enyo {
 }
 
 namespace NNUE {
+inline constexpr size_t LEGACY_NETWORK_SIZE =
+      INPUT_SIZE * HIDDEN_SIZE * sizeof(int16_t)
+    + HIDDEN_SIZE * sizeof(int16_t)
+    + HIDDEN_DSIZE * OUTPUT_SIZE * sizeof(int16_t)
+    + OUTPUT_SIZE * sizeof(int32_t);
+
 inline constexpr std::array<int, 64> KING_BUCKET {
     0,  1,  2,  3,  3,  2,  1,  0,
     4,  5,  6,  7,  7,  6,  5,  4,
@@ -146,39 +153,39 @@ struct AccumulatorCache {
 };
 
 struct Net {
-    struct NNUE2EvalCacheEntry {
+    struct NetworkEvalCacheEntry {
         uint64_t hash {};
         int32_t eval {};
         uint8_t valid {};
     };
 
-    static constexpr size_t nnue2_eval_cache_size = 1 << 17;
+    static constexpr size_t network_eval_cache_size = 1 << 17;
 
     size_t currentAccumulator = 0;
 
     std::array<Accumulator, 512> accumulator_stack;
-    std::vector<NNUE2::Accumulator> nnue2_accumulator_stack;
-    std::array<NNUE2::AccumulatorKingState, 2 * 2 * NNUE2::N_KING_BUCKETS> nnue2_refresh_table;
-    std::vector<NNUE2EvalCacheEntry> nnue2_eval_cache;
-    uint64_t nnue2_refresh_generation = 0;
-    uint64_t nnue2_eval_cache_generation = 0;
+    std::vector<Network::Accumulator> network_accumulator_stack;
+    std::array<Network::AccumulatorKingState, 2 * 2 * Network::N_KING_BUCKETS> network_refresh_table;
+    std::vector<NetworkEvalCacheEntry> network_eval_cache;
+    uint64_t network_refresh_generation = 0;
+    uint64_t network_eval_cache_generation = 0;
     AccumulatorCache cache;
 
     Net();
 
-    inline void push(bool copy_active_nnue2 = true) {
-        if (NNUE2::enabled && NNUE2::INPUT_WEIGHTS != nullptr) {
-            if (copy_active_nnue2) {
-                std::memcpy(&nnue2_accumulator_stack[currentAccumulator + 1],
-                            &nnue2_accumulator_stack[currentAccumulator],
-                            sizeof(NNUE2::Accumulator));
+    inline void push(bool copy_active_network = true) {
+        if (Network::enabled && Network::INPUT_WEIGHTS != nullptr) {
+            if (copy_active_network) {
+                std::memcpy(&network_accumulator_stack[currentAccumulator + 1],
+                            &network_accumulator_stack[currentAccumulator],
+                            sizeof(Network::Accumulator));
             }
         } else {
             accumulator_stack[currentAccumulator + 1].copy(accumulator_stack[currentAccumulator]);
-            if (NNUE2::INPUT_WEIGHTS != nullptr) {
-                std::memcpy(&nnue2_accumulator_stack[currentAccumulator + 1],
-                            &nnue2_accumulator_stack[currentAccumulator],
-                            sizeof(NNUE2::Accumulator));
+            if (Network::INPUT_WEIGHTS != nullptr) {
+                std::memcpy(&network_accumulator_stack[currentAccumulator + 1],
+                            &network_accumulator_stack[currentAccumulator],
+                            sizeof(Network::Accumulator));
             }
         }
         currentAccumulator++;
@@ -194,8 +201,8 @@ struct Net {
     }
 
     void refresh(enyo::Board &board);
-    void refresh_nnue2(enyo::Board &board);
-    void refresh_nnue2(enyo::Board &board, enyo::Color side);
+    void refresh_network(enyo::Board &board);
+    void refresh_network(enyo::Board &board, enyo::Color side);
     void refresh_with_cache(enyo::Board &board);
     void update_cache(enyo::Board &board, enyo::square_t w_ksq, enyo::square_t b_ksq);
 
@@ -226,16 +233,16 @@ struct Net {
         enyo::square_t kingSquare_White,
         enyo::square_t kingSquare_Black
     );
-    bool try_nnue2_eager_move(enyo::Move move,
+    bool try_network_eager_move(enyo::Move move,
                               enyo::PieceType capturedPieceType,
                               enyo::square_t capturedSquare,
                               enyo::square_t kingSquare_White,
                               enyo::square_t kingSquare_Black);
-    void mark_nnue2_lazy_move(enyo::Move move,
+    void mark_network_lazy_move(enyo::Move move,
                               enyo::square_t captured_square,
                               enyo::square_t kingSquare_White,
                               enyo::square_t kingSquare_Black);
-    void ensure_nnue2(enyo::Board &board);
+    void ensure_network(enyo::Board &board);
 
     int Evaluate(enyo::Color side);
     int Evaluate2(enyo::Board &board, enyo::Color side);

@@ -1,16 +1,16 @@
-// Engine integration for NNUE2.
-// Links nnue2's forward-pass primitives to enyo::Board. Kept in a
-// separate TU so the Phase-2/3 tests can compile nnue2.cpp without
+// Engine integration for Network.
+// Links network's forward-pass primitives to enyo::Board. Kept in a
+// separate TU so tests can compile nnue_model.cpp without
 // pulling in board.hpp / fmt / etc.
 
-#include "nnue2.hpp"
+#include "nnue_model.hpp"
 #include "board.hpp"
 #include "util.hpp"
 
 #include <algorithm>
 #include <cstring>
 
-namespace NNUE2 {
+namespace Network {
 
 // enumerate_pieces — walk `board.pt_bb` for both colors and emit
 // (packed-piece-code, enyo-sq) entries. Order doesn't matter since
@@ -71,4 +71,4 @@ int EvaluateFromScratch(const enyo::Board& b) {
     return Propagate(&acc, static_cast<int>(b.side));
 }
 
-} // namespace NNUE2
+} // namespace Network

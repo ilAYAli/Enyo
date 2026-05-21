@@ -747,15 +747,15 @@ bool accumulators_match(const NNUE::Accumulator & a, const NNUE::Accumulator & b
     return true;
 }
 
-void ensure_nnue2_mock_weights() {
-    static std::vector<NNUE2::acc_t> weights(
-        static_cast<size_t>(NNUE2::N_FEATURES) * NNUE2::N_HIDDEN);
-    static std::vector<NNUE2::acc_t> biases(NNUE2::N_HIDDEN);
+void ensure_network_mock_weights() {
+    static std::vector<Network::acc_t> weights(
+        static_cast<size_t>(Network::N_FEATURES) * Network::N_HIDDEN);
+    static std::vector<Network::acc_t> biases(Network::N_HIDDEN);
     static bool initialized = false;
 
     if (!initialized) {
-        for (size_t f = 0; f < static_cast<size_t>(NNUE2::N_FEATURES); ++f) {
-            for (size_t h = 0; h < static_cast<size_t>(NNUE2::N_HIDDEN); ++h) {
+        for (size_t f = 0; f < static_cast<size_t>(Network::N_FEATURES); ++f) {
+            for (size_t h = 0; h < static_cast<size_t>(Network::N_HIDDEN); ++h) {
                 uint64_t x = (f + 0x9e3779b97f4a7c15ULL)
                            ^ ((h + 0xbf58476d1ce4e5b9ULL) << 1);
                 x ^= x >> 30;
@@ -764,41 +764,41 @@ void ensure_nnue2_mock_weights() {
                 x *= 0x94d049bb133111ebULL;
                 x ^= x >> 31;
                 const int v = static_cast<int>(x % 255) - 127;
-                weights[f * NNUE2::N_HIDDEN + h] = static_cast<NNUE2::acc_t>(v);
+                weights[f * Network::N_HIDDEN + h] = static_cast<Network::acc_t>(v);
             }
         }
-        for (size_t h = 0; h < static_cast<size_t>(NNUE2::N_HIDDEN); ++h)
-            biases[h] = static_cast<NNUE2::acc_t>(static_cast<int>(h % 23) - 11);
+        for (size_t h = 0; h < static_cast<size_t>(Network::N_HIDDEN); ++h)
+            biases[h] = static_cast<Network::acc_t>(static_cast<int>(h % 23) - 11);
         initialized = true;
     }
 
-    NNUE2::SetWeights(weights.data(), biases.data());
+    Network::SetWeights(weights.data(), biases.data());
 }
 
-bool nnue2_accumulators_match(const NNUE2::Accumulator & a,
-                              const NNUE2::Accumulator & b) {
+bool network_accumulators_match(const Network::Accumulator & a,
+                              const Network::Accumulator & b) {
     for (int view = 0; view < 2; ++view) {
-        for (size_t i = 0; i < static_cast<size_t>(NNUE2::N_HIDDEN); ++i)
+        for (size_t i = 0; i < static_cast<size_t>(Network::N_HIDDEN); ++i)
             if (a.values[view][i] != b.values[view][i]) return false;
     }
     return true;
 }
 
-void materialize_nnue2(Board & b, NNUE::Net & net) {
-    net.ensure_nnue2(b);
+void materialize_network(Board & b, NNUE::Net & net) {
+    net.ensure_network(b);
 }
 
 template <Color Us>
-void audit_nnue2_lazy_tree(Board & b, NNUE::Net & live, int depth)
+void audit_network_lazy_tree(Board & b, NNUE::Net & live, int depth)
 {
     if (depth == 0) {
-        materialize_nnue2(b, live);
+        materialize_network(b, live);
         NNUE::Net fresh;
         fresh.refresh(b);
-        EXPECT_TRUE(nnue2_accumulators_match(
-            live.nnue2_accumulator_stack[live.currentAccumulator],
-            fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
-            << "active NNUE2 lazy tree diverged; fen after: " << b.fen();
+        EXPECT_TRUE(network_accumulators_match(
+            live.network_accumulator_stack[live.currentAccumulator],
+            fresh.network_accumulator_stack[fresh.currentAccumulator]))
+            << "active Network lazy tree diverged; fen after: " << b.fen();
         return;
     }
 
@@ -806,29 +806,29 @@ void audit_nnue2_lazy_tree(Board & b, NNUE::Net & live, int depth)
     int searched = 0;
     for (auto move : moves) {
         apply_move<Us, true, true>(b, move, &live);
-        audit_nnue2_lazy_tree<~Us>(b, live, depth - 1);
+        audit_network_lazy_tree<~Us>(b, live, depth - 1);
         revert_move<Us, true, true>(b, &live);
         if (++searched >= 12)
             break;
     }
 }
 
-struct ScopedNNUE2Enabled {
+struct ScopedNetworkEnabled {
     bool previous;
 
-    ScopedNNUE2Enabled()
-        : previous(NNUE2::enabled)
+    ScopedNetworkEnabled()
+        : previous(Network::enabled)
     {
-        NNUE2::enabled = true;
+        Network::enabled = true;
     }
 
-    ~ScopedNNUE2Enabled() {
-        NNUE2::enabled = previous;
+    ~ScopedNetworkEnabled() {
+        Network::enabled = previous;
     }
 };
 
-void expect_nnue2_matches_refresh(const char * label, Board & b, Move move, Color us) {
-    ensure_nnue2_mock_weights();
+void expect_network_matches_refresh(const char * label, Board & b, Move move, Color us) {
+    ensure_network_mock_weights();
 
     NNUE::Net live;
     live.refresh(b);
@@ -837,16 +837,16 @@ void expect_nnue2_matches_refresh(const char * label, Board & b, Move move, Colo
         apply_move<white, true, true>(b, move, &live);
     else
         apply_move<black, true, true>(b, move, &live);
-    materialize_nnue2(b, live);
+    materialize_network(b, live);
 
-    const auto after_live = live.nnue2_accumulator_stack[live.currentAccumulator];
+    const auto after_live = live.network_accumulator_stack[live.currentAccumulator];
 
     NNUE::Net fresh;
     fresh.refresh(b);
-    const auto after_fresh = fresh.nnue2_accumulator_stack[fresh.currentAccumulator];
+    const auto after_fresh = fresh.network_accumulator_stack[fresh.currentAccumulator];
 
-    EXPECT_TRUE(nnue2_accumulators_match(after_live, after_fresh))
-        << label << ": NNUE2 incremental accumulator diverged from full refresh after "
+    EXPECT_TRUE(network_accumulators_match(after_live, after_fresh))
+        << label << ": Network incremental accumulator diverged from full refresh after "
         << fmt::format("{}", move) << " (fen after: " << b.fen() << ")";
 }
 
@@ -1172,9 +1172,9 @@ TEST(nnue_audit, opening_sequence) {
 }
 #endif
 
-TEST(nnue2_audit, opening_sequence_matches_refresh) {
+TEST(network_audit, opening_sequence_matches_refresh) {
     Board b{"startpos"};
-    ensure_nnue2_mock_weights();
+    ensure_network_mock_weights();
     NNUE::Net live;
     live.refresh(b);
 
@@ -1200,23 +1200,23 @@ TEST(nnue2_audit, opening_sequence_matches_refresh) {
             apply_move<white, true, true>(b, m, &live);
         else
             apply_move<black, true, true>(b, m, &live);
-        materialize_nnue2(b, live);
+        materialize_network(b, live);
 
         NNUE::Net fresh;
         fresh.refresh(b);
-        EXPECT_TRUE(nnue2_accumulators_match(
-            live.nnue2_accumulator_stack[live.currentAccumulator],
-            fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
-            << "NNUE2 opening_sequence step " << step_idx << " ("
+        EXPECT_TRUE(network_accumulators_match(
+            live.network_accumulator_stack[live.currentAccumulator],
+            fresh.network_accumulator_stack[fresh.currentAccumulator]))
+            << "Network opening_sequence step " << step_idx << " ("
             << fmt::format("{}", m) << ") diverged; fen after: " << b.fen();
         ++step_idx;
     }
 }
 
-TEST(nnue2_audit, active_quiet_delta_matches_refresh) {
+TEST(network_audit, active_quiet_delta_matches_refresh) {
     Board b{"startpos"};
-    ensure_nnue2_mock_weights();
-    ScopedNNUE2Enabled scoped;
+    ensure_network_mock_weights();
+    ScopedNetworkEnabled scoped;
 
     NNUE::Net live;
     live.refresh(b);
@@ -1243,23 +1243,23 @@ TEST(nnue2_audit, active_quiet_delta_matches_refresh) {
             apply_move<white, true, true>(b, m, &live);
         else
             apply_move<black, true, true>(b, m, &live);
-        materialize_nnue2(b, live);
+        materialize_network(b, live);
 
         NNUE::Net fresh;
         fresh.refresh(b);
-        EXPECT_TRUE(nnue2_accumulators_match(
-            live.nnue2_accumulator_stack[live.currentAccumulator],
-            fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
-            << "active NNUE2 quiet step " << step_idx << " ("
+        EXPECT_TRUE(network_accumulators_match(
+            live.network_accumulator_stack[live.currentAccumulator],
+            fresh.network_accumulator_stack[fresh.currentAccumulator]))
+            << "active Network quiet step " << step_idx << " ("
             << fmt::format("{}", m) << ") diverged; fen after: " << b.fen();
         ++step_idx;
     }
 }
 
-TEST(nnue2_audit, active_lazy_chain_matches_refresh) {
+TEST(network_audit, active_lazy_chain_matches_refresh) {
     Board b{"startpos"};
-    ensure_nnue2_mock_weights();
-    ScopedNNUE2Enabled scoped;
+    ensure_network_mock_weights();
+    ScopedNetworkEnabled scoped;
 
     NNUE::Net live;
     live.refresh(b);
@@ -1286,30 +1286,30 @@ TEST(nnue2_audit, active_lazy_chain_matches_refresh) {
         else
             apply_move<black, true, true>(b, m, &live);
     }
-    materialize_nnue2(b, live);
+    materialize_network(b, live);
 
     NNUE::Net fresh;
     fresh.refresh(b);
-    EXPECT_TRUE(nnue2_accumulators_match(
-        live.nnue2_accumulator_stack[live.currentAccumulator],
-        fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
-        << "active NNUE2 lazy chain diverged; fen after: " << b.fen();
+    EXPECT_TRUE(network_accumulators_match(
+        live.network_accumulator_stack[live.currentAccumulator],
+        fresh.network_accumulator_stack[fresh.currentAccumulator]))
+        << "active Network lazy chain diverged; fen after: " << b.fen();
 }
 
-TEST(nnue2_audit, active_lazy_tree_matches_refresh) {
+TEST(network_audit, active_lazy_tree_matches_refresh) {
     Board b{"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"};
-    ensure_nnue2_mock_weights();
-    ScopedNNUE2Enabled scoped;
+    ensure_network_mock_weights();
+    ScopedNetworkEnabled scoped;
 
     NNUE::Net live;
     live.refresh(b);
-    audit_nnue2_lazy_tree<white>(b, live, 3);
+    audit_network_lazy_tree<white>(b, live, 3);
 }
 
-TEST(nnue2_audit, active_kiwipete_pv_with_castle_matches_refresh) {
+TEST(network_audit, active_kiwipete_pv_with_castle_matches_refresh) {
     Board b{"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"};
-    ensure_nnue2_mock_weights();
-    ScopedNNUE2Enabled scoped;
+    ensure_network_mock_weights();
+    ScopedNetworkEnabled scoped;
 
     NNUE::Net live;
     live.refresh(b);
@@ -1333,18 +1333,18 @@ TEST(nnue2_audit, active_kiwipete_pv_with_castle_matches_refresh) {
         }
     }
 
-    materialize_nnue2(b, live);
+    materialize_network(b, live);
     NNUE::Net fresh;
     fresh.refresh(b);
-    EXPECT_TRUE(nnue2_accumulators_match(
-        live.nnue2_accumulator_stack[live.currentAccumulator],
-        fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
-        << "active NNUE2 Kiwipete PV diverged; fen after: " << b.fen();
+    EXPECT_TRUE(network_accumulators_match(
+        live.network_accumulator_stack[live.currentAccumulator],
+        fresh.network_accumulator_stack[fresh.currentAccumulator]))
+        << "active Network Kiwipete PV diverged; fen after: " << b.fen();
 }
 
-TEST(nnue2_audit, active_promotion_capture_king_chain_matches_refresh) {
-    ensure_nnue2_mock_weights();
-    ScopedNNUE2Enabled scoped;
+TEST(network_audit, active_promotion_capture_king_chain_matches_refresh) {
+    ensure_network_mock_weights();
+    ScopedNetworkEnabled scoped;
 
     const std::vector<std::string> moves = {
         "e2a6", "b4c3", "b2c3", "h3g2", "d5e6",
@@ -1372,21 +1372,21 @@ TEST(nnue2_audit, active_promotion_capture_king_chain_matches_refresh) {
             }
         }
 
-        materialize_nnue2(b, live);
+        materialize_network(b, live);
         NNUE::Net fresh;
         fresh.refresh(b);
-        EXPECT_TRUE(nnue2_accumulators_match(
-            live.nnue2_accumulator_stack[live.currentAccumulator],
-            fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
-            << "active NNUE2 promotion/king chain diverged at prefix "
+        EXPECT_TRUE(network_accumulators_match(
+            live.network_accumulator_stack[live.currentAccumulator],
+            fresh.network_accumulator_stack[fresh.currentAccumulator]))
+            << "active Network promotion/king chain diverged at prefix "
             << prefix << "; fen after: " << b.fen();
     }
 }
 
-TEST(nnue2_audit, active_nonrefreshing_king_loop_matches_refresh) {
+TEST(network_audit, active_nonrefreshing_king_loop_matches_refresh) {
     Board b{"8/8/2k5/8/8/5Q2/1pq2PKP/8 b - - 13 60"};
-    ensure_nnue2_mock_weights();
-    ScopedNNUE2Enabled scoped;
+    ensure_network_mock_weights();
+    ScopedNetworkEnabled scoped;
 
     NNUE::Net live;
     live.refresh(b);
@@ -1410,19 +1410,19 @@ TEST(nnue2_audit, active_nonrefreshing_king_loop_matches_refresh) {
         }
     }
 
-    materialize_nnue2(b, live);
+    materialize_network(b, live);
     NNUE::Net fresh;
     fresh.refresh(b);
-    EXPECT_TRUE(nnue2_accumulators_match(
-        live.nnue2_accumulator_stack[live.currentAccumulator],
-        fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
-        << "active NNUE2 non-refreshing king loop diverged; fen after: " << b.fen();
+    EXPECT_TRUE(network_accumulators_match(
+        live.network_accumulator_stack[live.currentAccumulator],
+        fresh.network_accumulator_stack[fresh.currentAccumulator]))
+        << "active Network non-refreshing king loop diverged; fen after: " << b.fen();
 }
 
-TEST(nnue2_audit, active_quiet_sibling_matches_refresh) {
+TEST(network_audit, active_quiet_sibling_matches_refresh) {
     Board b{"startpos"};
-    ensure_nnue2_mock_weights();
-    ScopedNNUE2Enabled scoped;
+    ensure_network_mock_weights();
+    ScopedNetworkEnabled scoped;
 
     NNUE::Net live;
     live.refresh(b);
@@ -1433,38 +1433,38 @@ TEST(nnue2_audit, active_quiet_sibling_matches_refresh) {
 
     auto d2d4 = resolve_move<white>(b, pawn, d2, d4);
     apply_move<white, true, true>(b, d2d4, &live);
-    materialize_nnue2(b, live);
+    materialize_network(b, live);
 
     NNUE::Net fresh;
     fresh.refresh(b);
-    EXPECT_TRUE(nnue2_accumulators_match(
-        live.nnue2_accumulator_stack[live.currentAccumulator],
-        fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
-        << "active NNUE2 sibling quiet move diverged; fen after: " << b.fen();
+    EXPECT_TRUE(network_accumulators_match(
+        live.network_accumulator_stack[live.currentAccumulator],
+        fresh.network_accumulator_stack[fresh.currentAccumulator]))
+        << "active Network sibling quiet move diverged; fen after: " << b.fen();
 }
 
-TEST(nnue2_audit, active_generic_capture_matches_refresh) {
+TEST(network_audit, active_generic_capture_matches_refresh) {
     Board b{"rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2"};
-    ensure_nnue2_mock_weights();
-    ScopedNNUE2Enabled scoped;
+    ensure_network_mock_weights();
+    ScopedNetworkEnabled scoped;
 
     NNUE::Net live;
     live.refresh(b);
 
     auto move = resolve_move<white>(b, pawn, e4, d5);
     apply_move<white, true, true>(b, move, &live);
-    materialize_nnue2(b, live);
+    materialize_network(b, live);
 
     NNUE::Net fresh;
     fresh.refresh(b);
-    EXPECT_TRUE(nnue2_accumulators_match(
-        live.nnue2_accumulator_stack[live.currentAccumulator],
-        fresh.nnue2_accumulator_stack[fresh.currentAccumulator]))
-        << "active NNUE2 generic capture diverged; fen after: " << b.fen();
+    EXPECT_TRUE(network_accumulators_match(
+        live.network_accumulator_stack[live.currentAccumulator],
+        fresh.network_accumulator_stack[fresh.currentAccumulator]))
+        << "active Network generic capture diverged; fen after: " << b.fen();
 }
 
-TEST(nnue2_audit, special_moves_match_refresh) {
-    ScopedNNUE2Enabled scoped;
+TEST(network_audit, special_moves_match_refresh) {
+    ScopedNetworkEnabled scoped;
 
     {
         Board b{"rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3"};
@@ -1474,7 +1474,7 @@ TEST(nnue2_audit, special_moves_match_refresh) {
             if (m.flags() == Move::Flags::enpassant) { ep = m; break; }
         }
         ASSERT_TRUE(ep);
-        expect_nnue2_matches_refresh("enpassant", b, ep, white);
+        expect_network_matches_refresh("enpassant", b, ep, white);
     }
     {
         Board b{"1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1"};
@@ -1488,7 +1488,7 @@ TEST(nnue2_audit, special_moves_match_refresh) {
             }
         }
         ASSERT_TRUE(promo);
-        expect_nnue2_matches_refresh("promotion_with_capture", b, promo, white);
+        expect_network_matches_refresh("promotion_with_capture", b, promo, white);
     }
     {
         Board b{"r3k2r/pppqppbp/2np1np1/8/8/2NP1NP1/PPPQPPBP/R3K2R w KQkq - 0 1"};
@@ -1500,12 +1500,12 @@ TEST(nnue2_audit, special_moves_match_refresh) {
             }
         }
         ASSERT_TRUE(castle);
-        expect_nnue2_matches_refresh("castle_kingside", b, castle, white);
+        expect_network_matches_refresh("castle_kingside", b, castle, white);
     }
     {
         Board b{"4k3/8/8/8/8/8/8/R3K3 w Q - 0 1"};
         auto move = resolve_move<white>(b, king, e1, e2);
-        expect_nnue2_matches_refresh("king_move_non_castle", b, move, white);
+        expect_network_matches_refresh("king_move_non_castle", b, move, white);
     }
 }
 
