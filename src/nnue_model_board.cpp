@@ -30,7 +30,7 @@ size_t enumerate_pieces(const enyo::Board& b, PieceEntry* out) {
     return n;
 }
 
-int ScaleEval(const enyo::Board& b, int score) {
+int MaterialPhase(const enyo::Board& b) {
     const auto minors =
         b.pt_bb[enyo::white][enyo::knight]
       | b.pt_bb[enyo::black][enyo::knight]
@@ -42,9 +42,17 @@ int ScaleEval(const enyo::Board& b, int score) {
     const auto queens =
         b.pt_bb[enyo::white][enyo::queen]
       | b.pt_bb[enyo::black][enyo::queen];
-    const int phase = 3 * enyo::count_bits(minors)
+    return 3 * enyo::count_bits(minors)
         + 5 * enyo::count_bits(rooks)
         + 10 * enyo::count_bits(queens);
+}
+
+float PhaseHeadInput(const enyo::Board& b) {
+    return static_cast<float>(MaterialPhase(b)) / 128.0f;
+}
+
+int ScaleEval(const enyo::Board& b, int score) {
+    const int phase = MaterialPhase(b);
 
     score = (128 + phase) * score / 128;
     return std::clamp(score, -2045, 2045);
@@ -68,7 +76,9 @@ int EvaluateFromScratch(const enyo::Board& b) {
     ResetAccumulator(&acc, enyo::white, wk_sq, pieces, n);
     ResetAccumulator(&acc, enyo::black, bk_sq, pieces, n);
 
-    return Propagate(&acc, static_cast<int>(b.side));
+    return ScaleEval(
+        b,
+        Propagate(&acc, static_cast<int>(b.side), PhaseHeadInput(b)));
 }
 
 } // namespace Network

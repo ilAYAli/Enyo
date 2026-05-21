@@ -69,7 +69,7 @@ bool load_eval_file(const std::string & value)
         return false;
     }
 
-    if (size == Network::NETWORK_SIZE) {
+    if (size == Network::NETWORK_SIZE || size == Network::LEGACY_NETWORK_SIZE) {
         if (Network::LoadNetwork(path.c_str())) {
             Network::enabled = true;
             ucilog("info string network loaded from '{}'\n", path);

@@ -910,7 +910,10 @@ int32_t Net::Evaluate2(enyo::Board &board, enyo::Color side) {
 
     const int32_t eval = Network::ScaleEval(
         board,
-        Network::Propagate(&accumulator, static_cast<int>(side)));
+        Network::Propagate(
+            &accumulator,
+            static_cast<int>(side),
+            Network::PhaseHeadInput(board)));
     accumulator.eval[side] = eval;
     accumulator.eval_correct[side] = 1;
     if (entry.hash != board.hash) {

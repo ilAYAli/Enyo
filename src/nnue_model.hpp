@@ -30,6 +30,8 @@ inline constexpr int N_FEATURES     = N_KING_BUCKETS * N_PIECE_TYPES * N_SQUARES
 inline constexpr int N_HIDDEN       = 1024;
 inline constexpr int N_L1           = 2 * N_HIDDEN;     // 2048
 inline constexpr int N_L2           = 16;
+inline constexpr int N_PHASE_HEAD   = 1;
+inline constexpr int N_L2_HEAD      = N_L2 + N_PHASE_HEAD;
 inline constexpr int N_L3           = 32;
 inline constexpr int N_OUTPUT       = 1;
 
@@ -220,7 +222,7 @@ struct alignas(64) AccumulatorKingState {
 //   INPUT_BIASES [N_HIDDEN]               added during ResetAccumulator
 //   L1_WEIGHTS   [N_L1 * N_L2]            int8 sparse, row-major after shuffle
 //   L1_BIASES    [N_L2]                   int32
-//   L2_WEIGHTS   [N_L2 * N_L3]            float32
+//   L2_WEIGHTS   [N_L2_HEAD * N_L3]       float32
 //   L2_BIASES    [N_L3]                   float32
 //   OUTPUT_WEIGHTS[N_L3 * N_OUTPUT]       float32
 //   OUTPUT_BIAS                           float32
@@ -250,14 +252,24 @@ void SetWeights(const acc_t* weights, const acc_t* biases);
 // pointers are updated to reference internal storage owned by nnue_model.cpp.
 bool LoadNetwork(const char* path);
 
-// Total byte size of a v13-format .nn file, computed from the constants
-// above. Files exactly this size can be consumed by LoadNetwork().
-inline constexpr size_t NETWORK_SIZE =
+inline constexpr size_t LEGACY_NETWORK_SIZE =
       sizeof(int16_t) * N_FEATURES * N_HIDDEN  // input weights
     + sizeof(int16_t) * N_HIDDEN               // input biases
     + sizeof(int8_t)  * N_L1 * N_L2            // L1 weights
     + sizeof(int32_t) * N_L2                   // L1 biases
     + sizeof(float)   * N_L2 * N_L3            // L2 weights
+    + sizeof(float)   * N_L3                   // L2 biases
+    + sizeof(float)   * N_L3 * N_OUTPUT        // output weights
+    + sizeof(float);                           // output bias
+
+// Total byte size of Enyo material/phase-head .nn files. Legacy files
+// exactly LEGACY_NETWORK_SIZE bytes are still accepted by LoadNetwork().
+inline constexpr size_t NETWORK_SIZE =
+      sizeof(int16_t) * N_FEATURES * N_HIDDEN  // input weights
+    + sizeof(int16_t) * N_HIDDEN               // input biases
+    + sizeof(int8_t)  * N_L1 * N_L2            // L1 weights
+    + sizeof(int32_t) * N_L2                   // L1 biases
+    + sizeof(float)   * N_L2_HEAD * N_L3       // L2 weights
     + sizeof(float)   * N_L3                   // L2 biases
     + sizeof(float)   * N_L3 * N_OUTPUT        // output weights
     + sizeof(float);                           // output bias
@@ -506,6 +518,7 @@ inline void ResetAccumulator(Accumulator* dest, enyo::Color view,
 // Writes up to 32 entries to `out`, returns the number written.
 // ---------------------------------------------------------------------
 size_t enumerate_pieces(const enyo::Board& b, PieceEntry* out);
+float PhaseHeadInput(const enyo::Board& b);
 int ScaleEval(const enyo::Board& b, int score);
 
 // Convenience — full board evaluate in centipawns (stm-relative). Builds
@@ -1060,21 +1073,22 @@ inline __m128 hadd_psx4(__m256* regs) {
 #endif
 
 // L2AffineReLU — dense float matmul + ReLU. dest: float[N_L3],
-// src: float[N_L2].
-inline void L2AffineReLU(float* dest, const float* src) {
+// src: float[N_L2], plus one material/phase head input.
+inline void L2AffineReLU(float* dest, const float* src, float phase_head) {
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
     const float32x4_t src0 = vld1q_f32(&src[0]);
     const float32x4_t src1 = vld1q_f32(&src[4]);
     const float32x4_t src2 = vld1q_f32(&src[8]);
     const float32x4_t src3 = vld1q_f32(&src[12]);
     for (int i = 0; i < N_L3; ++i) {
-        const int offset = i * N_L2;
+        const int offset = i * N_L2_HEAD;
         float32x4_t s0 = vmulq_f32(src0, vld1q_f32(&L2_WEIGHTS[offset + 0]));
         float32x4_t s1 = vmulq_f32(src1, vld1q_f32(&L2_WEIGHTS[offset + 4]));
         float32x4_t s2 = vmulq_f32(src2, vld1q_f32(&L2_WEIGHTS[offset + 8]));
         float32x4_t s3 = vmulq_f32(src3, vld1q_f32(&L2_WEIGHTS[offset + 12]));
         const float s = L2_BIASES[i]
-            + vaddvq_f32(vaddq_f32(vaddq_f32(s0, s1), vaddq_f32(s2, s3)));
+            + vaddvq_f32(vaddq_f32(vaddq_f32(s0, s1), vaddq_f32(s2, s3)))
+            + phase_head * L2_WEIGHTS[offset + N_L2];
         dest[i] = s < 0.0f ? 0.0f : s;
     }
 #elif defined(__AVX2__)
@@ -1093,7 +1107,7 @@ inline void L2AffineReLU(float* dest, const float* src) {
             for (size_t k = 0; k < out_cc; ++k) {
                 const size_t output = out_cc * i + k;
                 const __m256 weights = _mm256_loadu_ps(
-                    &L2_WEIGHTS[output * N_L2 + j * in_width]);
+                    &L2_WEIGHTS[output * N_L2_HEAD + j * in_width]);
                 regs[k] = _mm256_fmadd_ps(in, weights, regs[k]);
             }
         }
@@ -1101,16 +1115,31 @@ inline void L2AffineReLU(float* dest, const float* src) {
         const __m128 s0 = hadd_psx4(regs);
         const __m128 s1 = hadd_psx4(&regs[4]);
         __m256 sum = _mm256_insertf128_ps(_mm256_castps128_ps256(s0), s1, 1);
+        const size_t output = out_cc * i;
+        const __m256 phase_weights = _mm256_setr_ps(
+            L2_WEIGHTS[(output + 0) * N_L2_HEAD + N_L2],
+            L2_WEIGHTS[(output + 1) * N_L2_HEAD + N_L2],
+            L2_WEIGHTS[(output + 2) * N_L2_HEAD + N_L2],
+            L2_WEIGHTS[(output + 3) * N_L2_HEAD + N_L2],
+            L2_WEIGHTS[(output + 4) * N_L2_HEAD + N_L2],
+            L2_WEIGHTS[(output + 5) * N_L2_HEAD + N_L2],
+            L2_WEIGHTS[(output + 6) * N_L2_HEAD + N_L2],
+            L2_WEIGHTS[(output + 7) * N_L2_HEAD + N_L2]);
+        sum = _mm256_fmadd_ps(
+            _mm256_set1_ps(phase_head),
+            phase_weights,
+            sum);
         const __m256 bias = _mm256_loadu_ps(&L2_BIASES[i * out_cc]);
         sum = _mm256_max_ps(_mm256_add_ps(sum, bias), _mm256_setzero_ps());
         _mm256_storeu_ps(&dest[i * out_cc], sum);
     }
 #else
     for (int i = 0; i < N_L3; ++i) {
-        const int offset = i * N_L2;
+        const int offset = i * N_L2_HEAD;
         float s = L2_BIASES[i];
         for (int j = 0; j < N_L2; ++j)
             s += src[j] * L2_WEIGHTS[offset + j];
+        s += phase_head * L2_WEIGHTS[offset + N_L2];
         dest[i] = s < 0.0f ? 0.0f : s;
     }
 #endif
@@ -1167,12 +1196,12 @@ inline float L3Transform(const float* src) {
 }
 
 // Full forward pass, scalar only. Returns eval in centipawns (stm-relative).
-inline int Propagate(const Accumulator* acc, int stm) {
+inline int Propagate(const Accumulator* acc, int stm, float phase_head) {
 #if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__ARM_FEATURE_DOTPROD)
     alignas(64) float x1[N_L2];
     alignas(64) float x2[N_L3];
     L1AffineReLUFromAccumulator(x1, acc, stm);
-    L2AffineReLU(x2, x1);
+    L2AffineReLU(x2, x1, phase_head);
     return static_cast<int>(L3Transform(x2) / 32.0f);
 #else
     alignas(64) int8_t x0[N_L1];
@@ -1180,9 +1209,13 @@ inline int Propagate(const Accumulator* acc, int stm) {
     alignas(64) float  x2[N_L3];
     InputReLU(x0, acc, stm);
     L1AffineReLU(x1, x0);
-    L2AffineReLU(x2, x1);
+    L2AffineReLU(x2, x1, phase_head);
     return static_cast<int>(L3Transform(x2) / 32.0f);
 #endif
+}
+
+inline int Propagate(const Accumulator* acc, int stm) {
+    return Propagate(acc, stm, 0.0f);
 }
 
 } // namespace Network

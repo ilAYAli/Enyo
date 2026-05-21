@@ -28,7 +28,7 @@ alignas(64) int8_t  s_l1_weights    [N_L1 * N_L2];
 alignas(64) int8_t  s_l1_weights_t  [N_L1 * N_L2];
 alignas(64) int8_t  s_l1_weights_sparse[N_L1 * N_L2];
 alignas(64) int32_t s_l1_biases     [N_L2];
-alignas(64) float   s_l2_weights    [N_L2 * N_L3];
+alignas(64) float   s_l2_weights    [N_L2_HEAD * N_L3];
 alignas(64) float   s_l2_biases     [N_L3];
 alignas(64) float   s_output_weights[N_L3 * N_OUTPUT];
 }
@@ -167,7 +167,7 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
 //   [N_HIDDEN]              int16  INPUT_BIASES
 //   [N_L1 * N_L2]           int8   L1_WEIGHTS     (scalar layout: w[j*N_L1+i])
 //   [N_L2]                  int32  L1_BIASES
-//   [N_L2 * N_L3]           float  L2_WEIGHTS     (row-major, output-major)
+//   [N_L2_HEAD * N_L3]      float  L2_WEIGHTS     (row-major, output-major)
 //   [N_L3]                  float  L2_BIASES
 //   [N_L3 * N_OUTPUT]       float  OUTPUT_WEIGHTS
 //   [1]                     float  OUTPUT_BIAS
@@ -192,10 +192,12 @@ bool LoadNetwork(const char* path) {
     }
     const long sz = std::ftell(fh);
     if (sz < 0) { std::fclose(fh); return false; }
-    if (static_cast<size_t>(sz) != NETWORK_SIZE) {
+    const auto file_size = static_cast<size_t>(sz);
+    const bool legacy_layout = file_size == LEGACY_NETWORK_SIZE;
+    if (file_size != NETWORK_SIZE && !legacy_layout) {
         std::fprintf(stderr,
-            "network: '%s' is %ld bytes, expected %zu\n",
-            path, sz, NETWORK_SIZE);
+            "network: '%s' is %ld bytes, expected %zu or %zu\n",
+            path, sz, LEGACY_NETWORK_SIZE, NETWORK_SIZE);
         std::fclose(fh);
         return false;
     }
@@ -213,7 +215,18 @@ bool LoadNetwork(const char* path) {
     if (!read(s_input_biases,   sizeof(s_input_biases),   "INPUT_BIASES"))  { std::fclose(fh); return false; }
     if (!read(s_l1_weights,     sizeof(s_l1_weights),     "L1_WEIGHTS"))    { std::fclose(fh); return false; }
     if (!read(s_l1_biases,      sizeof(s_l1_biases),      "L1_BIASES"))     { std::fclose(fh); return false; }
-    if (!read(s_l2_weights,     sizeof(s_l2_weights),     "L2_WEIGHTS"))    { std::fclose(fh); return false; }
+    if (legacy_layout) {
+        float legacy_l2_weights[N_L2 * N_L3];
+        if (!read(legacy_l2_weights, sizeof(legacy_l2_weights), "L2_WEIGHTS")) { std::fclose(fh); return false; }
+        std::memset(s_l2_weights, 0, sizeof(s_l2_weights));
+        for (size_t i = 0; i < N_L3; ++i)
+            std::memcpy(
+                &s_l2_weights[i * N_L2_HEAD],
+                &legacy_l2_weights[i * N_L2],
+                sizeof(float) * N_L2);
+    } else {
+        if (!read(s_l2_weights, sizeof(s_l2_weights), "L2_WEIGHTS")) { std::fclose(fh); return false; }
+    }
     if (!read(s_l2_biases,      sizeof(s_l2_biases),      "L2_BIASES"))     { std::fclose(fh); return false; }
     if (!read(s_output_weights, sizeof(s_output_weights), "OUTPUT_WEIGHTS")){ std::fclose(fh); return false; }
     if (!read(&OUTPUT_BIAS,     sizeof(OUTPUT_BIAS),      "OUTPUT_BIAS"))   { std::fclose(fh); return false; }
