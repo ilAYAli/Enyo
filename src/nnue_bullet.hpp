@@ -47,6 +47,20 @@ int FeatureIdx(enyo::PieceType pt,
                enyo::square_t king_sq,
                enyo::Color view);
 void ResetAccumulator(Accumulator* acc, const enyo::Board& board, enyo::Color view);
+void UpdateFeature(Accumulator* acc,
+                   enyo::PieceType pt,
+                   enyo::Color pc,
+                   enyo::square_t sq,
+                   enyo::square_t king_sq,
+                   enyo::Color view,
+                   bool add);
+void MoveFeature(Accumulator* acc,
+                 enyo::PieceType pt,
+                 enyo::Color pc,
+                 enyo::square_t from,
+                 enyo::square_t to,
+                 enyo::square_t king_sq,
+                 enyo::Color view);
 int Propagate(const Accumulator* acc, const enyo::Board& board);
 int EvaluateFromScratch(const enyo::Board& board);
 std::string Description();

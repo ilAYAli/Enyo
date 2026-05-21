@@ -223,6 +223,37 @@ void ResetAccumulator(Accumulator* acc, const enyo::Board& board, enyo::Color vi
     }
 }
 
+void UpdateFeature(Accumulator* acc,
+                   enyo::PieceType pt,
+                   enyo::Color pc,
+                   enyo::square_t sq,
+                   enyo::square_t king_sq,
+                   enyo::Color view,
+                   bool add)
+{
+    const int feature = FeatureIdx(pt, pc, sq, king_sq, view);
+    const int16_t* weights = &s_l0_weights[static_cast<size_t>(feature) * N_HIDDEN];
+    if (add) {
+        for (int i = 0; i < N_HIDDEN; ++i)
+            acc->values[view][i] += weights[i];
+    } else {
+        for (int i = 0; i < N_HIDDEN; ++i)
+            acc->values[view][i] -= weights[i];
+    }
+}
+
+void MoveFeature(Accumulator* acc,
+                 enyo::PieceType pt,
+                 enyo::Color pc,
+                 enyo::square_t from,
+                 enyo::square_t to,
+                 enyo::square_t king_sq,
+                 enyo::Color view)
+{
+    UpdateFeature(acc, pt, pc, from, king_sq, view, false);
+    UpdateFeature(acc, pt, pc, to, king_sq, view, true);
+}
+
 int Propagate(const Accumulator* acc, const enyo::Board& board)
 {
     float hidden[N_L1_INPUTS];

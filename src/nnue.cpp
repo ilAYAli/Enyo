@@ -1,7 +1,6 @@
 #include "nnue.hpp"
 #include "movelist.hpp"
 #include "movegen.hpp"
-#include "nnue_bullet.hpp"
 //#include "bench.h"
 
 #include <algorithm>
@@ -37,9 +36,12 @@ namespace NNUE {
 
 Net::Net() {
     std::fill(accumulator_stack.begin(), accumulator_stack.end(), Accumulator());
+    bullet_accumulator_stack.resize(accumulator_stack.size());
     network_accumulator_stack.resize(accumulator_stack.size());
     network_eval_cache.resize(network_eval_cache_size);
     network_eval_cache_generation = Network::NETWORK_GENERATION << 1;
+    std::memset(bullet_accumulator_stack.data(), 0,
+                bullet_accumulator_stack.size() * sizeof(BulletNetwork::Accumulator));
     std::memset(network_accumulator_stack.data(), 0,
                 network_accumulator_stack.size() * sizeof(Network::Accumulator));
 }
@@ -48,6 +50,11 @@ namespace {
 
 bool use_network() {
     return Network::enabled && Network::INPUT_WEIGHTS != nullptr;
+}
+
+bool use_bullet()
+{
+    return BulletNetwork::enabled && BulletNetwork::IsLoaded();
 }
 
 void invalidate_network_eval(Network::Accumulator & accumulator)
@@ -180,6 +187,26 @@ void update_network_feature(Network::Accumulator & accumulator,
     }
 }
 
+void update_bullet_feature(BulletNetwork::Accumulator & accumulator,
+                         enyo::PieceType pieceType,
+                         enyo::Color pieceColor,
+                         enyo::square_t square,
+                         enyo::square_t kingSquare_White,
+                         enyo::square_t kingSquare_Black,
+                         bool add)
+{
+    for (auto side : {enyo::white, enyo::black}) {
+        BulletNetwork::UpdateFeature(
+            &accumulator,
+            pieceType,
+            pieceColor,
+            square,
+            side == enyo::white ? kingSquare_White : kingSquare_Black,
+            side,
+            add);
+    }
+}
+
 void move_network_feature(Network::Accumulator & accumulator,
                         enyo::PieceType pieceType,
                         enyo::Color pieceColor,
@@ -200,6 +227,26 @@ void move_network_feature(Network::Accumulator & accumulator,
         delta.add[delta.a++] = Network::FeatureIdx(
             pieceType, pieceColor, to_square, king_square, side);
         Network::ApplyDelta(accumulator.values[side], accumulator.values[side], &delta);
+    }
+}
+
+void move_bullet_feature(BulletNetwork::Accumulator & accumulator,
+                       enyo::PieceType pieceType,
+                       enyo::Color pieceColor,
+                       enyo::square_t from_square,
+                       enyo::square_t to_square,
+                       enyo::square_t kingSquare_White,
+                       enyo::square_t kingSquare_Black)
+{
+    for (auto side : {enyo::white, enyo::black}) {
+        BulletNetwork::MoveFeature(
+            &accumulator,
+            pieceType,
+            pieceColor,
+            from_square,
+            to_square,
+            side == enyo::white ? kingSquare_White : kingSquare_Black,
+            side);
     }
 }
 
@@ -412,6 +459,17 @@ void Net::updateAccumulator(
     enyo::square_t kingSquare_White,
     enyo::square_t kingSquare_Black)
 {
+    if (use_bullet()) {
+        update_bullet_feature(
+            bullet_accumulator_stack[currentAccumulator],
+            pieceType,
+            pieceColor,
+            square,
+            kingSquare_White,
+            kingSquare_Black,
+            add);
+        return;
+    }
     if (use_network()) {
         update_network_feature(
             network_accumulator_stack[currentAccumulator],
@@ -474,6 +532,17 @@ void Net::updateAccumulator(
     enyo::square_t kingSquare_White,
     enyo::square_t kingSquare_Black)
 {
+    if (use_bullet()) {
+        move_bullet_feature(
+            bullet_accumulator_stack[currentAccumulator],
+            pieceType,
+            pieceColor,
+            from_square,
+            to_square,
+            kingSquare_White,
+            kingSquare_Black);
+        return;
+    }
     if (use_network()) {
         move_network_feature(
             network_accumulator_stack[currentAccumulator],
@@ -748,6 +817,10 @@ void Net::ensure_network(enyo::Board &board)
 }
 
 void Net::refresh(enyo::Board &board) {
+    if (use_bullet()) {
+        refresh_bullet(board);
+        return;
+    }
     if (use_network()) {
         refresh_network(board);
         return;
@@ -771,6 +844,13 @@ void Net::refresh(enyo::Board &board) {
         );
     }
     refresh_network(board);
+}
+
+void Net::refresh_bullet(enyo::Board &board)
+{
+    BulletNetwork::Accumulator & accumulator = bullet_accumulator_stack[currentAccumulator];
+    BulletNetwork::ResetAccumulator(&accumulator, board, enyo::white);
+    BulletNetwork::ResetAccumulator(&accumulator, board, enyo::black);
 }
 
 void Net::refresh_network(enyo::Board &board) {
@@ -835,6 +915,10 @@ void Net::update_cache(enyo::Board &board, enyo::square_t w_ksq, enyo::square_t 
 }
 
 void Net::refresh_with_cache(enyo::Board &board) {
+    if (use_bullet()) {
+        refresh_bullet(board);
+        return;
+    }
     if (use_network()) {
         refresh_network(board);
         return;
@@ -952,7 +1036,9 @@ int Net::EvaluateBullet(enyo::Board &board)
         entry.hash = board.hash;
         entry.valid = 0;
     }
-    entry.eval = BulletNetwork::EvaluateFromScratch(board);
+    entry.eval = BulletNetwork::Propagate(
+        &bullet_accumulator_stack[currentAccumulator],
+        board);
     entry.valid = 1;
     return entry.eval;
 }

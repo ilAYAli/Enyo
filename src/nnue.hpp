@@ -2,6 +2,7 @@
 //#include "board.hpp"
 #include "simd.h"
 #include "types.hpp"
+#include "nnue_bullet.hpp"
 #include "nnue_model.hpp"
 
 #include <array>
@@ -164,6 +165,7 @@ struct Net {
     size_t currentAccumulator = 0;
 
     std::array<Accumulator, 512> accumulator_stack;
+    std::vector<BulletNetwork::Accumulator> bullet_accumulator_stack;
     std::vector<Network::Accumulator> network_accumulator_stack;
     std::array<Network::AccumulatorKingState, 2 * 2 * Network::N_KING_BUCKETS> network_refresh_table;
     std::vector<NetworkEvalCacheEntry> network_eval_cache;
@@ -174,7 +176,11 @@ struct Net {
     Net();
 
     inline void push(bool copy_active_network = true) {
-        if (Network::enabled && Network::INPUT_WEIGHTS != nullptr) {
+        if (BulletNetwork::enabled && BulletNetwork::IsLoaded()) {
+            std::memcpy(&bullet_accumulator_stack[currentAccumulator + 1],
+                        &bullet_accumulator_stack[currentAccumulator],
+                        sizeof(BulletNetwork::Accumulator));
+        } else if (Network::enabled && Network::INPUT_WEIGHTS != nullptr) {
             if (copy_active_network) {
                 std::memcpy(&network_accumulator_stack[currentAccumulator + 1],
                             &network_accumulator_stack[currentAccumulator],
@@ -201,6 +207,7 @@ struct Net {
     }
 
     void refresh(enyo::Board &board);
+    void refresh_bullet(enyo::Board &board);
     void refresh_network(enyo::Board &board);
     void refresh_network(enyo::Board &board, enyo::Color side);
     void refresh_with_cache(enyo::Board &board);
