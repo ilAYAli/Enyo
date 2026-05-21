@@ -40,6 +40,7 @@ constexpr std::array<int, 32> INPUT_BUCKET_LAYOUT = {
 };
 
 constexpr std::array<int, 8> FILE_MIRROR = {0, 1, 2, 3, 3, 2, 1, 0};
+constexpr std::array<int, 4> SUPPORTED_HIDDEN = {384, 512, 768, 1024};
 
 constexpr int enyo_to_bullet_square(enyo::square_t sq)
 {
@@ -133,7 +134,7 @@ bool IsLoaded()
 
 std::string Description()
 {
-    return "Bullet/Reckless-like 768x10hm->" + std::to_string(s_hidden)
+    return "Bullet/Reckless-like 10hm->" + std::to_string(s_hidden)
         + " pairwise, material-bucketed 16/32 head";
 }
 
@@ -156,7 +157,7 @@ bool LoadNetwork(const char* path)
         return false;
     }
     int hidden = 0;
-    for (const int candidate : {768, 1024}) {
+    for (const int candidate : SUPPORTED_HIDDEN) {
         if (static_cast<size_t>(sz) == NetworkSizeForHidden(candidate)) {
             hidden = candidate;
             break;
@@ -164,8 +165,8 @@ bool LoadNetwork(const char* path)
     }
     if (hidden == 0) {
         std::fprintf(stderr,
-                     "bullet network: '%s' is %ld bytes, expected %zu or %zu\n",
-                     path, sz, NetworkSizeForHidden(768), NetworkSizeForHidden(1024));
+                     "bullet network: '%s' is %ld bytes, expected hidden 384/512/768/1024\n",
+                     path, sz);
         std::fclose(fh);
         return false;
     }
