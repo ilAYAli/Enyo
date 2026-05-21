@@ -14,23 +14,33 @@ inline constexpr int N_INPUT_BUCKETS = 10;
 inline constexpr int N_OUTPUT_BUCKETS = 8;
 inline constexpr int N_INPUTS = 768 * N_INPUT_BUCKETS;
 inline constexpr int N_HIDDEN = 1024;
-inline constexpr int N_PAIRWISE = N_HIDDEN / 2;
-inline constexpr int N_L1_INPUTS = 2 * N_PAIRWISE;
 inline constexpr int N_L2 = 16;
 inline constexpr int N_L3 = 32;
 
-inline constexpr size_t PAYLOAD_SIZE =
-      sizeof(int16_t) * N_INPUTS * N_HIDDEN
-    + sizeof(int16_t) * N_HIDDEN
-    + sizeof(int8_t)  * N_OUTPUT_BUCKETS * N_L2 * N_L1_INPUTS
-    + sizeof(float)   * N_OUTPUT_BUCKETS * N_L2
-    + sizeof(float)   * N_OUTPUT_BUCKETS * N_L3 * N_L2
-    + sizeof(float)   * N_OUTPUT_BUCKETS * N_L3
-    + sizeof(float)   * N_OUTPUT_BUCKETS * N_L3
-    + sizeof(float)   * N_OUTPUT_BUCKETS;
-
 inline constexpr size_t PADDING_SIZE = 32;
-inline constexpr size_t NETWORK_SIZE = PAYLOAD_SIZE + PADDING_SIZE;
+
+inline constexpr size_t PayloadSizeForHidden(int hidden)
+{
+    const size_t h = static_cast<size_t>(hidden);
+    return sizeof(int16_t) * static_cast<size_t>(N_INPUTS) * h
+        + sizeof(int16_t) * h
+        + sizeof(int8_t) * static_cast<size_t>(N_OUTPUT_BUCKETS) * N_L2 * h
+        + sizeof(float) * N_OUTPUT_BUCKETS * N_L2
+        + sizeof(float) * static_cast<size_t>(N_OUTPUT_BUCKETS) * N_L3 * N_L2
+        + sizeof(float) * N_OUTPUT_BUCKETS * N_L3
+        + sizeof(float) * N_OUTPUT_BUCKETS * N_L3
+        + sizeof(float) * N_OUTPUT_BUCKETS;
+}
+
+inline constexpr size_t NetworkSizeForHidden(int hidden)
+{
+    return PayloadSizeForHidden(hidden) + PADDING_SIZE;
+}
+
+inline constexpr bool IsNetworkSize(size_t size)
+{
+    return size == NetworkSizeForHidden(768) || size == NetworkSizeForHidden(1024);
+}
 
 extern bool enabled;
 extern uint64_t NETWORK_GENERATION;

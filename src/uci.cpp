@@ -87,7 +87,7 @@ bool load_eval_file(const std::string & value)
         return false;
     }
 
-    if (size == BulletNetwork::NETWORK_SIZE) {
+    if (BulletNetwork::IsNetworkSize(static_cast<size_t>(size))) {
         if (BulletNetwork::LoadNetwork(path.c_str())) {
             Network::enabled = false;
             BulletNetwork::enabled = true;

@@ -16,7 +16,7 @@ namespace {
 
 alignas(64) int16_t s_l0_weights[N_INPUTS * N_HIDDEN];
 alignas(64) int16_t s_l0_biases[N_HIDDEN];
-alignas(64) int8_t  s_l1_weights[N_OUTPUT_BUCKETS * N_L2 * N_L1_INPUTS];
+alignas(64) int8_t  s_l1_weights[N_OUTPUT_BUCKETS * N_L2 * N_HIDDEN];
 alignas(64) float   s_l1_biases[N_OUTPUT_BUCKETS * N_L2];
 alignas(64) float   s_l2_weights[N_OUTPUT_BUCKETS * N_L3 * N_L2];
 alignas(64) float   s_l2_biases[N_OUTPUT_BUCKETS * N_L3];
@@ -24,6 +24,8 @@ alignas(64) float   s_l3_weights[N_OUTPUT_BUCKETS * N_L3];
 alignas(64) float   s_l3_biases[N_OUTPUT_BUCKETS];
 
 bool s_loaded = false;
+int s_hidden = N_HIDDEN;
+int s_pairwise = N_HIDDEN / 2;
 
 constexpr std::array<int, 32> INPUT_BUCKET_LAYOUT = {
     0, 1, 2, 3,
@@ -130,7 +132,8 @@ bool IsLoaded()
 
 std::string Description()
 {
-    return "Bullet/Reckless-like 768x10hm->1024 pairwise, material-bucketed 16/32 head";
+    return "Bullet/Reckless-like 768x10hm->" + std::to_string(s_hidden)
+        + " pairwise, material-bucketed 16/32 head";
 }
 
 bool LoadNetwork(const char* path)
@@ -151,21 +154,32 @@ bool LoadNetwork(const char* path)
         std::fclose(fh);
         return false;
     }
-    if (static_cast<size_t>(sz) != NETWORK_SIZE) {
+    int hidden = 0;
+    for (const int candidate : {768, 1024}) {
+        if (static_cast<size_t>(sz) == NetworkSizeForHidden(candidate)) {
+            hidden = candidate;
+            break;
+        }
+    }
+    if (hidden == 0) {
         std::fprintf(stderr,
-                     "bullet network: '%s' is %ld bytes, expected %zu\n",
-                     path, sz, NETWORK_SIZE);
+                     "bullet network: '%s' is %ld bytes, expected %zu or %zu\n",
+                     path, sz, NetworkSizeForHidden(768), NetworkSizeForHidden(1024));
         std::fclose(fh);
         return false;
     }
     std::rewind(fh);
 
+    std::memset(s_l0_weights, 0, sizeof(s_l0_weights));
+    std::memset(s_l0_biases, 0, sizeof(s_l0_biases));
+    std::memset(s_l1_weights, 0, sizeof(s_l1_weights));
+
     bool ok = true;
-    ok = ok && read_exact(fh, s_l0_weights, static_cast<size_t>(N_INPUTS) * N_HIDDEN, "l0w");
-    ok = ok && read_exact(fh, s_l0_biases, N_HIDDEN, "l0b");
+    ok = ok && read_exact(fh, s_l0_weights, static_cast<size_t>(N_INPUTS) * hidden, "l0w");
+    ok = ok && read_exact(fh, s_l0_biases, hidden, "l0b");
     ok = ok && read_exact(
         fh, s_l1_weights,
-        static_cast<size_t>(N_OUTPUT_BUCKETS) * N_L2 * N_L1_INPUTS,
+        static_cast<size_t>(N_OUTPUT_BUCKETS) * N_L2 * hidden,
         "l1w");
     ok = ok && read_exact(fh, s_l1_biases, N_OUTPUT_BUCKETS * N_L2, "l1b");
     ok = ok && read_exact(
@@ -185,8 +199,11 @@ bool LoadNetwork(const char* path)
 
     std::fclose(fh);
     s_loaded = ok;
-    if (ok)
+    if (ok) {
+        s_hidden = hidden;
+        s_pairwise = hidden / 2;
         ++NETWORK_GENERATION;
+    }
     return ok;
 }
 
@@ -204,7 +221,7 @@ int FeatureIdx(enyo::PieceType pt,
 
 void ResetAccumulator(Accumulator* acc, const enyo::Board& board, enyo::Color view)
 {
-    for (int i = 0; i < N_HIDDEN; ++i)
+    for (int i = 0; i < s_hidden; ++i)
         acc->values[view][i] = s_l0_biases[i];
 
     const auto king_sq = static_cast<enyo::square_t>(
@@ -217,8 +234,8 @@ void ResetAccumulator(Accumulator* acc, const enyo::Board& board, enyo::Color vi
             ? enyo::white
             : enyo::black;
         const int feature = FeatureIdx(pt, pc, sq, king_sq, view);
-        const int16_t* weights = &s_l0_weights[static_cast<size_t>(feature) * N_HIDDEN];
-        for (int i = 0; i < N_HIDDEN; ++i)
+        const int16_t* weights = &s_l0_weights[static_cast<size_t>(feature) * s_hidden];
+        for (int i = 0; i < s_hidden; ++i)
             acc->values[view][i] = static_cast<int16_t>(acc->values[view][i] + weights[i]);
     }
 }
@@ -232,12 +249,12 @@ void UpdateFeature(Accumulator* acc,
                    bool add)
 {
     const int feature = FeatureIdx(pt, pc, sq, king_sq, view);
-    const int16_t* weights = &s_l0_weights[static_cast<size_t>(feature) * N_HIDDEN];
+    const int16_t* weights = &s_l0_weights[static_cast<size_t>(feature) * s_hidden];
     if (add) {
-        for (int i = 0; i < N_HIDDEN; ++i)
+        for (int i = 0; i < s_hidden; ++i)
             acc->values[view][i] = static_cast<int16_t>(acc->values[view][i] + weights[i]);
     } else {
-        for (int i = 0; i < N_HIDDEN; ++i)
+        for (int i = 0; i < s_hidden; ++i)
             acc->values[view][i] = static_cast<int16_t>(acc->values[view][i] - weights[i]);
     }
 }
@@ -256,24 +273,24 @@ void MoveFeature(Accumulator* acc,
 
 int Propagate(const Accumulator* acc, const enyo::Board& board)
 {
-    float hidden[N_L1_INPUTS];
+    float hidden[N_HIDDEN];
     const auto them = static_cast<enyo::Color>(!board.side);
-    for (int i = 0; i < N_PAIRWISE; ++i) {
+    for (int i = 0; i < s_pairwise; ++i) {
         hidden[i] = crelu_from_acc(acc->values[board.side][i])
-            * crelu_from_acc(acc->values[board.side][i + N_PAIRWISE]);
-        hidden[N_PAIRWISE + i] = crelu_from_acc(acc->values[them][i])
-            * crelu_from_acc(acc->values[them][i + N_PAIRWISE]);
+            * crelu_from_acc(acc->values[board.side][i + s_pairwise]);
+        hidden[s_pairwise + i] = crelu_from_acc(acc->values[them][i])
+            * crelu_from_acc(acc->values[them][i + s_pairwise]);
     }
 
     const int bucket = material_bucket(board);
 
     float l1[N_L2];
-    const size_t l1_offset = static_cast<size_t>(bucket) * N_L2 * N_L1_INPUTS;
+    const size_t l1_offset = static_cast<size_t>(bucket) * N_L2 * s_hidden;
     const size_t l1_bias_offset = static_cast<size_t>(bucket) * N_L2;
     for (int i = 0; i < N_L2; ++i) {
         float sum = s_l1_biases[l1_bias_offset + i];
-        const int8_t* weights = &s_l1_weights[l1_offset + static_cast<size_t>(i) * N_L1_INPUTS];
-        for (int j = 0; j < N_L1_INPUTS; ++j)
+        const int8_t* weights = &s_l1_weights[l1_offset + static_cast<size_t>(i) * s_hidden];
+        for (int j = 0; j < s_hidden; ++j)
             sum += hidden[j] * (static_cast<float>(weights[j]) / 64.0f);
         const float clipped = std::clamp(sum, 0.0f, 1.0f);
         l1[i] = clipped * clipped;
