@@ -7,11 +7,8 @@
     "threads":                  4,
     "Hash":                     1024,
     "opening_file":             "book.txt",
-    "nnue_file":                "default.net",
+    "nnue_file":                "~/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn",
     "logfile":                  "/tmp/enyo.log",
     "syzygy_path":              "~/code/cpp/chess/assets/tablebases"
-  },
-  "uci_options": {
-    "nnue2_file":               "~/code/cpp/chess/enyo/nnue/berserk-d43206fe90e4.nn"
   }
 }

@@ -36,60 +36,60 @@ namespace NNUE {
 
 Net::Net() {
     std::fill(accumulator_stack.begin(), accumulator_stack.end(), Accumulator());
-    nnue2_accumulator_stack.resize(accumulator_stack.size());
-    nnue2_eval_cache.resize(nnue2_eval_cache_size);
-    nnue2_eval_cache_generation = NNUE2::NETWORK_GENERATION;
-    std::memset(nnue2_accumulator_stack.data(), 0,
-                nnue2_accumulator_stack.size() * sizeof(NNUE2::Accumulator));
+    network_accumulator_stack.resize(accumulator_stack.size());
+    network_eval_cache.resize(network_eval_cache_size);
+    network_eval_cache_generation = Network::NETWORK_GENERATION;
+    std::memset(network_accumulator_stack.data(), 0,
+                network_accumulator_stack.size() * sizeof(Network::Accumulator));
 }
 
 namespace {
 
-bool use_nnue2() {
-    return NNUE2::enabled && NNUE2::INPUT_WEIGHTS != nullptr;
+bool use_network() {
+    return Network::enabled && Network::INPUT_WEIGHTS != nullptr;
 }
 
-void invalidate_nnue2_eval(NNUE2::Accumulator & accumulator)
+void invalidate_network_eval(Network::Accumulator & accumulator)
 {
     accumulator.eval_correct[enyo::white] = 0;
     accumulator.eval_correct[enyo::black] = 0;
 }
 
-size_t nnue2_refresh_table_index(enyo::square_t king_square, enyo::Color side)
+size_t network_refresh_table_index(enyo::square_t king_square, enyo::Color side)
 {
-    const int ksq = NNUE2::to_net_sq(king_square)
+    const int ksq = Network::to_net_sq(king_square)
         ^ (56 * static_cast<int>(side));
     const int file_half = (ksq & 4) ? 1 : 0;
     const auto bucket = static_cast<size_t>(
-        NNUE2::KING_BUCKETS[static_cast<size_t>(ksq)]);
-    return static_cast<size_t>(side) * 2 * NNUE2::N_KING_BUCKETS
-        + static_cast<size_t>(file_half) * NNUE2::N_KING_BUCKETS
+        Network::KING_BUCKETS[static_cast<size_t>(ksq)]);
+    return static_cast<size_t>(side) * 2 * Network::N_KING_BUCKETS
+        + static_cast<size_t>(file_half) * Network::N_KING_BUCKETS
         + bucket;
 }
 
-void reset_nnue2_refresh_table_if_needed(NNUE::Net & net)
+void reset_network_refresh_table_if_needed(NNUE::Net & net)
 {
-    if (net.nnue2_refresh_generation == NNUE2::NETWORK_GENERATION)
+    if (net.network_refresh_generation == Network::NETWORK_GENERATION)
         return;
 
-    NNUE2::ResetRefreshTable(net.nnue2_refresh_table.data());
-    net.nnue2_refresh_generation = NNUE2::NETWORK_GENERATION;
+    Network::ResetRefreshTable(net.network_refresh_table.data());
+    net.network_refresh_generation = Network::NETWORK_GENERATION;
 }
 
-void refresh_nnue2_from_table(NNUE::Net & net,
-                              NNUE2::Accumulator & accumulator,
+void refresh_network_from_table(NNUE::Net & net,
+                              Network::Accumulator & accumulator,
                               const enyo::Board & board,
                               enyo::Color side)
 {
-    reset_nnue2_refresh_table_if_needed(net);
+    reset_network_refresh_table_if_needed(net);
 
     const auto king_square = static_cast<enyo::square_t>(
         lsb(board.pt_bb[side][enyo::king]));
-    auto & state = net.nnue2_refresh_table[
-        nnue2_refresh_table_index(king_square, side)];
+    auto & state = net.network_refresh_table[
+        network_refresh_table_index(king_square, side)];
 
-    NNUE2::Delta delta{};
-    for (int pc = 0; pc < NNUE2::N_PIECE_TYPES; ++pc) {
+    Network::Delta delta{};
+    for (int pc = 0; pc < Network::N_PIECE_TYPES; ++pc) {
         const auto pt = static_cast<enyo::PieceType>((pc >> 1) + 1);
         const auto color = static_cast<enyo::Color>(pc & 1);
         const uint64_t curr = board.pt_bb[color][pt];
@@ -98,7 +98,7 @@ void refresh_nnue2_from_table(NNUE::Net & net,
         uint64_t rem = prev & ~curr;
         while (rem) {
             const auto sq = static_cast<enyo::square_t>(pop_lsb(rem));
-            delta.rem[delta.r++] = NNUE2::FeatureIdx(
+            delta.rem[delta.r++] = Network::FeatureIdx(
                 pt,
                 color,
                 sq,
@@ -109,7 +109,7 @@ void refresh_nnue2_from_table(NNUE::Net & net,
         uint64_t add = curr & ~prev;
         while (add) {
             const auto sq = static_cast<enyo::square_t>(pop_lsb(add));
-            delta.add[delta.a++] = NNUE2::FeatureIdx(
+            delta.add[delta.a++] = Network::FeatureIdx(
                 pt,
                 color,
                 sq,
@@ -120,16 +120,16 @@ void refresh_nnue2_from_table(NNUE::Net & net,
         state.pcs[pc] = curr;
     }
 
-    NNUE2::ApplyDelta(state.values, state.values, &delta);
+    Network::ApplyDelta(state.values, state.values, &delta);
     std::memcpy(
         accumulator.values[side],
         state.values,
-        sizeof(NNUE2::acc_t) * NNUE2::N_HIDDEN);
+        sizeof(Network::acc_t) * Network::N_HIDDEN);
     accumulator.correct[side] = 1;
-    invalidate_nnue2_eval(accumulator);
+    invalidate_network_eval(accumulator);
 }
 
-void update_nnue2_feature(NNUE2::Accumulator & accumulator,
+void update_network_feature(Network::Accumulator & accumulator,
                           enyo::PieceType pieceType,
                           enyo::Color pieceColor,
                           enyo::square_t square,
@@ -137,13 +137,13 @@ void update_nnue2_feature(NNUE2::Accumulator & accumulator,
                           enyo::square_t kingSquare_Black,
                           bool add)
 {
-    if (NNUE2::INPUT_WEIGHTS == nullptr)
+    if (Network::INPUT_WEIGHTS == nullptr)
         return;
 
-    invalidate_nnue2_eval(accumulator);
+    invalidate_network_eval(accumulator);
     for (auto side : {enyo::white, enyo::black}) {
-        NNUE2::Delta delta{};
-        const int feature = NNUE2::FeatureIdx(
+        Network::Delta delta{};
+        const int feature = Network::FeatureIdx(
             pieceType,
             pieceColor,
             square,
@@ -153,11 +153,11 @@ void update_nnue2_feature(NNUE2::Accumulator & accumulator,
             delta.add[delta.a++] = feature;
         else
             delta.rem[delta.r++] = feature;
-        NNUE2::ApplyDelta(accumulator.values[side], accumulator.values[side], &delta);
+        Network::ApplyDelta(accumulator.values[side], accumulator.values[side], &delta);
     }
 }
 
-void move_nnue2_feature(NNUE2::Accumulator & accumulator,
+void move_network_feature(Network::Accumulator & accumulator,
                         enyo::PieceType pieceType,
                         enyo::Color pieceColor,
                         enyo::square_t from_square,
@@ -165,23 +165,23 @@ void move_nnue2_feature(NNUE2::Accumulator & accumulator,
                         enyo::square_t kingSquare_White,
                         enyo::square_t kingSquare_Black)
 {
-    if (NNUE2::INPUT_WEIGHTS == nullptr)
+    if (Network::INPUT_WEIGHTS == nullptr)
         return;
 
-    invalidate_nnue2_eval(accumulator);
+    invalidate_network_eval(accumulator);
     for (auto side : {enyo::white, enyo::black}) {
         const auto king_square = side == enyo::white ? kingSquare_White : kingSquare_Black;
-        NNUE2::Delta delta{};
-        delta.rem[delta.r++] = NNUE2::FeatureIdx(
+        Network::Delta delta{};
+        delta.rem[delta.r++] = Network::FeatureIdx(
             pieceType, pieceColor, from_square, king_square, side);
-        delta.add[delta.a++] = NNUE2::FeatureIdx(
+        delta.add[delta.a++] = Network::FeatureIdx(
             pieceType, pieceColor, to_square, king_square, side);
-        NNUE2::ApplyDelta(accumulator.values[side], accumulator.values[side], &delta);
+        Network::ApplyDelta(accumulator.values[side], accumulator.values[side], &delta);
     }
 }
 
-void move_nnue2_feature_from(NNUE2::Accumulator & dest,
-                             const NNUE2::Accumulator & src,
+void move_network_feature_from(Network::Accumulator & dest,
+                             const Network::Accumulator & src,
                              enyo::PieceType pieceType,
                              enyo::Color pieceColor,
                              enyo::square_t from_square,
@@ -191,44 +191,44 @@ void move_nnue2_feature_from(NNUE2::Accumulator & dest,
                              enyo::square_t kingSquare_White,
                              enyo::square_t kingSquare_Black)
 {
-    if (NNUE2::INPUT_WEIGHTS == nullptr)
+    if (Network::INPUT_WEIGHTS == nullptr)
         return;
 
-    invalidate_nnue2_eval(dest);
+    invalidate_network_eval(dest);
     for (auto side : {enyo::white, enyo::black}) {
         const auto king_square = side == enyo::white ? kingSquare_White : kingSquare_Black;
-        NNUE2::Delta delta{};
-        delta.rem[delta.r++] = NNUE2::FeatureIdx(
+        Network::Delta delta{};
+        delta.rem[delta.r++] = Network::FeatureIdx(
             pieceType, pieceColor, from_square, king_square, side);
         if (capturedPieceType != enyo::no_piece_type) {
-            delta.rem[delta.r++] = NNUE2::FeatureIdx(
+            delta.rem[delta.r++] = Network::FeatureIdx(
                 capturedPieceType, capturedPieceColor, to_square, king_square, side);
         }
-        delta.add[delta.a++] = NNUE2::FeatureIdx(
+        delta.add[delta.a++] = Network::FeatureIdx(
             pieceType, pieceColor, to_square, king_square, side);
-        NNUE2::ApplyDelta(dest.values[side], src.values[side], &delta);
+        Network::ApplyDelta(dest.values[side], src.values[side], &delta);
     }
 }
 
-uint16_t pack_nnue2_capture(enyo::PieceType pt, enyo::square_t sq)
+uint16_t pack_network_capture(enyo::PieceType pt, enyo::square_t sq)
 {
     return static_cast<uint16_t>(
         static_cast<uint16_t>(pt)
       | (static_cast<uint16_t>(sq) << 8));
 }
 
-enyo::PieceType packed_nnue2_capture_piece(uint16_t packed)
+enyo::PieceType packed_network_capture_piece(uint16_t packed)
 {
     return static_cast<enyo::PieceType>(packed & 0xff);
 }
 
-enyo::square_t packed_nnue2_capture_square(uint16_t packed)
+enyo::square_t packed_network_capture_square(uint16_t packed)
 {
     return static_cast<enyo::square_t>(packed >> 8);
 }
 
-void move_nnue2_feature_from_for_side(NNUE2::Accumulator & dest,
-                                      const NNUE2::Accumulator & src,
+void move_network_feature_from_for_side(Network::Accumulator & dest,
+                                      const Network::Accumulator & src,
                                       enyo::Move move,
                                       uint16_t captured,
                                       enyo::Color side,
@@ -237,15 +237,15 @@ void move_nnue2_feature_from_for_side(NNUE2::Accumulator & dest,
     const auto mover = move.src_color();
     const bool own_king_move = mover == side && move.src_piece() == enyo::king;
     const auto add_king_square = own_king_move ? move.dst_sq() : king_square;
-    const auto captured_piece = packed_nnue2_capture_piece(captured);
-    const auto captured_square = packed_nnue2_capture_square(captured);
+    const auto captured_piece = packed_network_capture_piece(captured);
+    const auto captured_square = packed_network_capture_square(captured);
     const auto to_piece = move.flags() == enyo::Move::Flags::promote
         ? move.promo_piece()
         : move.src_piece();
 
-    const int from_feature = NNUE2::FeatureIdx(
+    const int from_feature = Network::FeatureIdx(
         move.src_piece(), mover, move.src_sq(), king_square, side);
-    const int to_feature = NNUE2::FeatureIdx(
+    const int to_feature = Network::FeatureIdx(
         to_piece, mover, move.dst_sq(), add_king_square, side);
 
     if (move.flags() == enyo::Move::Flags::castle) {
@@ -256,30 +256,30 @@ void move_nnue2_feature_from_for_side(NNUE2::Accumulator & dest,
         const enyo::square_t rook_to = mover == enyo::white
             ? (kingside ? enyo::f1 : enyo::d1)
             : (kingside ? enyo::f8 : enyo::d8);
-        NNUE2::ApplySubSubAddAdd(
+        Network::ApplySubSubAddAdd(
             dest.values[side],
             src.values[side],
             from_feature,
-            NNUE2::FeatureIdx(enyo::rook, mover, rook_from, king_square, side),
+            Network::FeatureIdx(enyo::rook, mover, rook_from, king_square, side),
             to_feature,
-            NNUE2::FeatureIdx(enyo::rook, mover, rook_to, king_square, side));
+            Network::FeatureIdx(enyo::rook, mover, rook_to, king_square, side));
         return;
     }
 
     if (captured_piece != enyo::no_piece_type) {
-        NNUE2::ApplySubSubAdd(
+        Network::ApplySubSubAdd(
             dest.values[side],
             src.values[side],
             from_feature,
-            NNUE2::FeatureIdx(captured_piece, ~mover, captured_square, king_square, side),
+            Network::FeatureIdx(captured_piece, ~mover, captured_square, king_square, side),
             to_feature);
         return;
     }
 
-    NNUE2::ApplySubAdd(dest.values[side], src.values[side], from_feature, to_feature);
+    Network::ApplySubAdd(dest.values[side], src.values[side], from_feature, to_feature);
 }
 
-void build_nnue2_lazy_for_side(NNUE2::Accumulator & accumulator,
+void build_network_lazy_for_side(Network::Accumulator & accumulator,
                                enyo::Move move,
                                enyo::PieceType to_piece,
                                enyo::PieceType captured_piece,
@@ -291,7 +291,7 @@ void build_nnue2_lazy_for_side(NNUE2::Accumulator & accumulator,
     const bool own_king_move = mover == side && move.src_piece() == enyo::king;
     accumulator.lazy_correct[side] = 1;
     accumulator.lazy_refresh[side] = own_king_move
-        && NNUE2::MoveRequiresRefresh(enyo::king, move.src_sq(), move.dst_sq(), side);
+        && Network::MoveRequiresRefresh(enyo::king, move.src_sq(), move.dst_sq(), side);
     accumulator.lazy_rem_count[side] = 0;
     accumulator.lazy_add_count[side] = 0;
 
@@ -301,10 +301,10 @@ void build_nnue2_lazy_for_side(NNUE2::Accumulator & accumulator,
     const auto add_king_square = own_king_move ? move.dst_sq() : king_square;
 
     accumulator.lazy_rem[side][accumulator.lazy_rem_count[side]++] =
-        static_cast<uint16_t>(NNUE2::FeatureIdx(
+        static_cast<uint16_t>(Network::FeatureIdx(
             move.src_piece(), mover, move.src_sq(), king_square, side));
     accumulator.lazy_add[side][accumulator.lazy_add_count[side]++] =
-        static_cast<uint16_t>(NNUE2::FeatureIdx(
+        static_cast<uint16_t>(Network::FeatureIdx(
             to_piece, mover, move.dst_sq(), add_king_square, side));
 
     if (move.flags() == enyo::Move::Flags::castle) {
@@ -316,27 +316,27 @@ void build_nnue2_lazy_for_side(NNUE2::Accumulator & accumulator,
             ? (kingside ? enyo::f1 : enyo::d1)
             : (kingside ? enyo::f8 : enyo::d8);
         accumulator.lazy_rem[side][accumulator.lazy_rem_count[side]++] =
-            static_cast<uint16_t>(NNUE2::FeatureIdx(
+            static_cast<uint16_t>(Network::FeatureIdx(
                 enyo::rook, mover, rook_from, king_square, side));
         accumulator.lazy_add[side][accumulator.lazy_add_count[side]++] =
-            static_cast<uint16_t>(NNUE2::FeatureIdx(
+            static_cast<uint16_t>(Network::FeatureIdx(
                 enyo::rook, mover, rook_to, king_square, side));
         return;
     }
 
     if (captured_piece != enyo::no_piece_type) {
         accumulator.lazy_rem[side][accumulator.lazy_rem_count[side]++] =
-            static_cast<uint16_t>(NNUE2::FeatureIdx(
+            static_cast<uint16_t>(Network::FeatureIdx(
                 captured_piece, ~mover, captured_square, king_square, side));
     }
 }
 
-void apply_nnue2_lazy_from_for_side(NNUE2::Accumulator & dest,
-                                    const NNUE2::Accumulator & src,
+void apply_network_lazy_from_for_side(Network::Accumulator & dest,
+                                    const Network::Accumulator & src,
                                     enyo::Color side)
 {
     if (dest.lazy_rem_count[side] == 2 && dest.lazy_add_count[side] == 2) {
-        NNUE2::ApplySubSubAddAdd(
+        Network::ApplySubSubAddAdd(
             dest.values[side],
             src.values[side],
             dest.lazy_rem[side][0],
@@ -347,7 +347,7 @@ void apply_nnue2_lazy_from_for_side(NNUE2::Accumulator & dest,
     }
 
     if (dest.lazy_rem_count[side] == 2 && dest.lazy_add_count[side] == 1) {
-        NNUE2::ApplySubSubAdd(
+        Network::ApplySubSubAdd(
             dest.values[side],
             src.values[side],
             dest.lazy_rem[side][0],
@@ -356,7 +356,7 @@ void apply_nnue2_lazy_from_for_side(NNUE2::Accumulator & dest,
         return;
     }
 
-    NNUE2::ApplySubAdd(
+    Network::ApplySubAdd(
         dest.values[side],
         src.values[side],
         dest.lazy_rem[side][0],
@@ -389,9 +389,9 @@ void Net::updateAccumulator(
     enyo::square_t kingSquare_White,
     enyo::square_t kingSquare_Black)
 {
-    if (use_nnue2()) {
-        update_nnue2_feature(
-            nnue2_accumulator_stack[currentAccumulator],
+    if (use_network()) {
+        update_network_feature(
+            network_accumulator_stack[currentAccumulator],
             pieceType,
             pieceColor,
             square,
@@ -400,9 +400,9 @@ void Net::updateAccumulator(
             add);
         return;
     }
-    if (NNUE2::INPUT_WEIGHTS != nullptr) {
-        update_nnue2_feature(
-            nnue2_accumulator_stack[currentAccumulator],
+    if (Network::INPUT_WEIGHTS != nullptr) {
+        update_network_feature(
+            network_accumulator_stack[currentAccumulator],
             pieceType,
             pieceColor,
             square,
@@ -451,9 +451,9 @@ void Net::updateAccumulator(
     enyo::square_t kingSquare_White,
     enyo::square_t kingSquare_Black)
 {
-    if (use_nnue2()) {
-        move_nnue2_feature(
-            nnue2_accumulator_stack[currentAccumulator],
+    if (use_network()) {
+        move_network_feature(
+            network_accumulator_stack[currentAccumulator],
             pieceType,
             pieceColor,
             from_square,
@@ -462,9 +462,9 @@ void Net::updateAccumulator(
             kingSquare_Black);
         return;
     }
-    if (NNUE2::INPUT_WEIGHTS != nullptr) {
-        move_nnue2_feature(
-            nnue2_accumulator_stack[currentAccumulator],
+    if (Network::INPUT_WEIGHTS != nullptr) {
+        move_network_feature(
+            network_accumulator_stack[currentAccumulator],
             pieceType,
             pieceColor,
             from_square,
@@ -558,10 +558,10 @@ void Net::updateAccumulatorFromPrevious(
     enyo::square_t kingSquare_White,
     enyo::square_t kingSquare_Black)
 {
-    assert(currentAccumulator > 0 && "NNUE2 previous accumulator missing");
-    move_nnue2_feature_from(
-        nnue2_accumulator_stack[currentAccumulator],
-        nnue2_accumulator_stack[currentAccumulator - 1],
+    assert(currentAccumulator > 0 && "Network previous accumulator missing");
+    move_network_feature_from(
+        network_accumulator_stack[currentAccumulator],
+        network_accumulator_stack[currentAccumulator - 1],
         pieceType,
         pieceColor,
         from_square,
@@ -572,37 +572,37 @@ void Net::updateAccumulatorFromPrevious(
         kingSquare_Black);
 }
 
-bool Net::try_nnue2_eager_move(enyo::Move move,
+bool Net::try_network_eager_move(enyo::Move move,
                                enyo::PieceType capturedPieceType,
                                enyo::square_t capturedSquare,
                                enyo::square_t kingSquare_White,
                                enyo::square_t kingSquare_Black)
 {
-    if (!use_nnue2() || currentAccumulator == 0)
+    if (!use_network() || currentAccumulator == 0)
         return false;
     if (move.src_piece() == enyo::king
-     && NNUE2::MoveRequiresRefresh(
+     && Network::MoveRequiresRefresh(
             enyo::king,
             move.src_sq(),
             move.dst_sq(),
             move.src_color()))
         return false;
 
-    const NNUE2::Accumulator & parent =
-        nnue2_accumulator_stack[currentAccumulator - 1];
+    const Network::Accumulator & parent =
+        network_accumulator_stack[currentAccumulator - 1];
     if (!parent.correct[enyo::white] || !parent.correct[enyo::black])
         return false;
 
-    NNUE2::Accumulator & child = nnue2_accumulator_stack[currentAccumulator];
-    child.captured = pack_nnue2_capture(capturedPieceType, capturedSquare);
-    move_nnue2_feature_from_for_side(
+    Network::Accumulator & child = network_accumulator_stack[currentAccumulator];
+    child.captured = pack_network_capture(capturedPieceType, capturedSquare);
+    move_network_feature_from_for_side(
         child,
         parent,
         move,
         child.captured,
         enyo::white,
         kingSquare_White);
-    move_nnue2_feature_from_for_side(
+    move_network_feature_from_for_side(
         child,
         parent,
         move,
@@ -611,36 +611,36 @@ bool Net::try_nnue2_eager_move(enyo::Move move,
         kingSquare_Black);
     child.correct[enyo::white] = 1;
     child.correct[enyo::black] = 1;
-    invalidate_nnue2_eval(child);
+    invalidate_network_eval(child);
     child.move = move.data;
     return true;
 }
 
-void Net::mark_nnue2_lazy_move(enyo::Move move,
+void Net::mark_network_lazy_move(enyo::Move move,
                                enyo::square_t captured_square,
                                enyo::square_t kingSquare_White,
                                enyo::square_t kingSquare_Black)
 {
-    if (!use_nnue2())
+    if (!use_network())
         return;
 
-    assert(currentAccumulator > 0 && "NNUE2 lazy move needs a child slot");
-    NNUE2::Accumulator & accumulator = nnue2_accumulator_stack[currentAccumulator];
+    assert(currentAccumulator > 0 && "Network lazy move needs a child slot");
+    Network::Accumulator & accumulator = network_accumulator_stack[currentAccumulator];
     accumulator.correct[enyo::white] = 0;
     accumulator.correct[enyo::black] = 0;
-    invalidate_nnue2_eval(accumulator);
+    invalidate_network_eval(accumulator);
     accumulator.move = move.data;
-    accumulator.captured = pack_nnue2_capture(
+    accumulator.captured = pack_network_capture(
         move.flags() == enyo::Move::Flags::enpassant
             ? enyo::pawn
             : move.dst_piece(),
         captured_square == enyo::nosquare ? move.dst_sq() : captured_square);
-    const auto captured_piece = packed_nnue2_capture_piece(accumulator.captured);
-    const auto captured_sq = packed_nnue2_capture_square(accumulator.captured);
+    const auto captured_piece = packed_network_capture_piece(accumulator.captured);
+    const auto captured_sq = packed_network_capture_square(accumulator.captured);
     const auto to_piece = move.flags() == enyo::Move::Flags::promote
         ? move.promo_piece()
         : move.src_piece();
-    build_nnue2_lazy_for_side(
+    build_network_lazy_for_side(
         accumulator,
         move,
         to_piece,
@@ -648,7 +648,7 @@ void Net::mark_nnue2_lazy_move(enyo::Move move,
         captured_sq,
         enyo::white,
         kingSquare_White);
-    build_nnue2_lazy_for_side(
+    build_network_lazy_for_side(
         accumulator,
         move,
         to_piece,
@@ -658,12 +658,12 @@ void Net::mark_nnue2_lazy_move(enyo::Move move,
         kingSquare_Black);
 }
 
-void Net::ensure_nnue2(enyo::Board &board)
+void Net::ensure_network(enyo::Board &board)
 {
-    if (!use_nnue2())
+    if (!use_network())
         return;
 
-    NNUE2::Accumulator & current = nnue2_accumulator_stack[currentAccumulator];
+    Network::Accumulator & current = network_accumulator_stack[currentAccumulator];
     bool need[2] = {
         !current.correct[enyo::white],
         !current.correct[enyo::black],
@@ -673,10 +673,10 @@ void Net::ensure_nnue2(enyo::Board &board)
 
     size_t base[2] = {currentAccumulator, currentAccumulator};
     for (auto side : {enyo::white, enyo::black}) {
-        while (base[side] > 0 && !nnue2_accumulator_stack[base[side]].correct[side])
+        while (base[side] > 0 && !network_accumulator_stack[base[side]].correct[side])
             --base[side];
-        if (!nnue2_accumulator_stack[base[side]].correct[side]) {
-            refresh_nnue2(board, side);
+        if (!network_accumulator_stack[base[side]].correct[side]) {
+            refresh_network(board, side);
             need[side] = false;
         }
     }
@@ -688,12 +688,12 @@ void Net::ensure_nnue2(enyo::Board &board)
         : (need[enyo::white] ? base[enyo::white] : base[enyo::black]);
 
     for (size_t ply = min_base + 1; ply <= currentAccumulator; ++ply) {
-        NNUE2::Accumulator & dest = nnue2_accumulator_stack[ply];
+        Network::Accumulator & dest = network_accumulator_stack[ply];
         const enyo::Move move{dest.move};
         if (!move) {
             for (auto side : {enyo::white, enyo::black}) {
                 if (need[side]) {
-                    refresh_nnue2(board, side);
+                    refresh_network(board, side);
                     need[side] = false;
                 }
             }
@@ -705,28 +705,28 @@ void Net::ensure_nnue2(enyo::Board &board)
                 continue;
 
             if (!dest.lazy_correct[side]) {
-                refresh_nnue2(board, side);
+                refresh_network(board, side);
                 need[side] = false;
                 continue;
             }
 
             if (dest.lazy_refresh[side]) {
-                refresh_nnue2(board, side);
+                refresh_network(board, side);
                 need[side] = false;
                 continue;
             }
 
-            apply_nnue2_lazy_from_for_side(
-                dest, nnue2_accumulator_stack[ply - 1], side);
+            apply_network_lazy_from_for_side(
+                dest, network_accumulator_stack[ply - 1], side);
             dest.correct[side] = 1;
-            invalidate_nnue2_eval(dest);
+            invalidate_network_eval(dest);
         }
     }
 }
 
 void Net::refresh(enyo::Board &board) {
-    if (use_nnue2()) {
-        refresh_nnue2(board);
+    if (use_network()) {
+        refresh_network(board);
         return;
     }
 
@@ -747,25 +747,25 @@ void Net::refresh(enyo::Board &board) {
             lsb(board.pt_bb[enyo::black][enyo::king])
         );
     }
-    refresh_nnue2(board);
+    refresh_network(board);
 }
 
-void Net::refresh_nnue2(enyo::Board &board) {
-    if (NNUE2::INPUT_WEIGHTS == nullptr || NNUE2::INPUT_BIASES == nullptr)
+void Net::refresh_network(enyo::Board &board) {
+    if (Network::INPUT_WEIGHTS == nullptr || Network::INPUT_BIASES == nullptr)
         return;
 
-    NNUE2::Accumulator & accumulator = nnue2_accumulator_stack[currentAccumulator];
+    Network::Accumulator & accumulator = network_accumulator_stack[currentAccumulator];
     std::memset(&accumulator, 0, sizeof(accumulator));
-    refresh_nnue2_from_table(*this, accumulator, board, enyo::white);
-    refresh_nnue2_from_table(*this, accumulator, board, enyo::black);
+    refresh_network_from_table(*this, accumulator, board, enyo::white);
+    refresh_network_from_table(*this, accumulator, board, enyo::black);
 }
 
-void Net::refresh_nnue2(enyo::Board &board, enyo::Color side) {
-    if (NNUE2::INPUT_WEIGHTS == nullptr || NNUE2::INPUT_BIASES == nullptr)
+void Net::refresh_network(enyo::Board &board, enyo::Color side) {
+    if (Network::INPUT_WEIGHTS == nullptr || Network::INPUT_BIASES == nullptr)
         return;
 
-    NNUE2::Accumulator & accumulator = nnue2_accumulator_stack[currentAccumulator];
-    refresh_nnue2_from_table(*this, accumulator, board, side);
+    Network::Accumulator & accumulator = network_accumulator_stack[currentAccumulator];
+    refresh_network_from_table(*this, accumulator, board, side);
 }
 
 // Compute a collision-resistant hash of piece positions for
@@ -812,8 +812,8 @@ void Net::update_cache(enyo::Board &board, enyo::square_t w_ksq, enyo::square_t 
 }
 
 void Net::refresh_with_cache(enyo::Board &board) {
-    if (use_nnue2()) {
-        refresh_nnue2(board);
+    if (use_network()) {
+        refresh_network(board);
         return;
     }
 
@@ -829,7 +829,7 @@ void Net::refresh_with_cache(enyo::Board &board) {
         w_entry.pieces_hash == pieces_hash && b_entry.pieces_hash == pieces_hash) {
         // Cache hit! Copy from cache
         accumulator_stack[currentAccumulator].copy(w_entry.acc);
-        refresh_nnue2(board);
+        refresh_network(board);
         return;
     }
     
@@ -885,32 +885,32 @@ int32_t Net::Evaluate(enyo::Color side) {
 }
 
 int32_t Net::Evaluate2(enyo::Board &board, enyo::Color side) {
-    assert(side == board.side && "NNUE2 eval cache is side-to-move keyed");
-    NNUE2::Accumulator & accumulator = nnue2_accumulator_stack[currentAccumulator];
+    assert(side == board.side && "Network eval cache is side-to-move keyed");
+    Network::Accumulator & accumulator = network_accumulator_stack[currentAccumulator];
     if (accumulator.eval_correct[side])
         return accumulator.eval[side];
 
-    if (nnue2_eval_cache_generation != NNUE2::NETWORK_GENERATION) {
-        for (auto & entry : nnue2_eval_cache) {
+    if (network_eval_cache_generation != Network::NETWORK_GENERATION) {
+        for (auto & entry : network_eval_cache) {
             entry.hash = 0;
             entry.valid = 0;
         }
-        nnue2_eval_cache_generation = NNUE2::NETWORK_GENERATION;
+        network_eval_cache_generation = Network::NETWORK_GENERATION;
     }
 
-    auto & entry = nnue2_eval_cache[
-        board.hash & (nnue2_eval_cache_size - 1)];
+    auto & entry = network_eval_cache[
+        board.hash & (network_eval_cache_size - 1)];
     if (entry.hash == board.hash && entry.valid) {
         accumulator.eval[side] = entry.eval;
         accumulator.eval_correct[side] = 1;
         return accumulator.eval[side];
     }
 
-    ensure_nnue2(board);
+    ensure_network(board);
 
-    const int32_t eval = NNUE2::ScaleEval(
+    const int32_t eval = Network::ScaleEval(
         board,
-        NNUE2::Propagate(&accumulator, static_cast<int>(side)));
+        Network::Propagate(&accumulator, static_cast<int>(side)));
     accumulator.eval[side] = eval;
     accumulator.eval_correct[side] = 1;
     if (entry.hash != board.hash) {
@@ -1032,14 +1032,9 @@ void Net::Benchmark()
 // between the embedded-blob and on-disk paths.
 static void ReadBinFromMemory(const unsigned char * data, size_t size)
 {
-    constexpr size_t expected =
-          INPUT_SIZE * HIDDEN_SIZE * sizeof(int16_t)
-        + HIDDEN_SIZE * sizeof(int16_t)
-        + HIDDEN_DSIZE * OUTPUT_SIZE * sizeof(int16_t)
-        + OUTPUT_SIZE * sizeof(int32_t);
-    if (size < expected) {
+    if (size < LEGACY_NETWORK_SIZE) {
         fmt::print("nnue: net blob too small ({} < {} bytes); aborting load\n",
-                   size, expected);
+                   size, LEGACY_NETWORK_SIZE);
         std::exit(EXIT_FAILURE);
     }
 

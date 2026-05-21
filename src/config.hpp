@@ -114,8 +114,7 @@ public:
     bool use_tt_upper_cutoff = false;
     bool use_syzygy         = true;
     bool use_lmr            = false;
-    std::string nnue_file   = "nn-eba324f53044.nnue";
-    std::string nnue2_file  = "";  // empty = disabled (use embedded nnue)
+    std::string nnue_file     = "";  // empty = embedded default
     std::string logfile     = "/tmp/enyo.log";
     std::string syzygy_path = "";
     std::vector<std::pair<std::string, std::string>> uci_options;
@@ -148,7 +147,6 @@ public:
             concat("use_syzygy",    "check", use_syzygy) +
             //concat("UCI_Chess960",  "check", use_chess_960) +
             concat("nnue_file",     "string", nnue_file) +
-            concat("nnue2_file",    "string", nnue2_file) +
             concat("logfile",       "string", logfile) +
             concat("SyzygyPath",    "string", syzygy_path) +
             concat("use_lmr",       "check", use_lmr);
@@ -178,8 +176,6 @@ public:
             use_syzygy = (value == "true");
         else if (lc == "nnue_file")
             nnue_file = value;
-        else if (lc == "nnue2_file")
-            nnue2_file = value;
         else if (lc == "logfile" || lc == "debug log file")
             logfile = value;
         else if (lc == "syzygypath")
@@ -209,7 +205,6 @@ private:
             num_threads = c.value("threads",   num_threads);
             hash_size   = c.value("Hash",      hash_size);
             nnue_file   = c.value("nnue_file", nnue_file);
-            nnue2_file  = c.value("nnue2_file", nnue2_file);
             logfile     = c.value("logfile",   logfile);
             syzygy_path = c.value("syzygy_path", c.value("SyzygyPath", syzygy_path));
 

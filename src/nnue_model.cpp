@@ -1,12 +1,12 @@
-// NNUE2 weight storage and network loading.
-// Defines the extern storage for weight pointers declared in nnue2.hpp
+// Network weight storage and network loading.
+// Defines the extern storage for weight pointers declared in network.hpp
 // and implements LoadNetwork for the v13-compatible .nn binary layout.
 //
 // This TU is intentionally independent of the engine's Board type so
 // Phase 2/3 parity tests can compile it directly. The Board-aware bits
-// live in nnue2_board.cpp.
+// live in nnue_model_board.cpp.
 
-#include "nnue2.hpp"
+#include "nnue_model.hpp"
 
 #include <cstdio>
 #include <cstdint>
@@ -15,7 +15,7 @@
 #include <cerrno>
 #include <string>
 
-namespace NNUE2 {
+namespace Network {
 
 // ---------------------------------------------------------------------
 // Internal weight storage. Populated by LoadNetwork() from the .nn blob;
@@ -33,7 +33,7 @@ alignas(64) float   s_l2_biases     [N_L3];
 alignas(64) float   s_output_weights[N_L3 * N_OUTPUT];
 }
 
-// Weight-pointer definitions referenced from nnue2.hpp. Start as nullptr;
+// Weight-pointer definitions referenced from network.hpp. Start as nullptr;
 // either SetWeights (tests) or LoadNetwork (runtime) repoints them.
 const acc_t*  INPUT_WEIGHTS  = nullptr;
 const acc_t*  INPUT_BIASES   = nullptr;
@@ -180,7 +180,7 @@ bool LoadNetwork(const char* path) {
 
     std::FILE* fh = std::fopen(path, "rb");
     if (!fh) {
-        std::fprintf(stderr, "nnue2: can't open '%s': %s\n",
+        std::fprintf(stderr, "network: can't open '%s': %s\n",
                      path, std::strerror(errno));
         return false;
     }
@@ -194,7 +194,7 @@ bool LoadNetwork(const char* path) {
     if (sz < 0) { std::fclose(fh); return false; }
     if (static_cast<size_t>(sz) != NETWORK_SIZE) {
         std::fprintf(stderr,
-            "nnue2: '%s' is %ld bytes, expected %zu\n",
+            "network: '%s' is %ld bytes, expected %zu\n",
             path, sz, NETWORK_SIZE);
         std::fclose(fh);
         return false;
@@ -203,7 +203,7 @@ bool LoadNetwork(const char* path) {
 
     auto read = [&](void* dst, size_t n, const char* label) -> bool {
         if (std::fread(dst, 1, n, fh) != n) {
-            std::fprintf(stderr, "nnue2: short read at %s\n", label);
+            std::fprintf(stderr, "network: short read at %s\n", label);
             return false;
         }
         return true;
@@ -221,7 +221,7 @@ bool LoadNetwork(const char* path) {
     // Sanity: trailing-byte check (should be exactly EOF now).
     unsigned char probe;
     if (std::fread(&probe, 1, 1, fh) != 0) {
-        std::fprintf(stderr, "nnue2: trailing bytes after expected EOF\n");
+        std::fprintf(stderr, "network: trailing bytes after expected EOF\n");
         std::fclose(fh);
         return false;
     }
@@ -250,4 +250,4 @@ bool LoadNetwork(const char* path) {
     return true;
 }
 
-} // namespace NNUE2
+} // namespace Network

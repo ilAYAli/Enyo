@@ -1,5 +1,5 @@
 #pragma once
-// NNUE2 uses a Berserk v13-compatible network layout and feature indexing.
+// Network uses a Berserk v13-compatible network layout and feature indexing.
 // KING_BUCKETS and the feature-index formula are derived from Berserk
 // (GPL-3.0), adapted to Enyo's square and piece conventions.
 
@@ -18,7 +18,7 @@
 
 namespace enyo { class Board; }
 
-namespace NNUE2 {
+namespace Network {
 
 // ---------------------------------------------------------------------
 // Architecture constants.
@@ -247,7 +247,7 @@ void SetWeights(const acc_t* weights, const acc_t* biases);
 
 // Load a full `.nn` blob from disk. Returns true on success.
 // The blob layout must match NETWORK_SIZE below. Weight
-// pointers are updated to reference internal storage owned by nnue2.cpp.
+// pointers are updated to reference internal storage owned by nnue_model.cpp.
 bool LoadNetwork(const char* path);
 
 // Total byte size of a v13-format .nn file, computed from the constants
@@ -501,7 +501,7 @@ inline void ResetAccumulator(Accumulator* dest, enyo::Color view,
 // ---------------------------------------------------------------------
 // Integration helper: walk a Board and emit the (piece, sq)
 // entries that ResetAccumulator expects. Forward-declared here so the
-// header stays decoupled from board.hpp; implemented in nnue2.cpp.
+// header stays decoupled from board.hpp; implemented in nnue_model.cpp.
 //
 // Writes up to 32 entries to `out`, returns the number written.
 // ---------------------------------------------------------------------
@@ -1185,4 +1185,4 @@ inline int Propagate(const Accumulator* acc, int stm) {
 #endif
 }
 
-} // namespace NNUE2
+} // namespace Network

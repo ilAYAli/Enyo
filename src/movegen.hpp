@@ -689,12 +689,12 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
         b_ksq = lsb(b.pt_bb[black][king]);
     }
     if constexpr (UpdateNNUE) {
-        if (NNUE2::enabled && NNUE2::INPUT_WEIGHTS != nullptr) {
+        if (Network::enabled && Network::INPUT_WEIGHTS != nullptr) {
             clr_piece<Us, UpdateZobrist, false>(b, src_piece, src, nnue, w_ksq, b_ksq);
             if (dst_piece != no_piece_type)
                 clr_piece<Them, UpdateZobrist, false>(b, dst_piece, dst, nnue, w_ksq, b_ksq);
             set_piece<Us, UpdateZobrist, false>(b, src_piece, dst, nnue, w_ksq, b_ksq);
-            nnue->mark_nnue2_lazy_move(mv, nosquare, w_ksq, b_ksq);
+            nnue->mark_network_lazy_move(mv, nosquare, w_ksq, b_ksq);
             return true;
         }
     }
@@ -819,11 +819,11 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
     const auto dst_piece = move.dst_piece();
     assert((src_piece != PieceType::no_piece_type) && "error, source position not specified");
 
-    bool nnue2_active = false;
+    bool network_active = false;
     if constexpr (UpdateNNUE) {
         assert(nnue && "apply_move: nnue is null");
-        nnue2_active = NNUE2::enabled && NNUE2::INPUT_WEIGHTS != nullptr;
-        nnue->push(!nnue2_active);
+        network_active = Network::enabled && Network::INPUT_WEIGHTS != nullptr;
+        nnue->push(!network_active);
     }
 
     auto & undo = b.history[b.histply++] = Undo{
@@ -841,15 +841,15 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
     switch (move.flags()) {
         case Move::Flags::castle:
             if constexpr (UpdateNNUE) {
-                if (nnue2_active) {
-                    const square_t nnue2_w_ksq = lsb(b.pt_bb[white][king]);
-                    const square_t nnue2_b_ksq = lsb(b.pt_bb[black][king]);
+                if (network_active) {
+                    const square_t network_w_ksq = lsb(b.pt_bb[white][king]);
+                    const square_t network_b_ksq = lsb(b.pt_bb[black][king]);
                     if (move.dst_sq() < move.src_sq())
                         apply_castle<Us, CastleSide::Kingside, UpdateZobrist, false>(b, nnue);
                     else
                         apply_castle<Us, CastleSide::Queenside, UpdateZobrist, false>(b, nnue);
-                    nnue->mark_nnue2_lazy_move(
-                        move, nosquare, nnue2_w_ksq, nnue2_b_ksq);
+                    nnue->mark_network_lazy_move(
+                        move, nosquare, network_w_ksq, network_b_ksq);
                 } else {
                     if (move.dst_sq() < move.src_sq())
                         apply_castle<Us, CastleSide::Kingside, UpdateZobrist, UpdateNNUE>(b, nnue);
@@ -872,12 +872,12 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
             break;
         case Move::Flags::promote:
             if constexpr (UpdateNNUE) {
-                if (nnue2_active) {
-                    const square_t nnue2_w_ksq = lsb(b.pt_bb[white][king]);
-                    const square_t nnue2_b_ksq = lsb(b.pt_bb[black][king]);
+                if (network_active) {
+                    const square_t network_w_ksq = lsb(b.pt_bb[white][king]);
+                    const square_t network_b_ksq = lsb(b.pt_bb[black][king]);
                     apply_promotion<Us, UpdateZobrist, false>(b, move, nnue);
-                    nnue->mark_nnue2_lazy_move(
-                        move, nosquare, nnue2_w_ksq, nnue2_b_ksq);
+                    nnue->mark_network_lazy_move(
+                        move, nosquare, network_w_ksq, network_b_ksq);
                 } else {
                     apply_promotion<Us, UpdateZobrist, UpdateNNUE>(b, move, nnue);
                 }
@@ -888,15 +888,15 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
             break;
         case Move::Flags::enpassant:
             if constexpr (UpdateNNUE) {
-                if (nnue2_active) {
-                    const square_t nnue2_w_ksq = lsb(b.pt_bb[white][king]);
-                    const square_t nnue2_b_ksq = lsb(b.pt_bb[black][king]);
+                if (network_active) {
+                    const square_t network_w_ksq = lsb(b.pt_bb[white][king]);
+                    const square_t network_b_ksq = lsb(b.pt_bb[black][king]);
                     const square_t target = static_cast<square_t>(
                         undo.gamestate.enpassant_square + (Us == black ? 8 : -8U));
                     apply_enpassant<Us, UpdateZobrist, false>(
                         b, move, undo.gamestate.enpassant_square, nnue);
-                    nnue->mark_nnue2_lazy_move(
-                        move, target, nnue2_w_ksq, nnue2_b_ksq);
+                    nnue->mark_network_lazy_move(
+                        move, target, network_w_ksq, network_b_ksq);
                 } else {
                     apply_enpassant<Us, UpdateZobrist, UpdateNNUE>(
                         b, move, undo.gamestate.enpassant_square, nnue);
