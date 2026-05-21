@@ -8,6 +8,7 @@
 #include "fmt/format.h"
 
 #include "nnue.hpp"
+#include "nnue_bullet.hpp"
 #include "nnue_model.hpp"
 #include "precalc/knight_attacks.hpp"
 #include "probe.hpp"
@@ -134,6 +135,12 @@ template <Color Us, bool UseNNUE = true>
 Value evaluate(Board & b, NNUE::Net * nnue)
 {
     if constexpr (UseNNUE) {
+        if (BulletNetwork::enabled && BulletNetwork::IsLoaded()) {
+            auto const score = static_cast<Value>(BulletNetwork::EvaluateFromScratch(b));
+            if constexpr (Constexpr::debug_eval)
+                fmt::print("<{}> move: {}, bullet score: {}\n", Us, b.history[b.histply -1].move, score);
+            return score;
+        }
         if (Network::enabled && Network::INPUT_WEIGHTS != nullptr) {
             auto const score = static_cast<Value>(nnue->Evaluate2(b, Us));
             if constexpr (Constexpr::debug_eval)

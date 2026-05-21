@@ -120,6 +120,7 @@ set(ENYO_ENGINE_SOURCES
     src/nnue.cpp
     src/nnue_model.cpp
     src/nnue_model_board.cpp
+    src/nnue_bullet.cpp
     src/search.cpp
     src/probe.cpp
 )
@@ -205,6 +206,7 @@ if(BUILD_TESTS)
         src/nnue.cpp
         src/nnue_model.cpp
         src/nnue_model_board.cpp
+        src/nnue_bullet.cpp
         src/search.cpp
         src/probe.cpp
     )
