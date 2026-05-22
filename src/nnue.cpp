@@ -36,12 +36,16 @@ namespace NNUE {
 
 Net::Net() {
     std::fill(accumulator_stack.begin(), accumulator_stack.end(), Accumulator());
+#if ENYO_ENABLE_BULLET_NNUE
     bullet_accumulator_stack.resize(accumulator_stack.size());
+#endif
     network_accumulator_stack.resize(accumulator_stack.size());
     network_eval_cache.resize(network_eval_cache_size);
     network_eval_cache_generation = Network::NETWORK_GENERATION << 1;
+#if ENYO_ENABLE_BULLET_NNUE
     std::memset(bullet_accumulator_stack.data(), 0,
                 bullet_accumulator_stack.size() * sizeof(BulletNetwork::Accumulator));
+#endif
     std::memset(network_accumulator_stack.data(), 0,
                 network_accumulator_stack.size() * sizeof(Network::Accumulator));
 }
@@ -52,10 +56,12 @@ bool use_network() {
     return Network::enabled && Network::INPUT_WEIGHTS != nullptr;
 }
 
+#if ENYO_ENABLE_BULLET_NNUE
 bool use_bullet()
 {
     return BulletNetwork::enabled && BulletNetwork::IsLoaded();
 }
+#endif
 
 void invalidate_network_eval(Network::Accumulator & accumulator)
 {
@@ -89,10 +95,12 @@ uint64_t network_eval_token()
     return Network::NETWORK_GENERATION << 1;
 }
 
+#if ENYO_ENABLE_BULLET_NNUE
 uint64_t bullet_eval_token()
 {
     return (BulletNetwork::NETWORK_GENERATION << 1) | 1ULL;
 }
+#endif
 
 void reset_eval_cache_if_needed(NNUE::Net & net, uint64_t token)
 {
@@ -187,26 +195,6 @@ void update_network_feature(Network::Accumulator & accumulator,
     }
 }
 
-void update_bullet_feature(BulletNetwork::Accumulator & accumulator,
-                         enyo::PieceType pieceType,
-                         enyo::Color pieceColor,
-                         enyo::square_t square,
-                         enyo::square_t kingSquare_White,
-                         enyo::square_t kingSquare_Black,
-                         bool add)
-{
-    for (auto side : {enyo::white, enyo::black}) {
-        BulletNetwork::UpdateFeature(
-            &accumulator,
-            pieceType,
-            pieceColor,
-            square,
-            side == enyo::white ? kingSquare_White : kingSquare_Black,
-            side,
-            add);
-    }
-}
-
 void move_network_feature(Network::Accumulator & accumulator,
                         enyo::PieceType pieceType,
                         enyo::Color pieceColor,
@@ -230,6 +218,27 @@ void move_network_feature(Network::Accumulator & accumulator,
     }
 }
 
+#if ENYO_ENABLE_BULLET_NNUE
+void update_bullet_feature(BulletNetwork::Accumulator & accumulator,
+                         enyo::PieceType pieceType,
+                         enyo::Color pieceColor,
+                         enyo::square_t square,
+                         enyo::square_t kingSquare_White,
+                         enyo::square_t kingSquare_Black,
+                         bool add)
+{
+    for (auto side : {enyo::white, enyo::black}) {
+        BulletNetwork::UpdateFeature(
+            &accumulator,
+            pieceType,
+            pieceColor,
+            square,
+            side == enyo::white ? kingSquare_White : kingSquare_Black,
+            side,
+            add);
+    }
+}
+
 void move_bullet_feature(BulletNetwork::Accumulator & accumulator,
                        enyo::PieceType pieceType,
                        enyo::Color pieceColor,
@@ -249,6 +258,7 @@ void move_bullet_feature(BulletNetwork::Accumulator & accumulator,
             side);
     }
 }
+#endif
 
 void move_network_feature_from(Network::Accumulator & dest,
                              const Network::Accumulator & src,
@@ -459,6 +469,7 @@ void Net::updateAccumulator(
     enyo::square_t kingSquare_White,
     enyo::square_t kingSquare_Black)
 {
+#if ENYO_ENABLE_BULLET_NNUE
     if (use_bullet()) {
         update_bullet_feature(
             bullet_accumulator_stack[currentAccumulator],
@@ -470,6 +481,7 @@ void Net::updateAccumulator(
             add);
         return;
     }
+#endif
     if (use_network()) {
         update_network_feature(
             network_accumulator_stack[currentAccumulator],
@@ -532,6 +544,7 @@ void Net::updateAccumulator(
     enyo::square_t kingSquare_White,
     enyo::square_t kingSquare_Black)
 {
+#if ENYO_ENABLE_BULLET_NNUE
     if (use_bullet()) {
         move_bullet_feature(
             bullet_accumulator_stack[currentAccumulator],
@@ -543,6 +556,7 @@ void Net::updateAccumulator(
             kingSquare_Black);
         return;
     }
+#endif
     if (use_network()) {
         move_network_feature(
             network_accumulator_stack[currentAccumulator],
@@ -817,10 +831,12 @@ void Net::ensure_network(enyo::Board &board)
 }
 
 void Net::refresh(enyo::Board &board) {
+#if ENYO_ENABLE_BULLET_NNUE
     if (use_bullet()) {
         refresh_bullet(board);
         return;
     }
+#endif
     if (use_network()) {
         refresh_network(board);
         return;
@@ -846,12 +862,14 @@ void Net::refresh(enyo::Board &board) {
     refresh_network(board);
 }
 
+#if ENYO_ENABLE_BULLET_NNUE
 void Net::refresh_bullet(enyo::Board &board)
 {
     BulletNetwork::Accumulator & accumulator = bullet_accumulator_stack[currentAccumulator];
     BulletNetwork::ResetAccumulator(&accumulator, board, enyo::white);
     BulletNetwork::ResetAccumulator(&accumulator, board, enyo::black);
 }
+#endif
 
 void Net::refresh_network(enyo::Board &board) {
     if (Network::INPUT_WEIGHTS == nullptr || Network::INPUT_BIASES == nullptr)
@@ -915,10 +933,12 @@ void Net::update_cache(enyo::Board &board, enyo::square_t w_ksq, enyo::square_t 
 }
 
 void Net::refresh_with_cache(enyo::Board &board) {
+#if ENYO_ENABLE_BULLET_NNUE
     if (use_bullet()) {
         refresh_bullet(board);
         return;
     }
+#endif
     if (use_network()) {
         refresh_network(board);
         return;
@@ -1023,6 +1043,7 @@ int32_t Net::Evaluate2(enyo::Board &board, enyo::Color side) {
     return eval;
 }
 
+#if ENYO_ENABLE_BULLET_NNUE
 int Net::EvaluateBullet(enyo::Board &board)
 {
     reset_eval_cache_if_needed(*this, bullet_eval_token());
@@ -1042,6 +1063,7 @@ int Net::EvaluateBullet(enyo::Board &board)
     entry.valid = 1;
     return entry.eval;
 }
+#endif
 
 void Net::print_indexes(
     const enyo::Board &board,

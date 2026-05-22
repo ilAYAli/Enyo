@@ -71,6 +71,9 @@ Embedded 512-hidden Enyo NNUE evaluator<br>
 Optional 1024-hidden Network evaluator via UCI <code>nnue_file</code><br>
 The Network path uses sparse king-relative features, 1024 hidden values per
 perspective, incremental accumulators, and a compact fully connected head.<br>
+Optional Bullet/Reckless-style raw checkpoint loader via
+<code>-DENYO_ENABLE_BULLET_NNUE=ON</code>; it is compiled out by default so
+normal builds do not pay hot-path overhead for extra net formats.<br>
 Incremental NNUE and Network accumulators with refresh-table support<br>
 Network SIMD paths for ARM NEON and x86 AVX2/AVX-512 where available<br>
 Classical fallback evaluation for debugging<br>

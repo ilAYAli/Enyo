@@ -24,7 +24,9 @@
 #include "eventlog.hpp"
 #include "probe.hpp"
 #include "nnue.hpp"
+#if ENYO_ENABLE_BULLET_NNUE
 #include "nnue_bullet.hpp"
+#endif
 #include "nnue_model.hpp"
 
 using namespace enyo;
@@ -49,7 +51,9 @@ std::string expand_home_path(std::string path)
 bool load_eval_file(const std::string & value)
 {
     if (value.empty()) {
+#if ENYO_ENABLE_BULLET_NNUE
         BulletNetwork::enabled = false;
+#endif
         Network::enabled = false;
         NNUE::Init("");
         ucilog("info string nnue_file empty; using embedded evaluator\n");
@@ -59,7 +63,9 @@ bool load_eval_file(const std::string & value)
     const auto path = expand_home_path(value);
     std::error_code ec;
     if (!fs::exists(path, ec) || ec) {
+#if ENYO_ENABLE_BULLET_NNUE
         BulletNetwork::enabled = false;
+#endif
         Network::enabled = false;
         NNUE::Init("");
         ucilog("info string WARNING: nnue_file '{}' not found/readable; using embedded evaluator\n", path);
@@ -68,7 +74,9 @@ bool load_eval_file(const std::string & value)
 
     const auto size = fs::file_size(path, ec);
     if (ec) {
+#if ENYO_ENABLE_BULLET_NNUE
         BulletNetwork::enabled = false;
+#endif
         Network::enabled = false;
         NNUE::Init("");
         ucilog("info string WARNING: nnue_file '{}' size check failed; using embedded evaluator\n", path);
@@ -77,7 +85,9 @@ bool load_eval_file(const std::string & value)
 
     if (size == Network::NETWORK_SIZE || size == Network::LEGACY_NETWORK_SIZE) {
         if (Network::LoadNetwork(path.c_str())) {
+#if ENYO_ENABLE_BULLET_NNUE
             BulletNetwork::enabled = false;
+#endif
             Network::enabled = true;
             ucilog("info string network loaded from '{}'\n", path);
             return true;
@@ -89,6 +99,7 @@ bool load_eval_file(const std::string & value)
         return false;
     }
 
+#if ENYO_ENABLE_BULLET_NNUE
     if (BulletNetwork::IsNetworkSize(static_cast<size_t>(size))) {
         if (BulletNetwork::LoadNetwork(path.c_str())) {
             Network::enabled = false;
@@ -105,16 +116,21 @@ bool load_eval_file(const std::string & value)
                path);
         return false;
     }
+#endif
 
     if (size == NNUE::LEGACY_NETWORK_SIZE) {
+#if ENYO_ENABLE_BULLET_NNUE
         BulletNetwork::enabled = false;
+#endif
         Network::enabled = false;
         NNUE::Init(path);
         ucilog("info string embedded evaluator loaded from '{}'\n", path);
         return true;
     }
 
+#if ENYO_ENABLE_BULLET_NNUE
     BulletNetwork::enabled = false;
+#endif
     Network::enabled = false;
     NNUE::Init("");
     ucilog("info string WARNING: nnue_file '{}' has invalid size {} bytes; using embedded evaluator\n", path, size);
@@ -135,6 +151,7 @@ bool load_eval_file(const std::string & value)
     return moves;
 }
 
+#if ENYO_ENABLE_BULLET_NNUE
 template <Color Us>
 bool bullet_parity_dfs(SearchInfo & si, int depth, int limit, int & checked, std::string & error)
 {
@@ -191,6 +208,7 @@ bool bullet_parity_check(const Board & board, int depth, int limit, int & checke
         ? bullet_parity_dfs<white>(si, depth, limit, checked, error)
         : bullet_parity_dfs<black>(si, depth, limit, checked, error);
 }
+#endif
 
 struct TimeAllocation {
     std::chrono::milliseconds soft{-1};  // optimum — between-iteration stop
@@ -519,26 +537,37 @@ int Uci::operator()(const std::string& command)
                 return 0;
             }
             if (sub == "enable") {
+#if ENYO_ENABLE_BULLET_NNUE
                 if (Network::INPUT_WEIGHTS == nullptr && !BulletNetwork::IsLoaded()) {
+#else
+                if (Network::INPUT_WEIGHTS == nullptr) {
+#endif
                     fmt::print("evalnet enable failed: no network loaded\n");
                     return 0;
                 }
+#if ENYO_ENABLE_BULLET_NNUE
                 if (BulletNetwork::IsLoaded()) {
                     BulletNetwork::enabled = true;
                     Network::enabled = false;
                 } else {
                     Network::enabled = true;
                 }
+#else
+                Network::enabled = true;
+#endif
                 fmt::print("evalnet enable ok\n");
                 return 0;
             }
             if (sub == "disable") {
+#if ENYO_ENABLE_BULLET_NNUE
                 BulletNetwork::enabled = false;
+#endif
                 Network::enabled = false;
                 fmt::print("evalnet disable ok (reverted to embedded net)\n");
                 return 0;
             }
             if (sub == "check") {
+#if ENYO_ENABLE_BULLET_NNUE
                 if (!BulletNetwork::enabled || !BulletNetwork::IsLoaded()) {
                     fmt::print("evalnet check failed: no bullet network loaded\n");
                     return 0;
@@ -557,6 +586,9 @@ int Uci::operator()(const std::string& command)
                     fmt::print("evalnet check ok depth={} checked={}\n", depth, checked);
                 else
                     fmt::print("evalnet check fail depth={} checked={} {}\n", depth, checked, error);
+#else
+                fmt::print("evalnet check failed: Bullet NNUE support not compiled\n");
+#endif
                 return 0;
             }
             if (sub == "bench") {
@@ -564,6 +596,7 @@ int Uci::operator()(const std::string& command)
                 iss >> iterations;
                 iterations = std::clamp(iterations, 1, 100'000'000);
 
+#if ENYO_ENABLE_BULLET_NNUE
                 if (BulletNetwork::enabled && BulletNetwork::IsLoaded()) {
                     SearchInfo si(b, 1);
                     const auto * acc = &si.nnue.bullet_accumulator_stack[si.nnue.currentAccumulator];
@@ -585,6 +618,7 @@ int Uci::operator()(const std::string& command)
                                iterations, us, evals_per_second, sum);
                     return 0;
                 }
+#endif
 
                 if (Network::enabled && Network::INPUT_WEIGHTS != nullptr) {
                     SearchInfo si(b, 1);
@@ -614,6 +648,7 @@ int Uci::operator()(const std::string& command)
                 fmt::print("evalnet bench failed: no network loaded\n");
                 return 0;
             }
+#if ENYO_ENABLE_BULLET_NNUE
             if (BulletNetwork::enabled && BulletNetwork::IsLoaded()) {
                 SearchInfo si(b, 1);
                 const int cp = si.nnue.EvaluateBullet(si.board);
@@ -621,6 +656,7 @@ int Uci::operator()(const std::string& command)
                            b.side == white ? "white" : "black");
                 return 0;
             }
+#endif
             if (Network::INPUT_WEIGHTS == nullptr) {
                 fmt::print("evalnet error: no network loaded; try "
                            "'evalnet load <path>' first\n");

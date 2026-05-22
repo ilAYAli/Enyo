@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ENYO_USE_SYZYGY "Enable Syzygy tablebase probing via Fathom" ON)
+option(ENYO_ENABLE_BULLET_NNUE "Enable native Bullet/Reckless NNUE loading" OFF)
 
 #---[ git versioning/output ]--------------------------------------------------
 string(ASCII 27 Esc)
@@ -120,10 +121,13 @@ set(ENYO_ENGINE_SOURCES
     src/nnue.cpp
     src/nnue_model.cpp
     src/nnue_model_board.cpp
-    src/nnue_bullet.cpp
     src/search.cpp
     src/probe.cpp
 )
+
+if(ENYO_ENABLE_BULLET_NNUE)
+    list(APPEND ENYO_ENGINE_SOURCES src/nnue_bullet.cpp)
+endif()
 
 if(ENYO_USE_SYZYGY)
     if(EXISTS "${CMAKE_SOURCE_DIR}/3rdparty/Fathom/src/tbprobe.c" AND EXISTS "${CMAKE_SOURCE_DIR}/3rdparty/Fathom/src/tbprobe.h")
@@ -165,6 +169,9 @@ target_include_directories(enyo_chess PUBLIC
     ${CMAKE_SOURCE_DIR}
 )
 
+target_compile_definitions(enyo_chess PUBLIC
+    ENYO_ENABLE_BULLET_NNUE=$<BOOL:${ENYO_ENABLE_BULLET_NNUE}>)
+
 target_link_libraries(enyo_chess PUBLIC
     fmt::fmt-header-only
     nlohmann_json::nlohmann_json
@@ -174,7 +181,9 @@ add_executable(enyo
     ${ENYO_ENGINE_SOURCES}
 )
 
-target_compile_definitions(enyo PRIVATE ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>)
+target_compile_definitions(enyo PRIVATE
+    ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>
+    ENYO_ENABLE_BULLET_NNUE=$<BOOL:${ENYO_ENABLE_BULLET_NNUE}>)
 target_link_libraries(enyo PRIVATE enyo_chess version_lib)
 
 if(WIN32)
@@ -206,15 +215,19 @@ if(BUILD_TESTS)
         src/nnue.cpp
         src/nnue_model.cpp
         src/nnue_model_board.cpp
-        src/nnue_bullet.cpp
         src/search.cpp
         src/probe.cpp
     )
+    if(ENYO_ENABLE_BULLET_NNUE)
+        list(APPEND ENYO_TEST_SOURCES src/nnue_bullet.cpp)
+    endif()
 
     add_executable(test
         ${ENYO_TEST_SOURCES}
     )
-    target_compile_definitions(test PRIVATE ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>)
+    target_compile_definitions(test PRIVATE
+        ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>
+        ENYO_ENABLE_BULLET_NNUE=$<BOOL:${ENYO_ENABLE_BULLET_NNUE}>)
     target_include_directories(test PRIVATE ${CMAKE_BINARY_DIR})
     target_link_libraries(test PRIVATE enyo_chess version_lib GTest::gtest)
 
