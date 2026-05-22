@@ -83,7 +83,12 @@ bool load_eval_file(const std::string & value)
         return false;
     }
 
-    if (size == Network::NETWORK_SIZE || size == Network::LEGACY_NETWORK_SIZE) {
+    if (size == Network::NETWORK_SIZE || size == Network::LEGACY_NETWORK_SIZE
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+        || size == Network::BUCKETED_HEAD_NETWORK_SIZE
+        || size == Network::LEGACY_BUCKETED_HEAD_NETWORK_SIZE
+#endif
+    ) {
         if (Network::LoadNetwork(path.c_str())) {
 #if ENYO_ENABLE_BULLET_NNUE
             BulletNetwork::enabled = false;
@@ -624,15 +629,30 @@ int Uci::operator()(const std::string& command)
                     SearchInfo si(b, 1);
                     const auto * acc =
                         &si.nnue.network_accumulator_stack[si.nnue.currentAccumulator];
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+                    int (* volatile propagate)(const Network::Accumulator*, int, int) =
+                        &Network::Propagate;
+#else
                     int (* volatile propagate)(const Network::Accumulator*, int) =
                         &Network::Propagate;
+#endif
                     int (* volatile scale)(const Board&, int) =
                         &Network::ScaleEval;
                     int64_t sum = 0;
                     const auto start = std::chrono::steady_clock::now();
                     for (int i = 0; i < iterations; ++i) {
                         std::atomic_signal_fence(std::memory_order_acq_rel);
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+                        const int bucket = Network::CheckStateBucket(si.board);
+                        sum += scale(
+                            si.board,
+                            propagate(
+                                acc,
+                                static_cast<int>(si.board.side),
+                                bucket));
+#else
                         sum += scale(si.board, propagate(acc, static_cast<int>(si.board.side)));
+#endif
                     }
                     const auto end = std::chrono::steady_clock::now();
                     const auto us =

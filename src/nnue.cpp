@@ -1029,9 +1029,17 @@ int32_t Net::Evaluate2(enyo::Board &board, enyo::Color side) {
 
     ensure_network(board);
 
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+    const int raw = Network::Propagate(
+        &accumulator,
+        static_cast<int>(side),
+        Network::CheckStateBucket(board));
+#else
+    const int raw = Network::Propagate(&accumulator, static_cast<int>(side));
+#endif
     const int32_t eval = Network::ScaleEval(
         board,
-        Network::Propagate(&accumulator, static_cast<int>(side)));
+        raw);
     accumulator.eval[side] = eval;
     accumulator.eval_correct[side] = 1;
     if (entry.hash != board.hash) {

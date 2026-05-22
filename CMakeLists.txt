@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ENYO_USE_SYZYGY "Enable Syzygy tablebase probing via Fathom" ON)
 option(ENYO_ENABLE_BULLET_NNUE "Enable native Bullet/Reckless NNUE loading" OFF)
+option(ENYO_ENABLE_CHECK_BUCKET_NNUE "Enable check/king-pressure bucketed Enyo NNUE output heads" OFF)
 
 #---[ git versioning/output ]--------------------------------------------------
 string(ASCII 27 Esc)
@@ -170,7 +171,8 @@ target_include_directories(enyo_chess PUBLIC
 )
 
 target_compile_definitions(enyo_chess PUBLIC
-    ENYO_ENABLE_BULLET_NNUE=$<BOOL:${ENYO_ENABLE_BULLET_NNUE}>)
+    ENYO_ENABLE_BULLET_NNUE=$<BOOL:${ENYO_ENABLE_BULLET_NNUE}>
+    ENYO_ENABLE_CHECK_BUCKET_NNUE=$<BOOL:${ENYO_ENABLE_CHECK_BUCKET_NNUE}>)
 
 target_link_libraries(enyo_chess PUBLIC
     fmt::fmt-header-only
@@ -183,7 +185,8 @@ add_executable(enyo
 
 target_compile_definitions(enyo PRIVATE
     ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>
-    ENYO_ENABLE_BULLET_NNUE=$<BOOL:${ENYO_ENABLE_BULLET_NNUE}>)
+    ENYO_ENABLE_BULLET_NNUE=$<BOOL:${ENYO_ENABLE_BULLET_NNUE}>
+    ENYO_ENABLE_CHECK_BUCKET_NNUE=$<BOOL:${ENYO_ENABLE_CHECK_BUCKET_NNUE}>)
 target_link_libraries(enyo PRIVATE enyo_chess version_lib)
 
 if(WIN32)
@@ -227,7 +230,8 @@ if(BUILD_TESTS)
     )
     target_compile_definitions(test PRIVATE
         ENYO_USE_SYZYGY=$<BOOL:${ENYO_USE_SYZYGY}>
-        ENYO_ENABLE_BULLET_NNUE=$<BOOL:${ENYO_ENABLE_BULLET_NNUE}>)
+        ENYO_ENABLE_BULLET_NNUE=$<BOOL:${ENYO_ENABLE_BULLET_NNUE}>
+        ENYO_ENABLE_CHECK_BUCKET_NNUE=$<BOOL:${ENYO_ENABLE_CHECK_BUCKET_NNUE}>)
     target_include_directories(test PRIVATE ${CMAKE_BINARY_DIR})
     target_link_libraries(test PRIVATE enyo_chess version_lib GTest::gtest)
 

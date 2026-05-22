@@ -29,9 +29,16 @@ alignas(64) int8_t  s_l1_weights    [N_L1 * N_L2];
 alignas(64) int8_t  s_l1_weights_t  [N_L1 * N_L2];
 alignas(64) int8_t  s_l1_weights_sparse[N_L1 * N_L2];
 alignas(64) int32_t s_l1_biases     [N_L2];
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+alignas(64) float   s_l2_weights    [N_OUTPUT_BUCKETS * N_L2 * N_L3];
+alignas(64) float   s_l2_biases     [N_OUTPUT_BUCKETS * N_L3];
+alignas(64) float   s_output_weights[N_OUTPUT_BUCKETS * N_L3 * N_OUTPUT];
+alignas(64) float   s_output_biases [N_OUTPUT_BUCKETS];
+#else
 alignas(64) float   s_l2_weights    [N_L2 * N_L3];
 alignas(64) float   s_l2_biases     [N_L3];
 alignas(64) float   s_output_weights[N_L3 * N_OUTPUT];
+#endif
 }
 
 // Weight-pointer definitions referenced from network.hpp. Start as nullptr;
@@ -47,6 +54,10 @@ const float*  L2_WEIGHTS     = nullptr;
 const float*  L2_BIASES      = nullptr;
 const float*  OUTPUT_WEIGHTS = nullptr;
 float         OUTPUT_BIAS    = 0.0f;
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+const float*  OUTPUT_BIASES  = nullptr;
+int           OUTPUT_BUCKETS = 1;
+#endif
 bool          INPUT_LAYOUT_SCRAMBLED = false;
 uint64_t      NETWORK_GENERATION = 0;
 
@@ -209,11 +220,31 @@ bool LoadNetwork(const char* path) {
     const long sz = std::ftell(fh);
     if (sz < 0) { std::fclose(fh); return false; }
     const auto file_size = static_cast<size_t>(sz);
-    const bool legacy_layout = file_size == LEGACY_NETWORK_SIZE;
-    if (file_size != NETWORK_SIZE && !legacy_layout) {
+    const bool legacy_layout = file_size == LEGACY_NETWORK_SIZE
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+        || file_size == LEGACY_BUCKETED_HEAD_NETWORK_SIZE
+#endif
+        ;
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+    const bool bucketed_head = file_size == BUCKETED_HEAD_NETWORK_SIZE
+        || file_size == LEGACY_BUCKETED_HEAD_NETWORK_SIZE;
+#endif
+    if (file_size != NETWORK_SIZE && !legacy_layout
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+        && file_size != BUCKETED_HEAD_NETWORK_SIZE
+#endif
+        ) {
         std::fprintf(stderr,
-            "network: '%s' is %ld bytes, expected %zu or %zu\n",
-            path, sz, LEGACY_NETWORK_SIZE, NETWORK_SIZE);
+            "network: '%s' is %ld bytes, expected %zu or %zu"
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            " or %zu or %zu"
+#endif
+            "\n",
+            path, sz, LEGACY_NETWORK_SIZE, NETWORK_SIZE
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            , LEGACY_BUCKETED_HEAD_NETWORK_SIZE, BUCKETED_HEAD_NETWORK_SIZE
+#endif
+        );
         std::fclose(fh);
         return false;
     }
@@ -242,10 +273,25 @@ bool LoadNetwork(const char* path) {
     if (!read(s_input_biases,   sizeof(s_input_biases),   "INPUT_BIASES"))  { std::fclose(fh); return false; }
     if (!read(s_l1_weights,     sizeof(s_l1_weights),     "L1_WEIGHTS"))    { std::fclose(fh); return false; }
     if (!read(s_l1_biases,      sizeof(s_l1_biases),      "L1_BIASES"))     { std::fclose(fh); return false; }
-    if (!read(s_l2_weights,     sizeof(s_l2_weights),     "L2_WEIGHTS"))    { std::fclose(fh); return false; }
-    if (!read(s_l2_biases,      sizeof(s_l2_biases),      "L2_BIASES"))     { std::fclose(fh); return false; }
-    if (!read(s_output_weights, sizeof(s_output_weights), "OUTPUT_WEIGHTS")){ std::fclose(fh); return false; }
-    if (!read(&OUTPUT_BIAS,     sizeof(OUTPUT_BIAS),      "OUTPUT_BIAS"))   { std::fclose(fh); return false; }
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+    const size_t head_buckets = bucketed_head ? N_OUTPUT_BUCKETS : 1;
+    const size_t l2_weight_bytes =
+        head_buckets * N_L2 * N_L3 * sizeof(float);
+    const size_t l2_bias_bytes = head_buckets * N_L3 * sizeof(float);
+    const size_t output_weight_bytes =
+        head_buckets * N_L3 * N_OUTPUT * sizeof(float);
+    const size_t output_bias_bytes = head_buckets * sizeof(float);
+    if (!read(s_l2_weights,     l2_weight_bytes,     "L2_WEIGHTS"))     { std::fclose(fh); return false; }
+    if (!read(s_l2_biases,      l2_bias_bytes,       "L2_BIASES"))      { std::fclose(fh); return false; }
+    if (!read(s_output_weights, output_weight_bytes, "OUTPUT_WEIGHTS")) { std::fclose(fh); return false; }
+    if (!read(s_output_biases,  output_bias_bytes,   "OUTPUT_BIAS"))    { std::fclose(fh); return false; }
+    OUTPUT_BIAS = s_output_biases[0];
+#else
+    if (!read(s_l2_weights,     sizeof(s_l2_weights),     "L2_WEIGHTS"))     { std::fclose(fh); return false; }
+    if (!read(s_l2_biases,      sizeof(s_l2_biases),      "L2_BIASES"))      { std::fclose(fh); return false; }
+    if (!read(s_output_weights, sizeof(s_output_weights), "OUTPUT_WEIGHTS")) { std::fclose(fh); return false; }
+    if (!read(&OUTPUT_BIAS,     sizeof(OUTPUT_BIAS),      "OUTPUT_BIAS"))    { std::fclose(fh); return false; }
+#endif
 
     // Sanity: trailing-byte check (should be exactly EOF now).
     unsigned char probe;
@@ -273,6 +319,10 @@ bool LoadNetwork(const char* path) {
     L2_WEIGHTS     = s_l2_weights;
     L2_BIASES      = s_l2_biases;
     OUTPUT_WEIGHTS = s_output_weights;
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+    OUTPUT_BIASES  = s_output_biases;
+    OUTPUT_BUCKETS = static_cast<int>(head_buckets);
+#endif
     // OUTPUT_BIAS already assigned via &OUTPUT_BIAS read.
     ++NETWORK_GENERATION;
 

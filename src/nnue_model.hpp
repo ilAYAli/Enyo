@@ -11,6 +11,10 @@
 #include <cstring>
 #include <vector>
 
+#ifndef ENYO_ENABLE_CHECK_BUCKET_NNUE
+#define ENYO_ENABLE_CHECK_BUCKET_NNUE 0
+#endif
+
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
 #elif defined(__AVX512BW__) || defined(__AVX2__)
@@ -36,6 +40,7 @@ inline constexpr int N_L1           = 2 * N_HIDDEN;     // 2048
 inline constexpr int N_L2           = 16;
 inline constexpr int N_L3           = 32;
 inline constexpr int N_OUTPUT       = 1;
+inline constexpr int N_OUTPUT_BUCKETS = 8;
 
 // ---------------------------------------------------------------------
 // Network king buckets. Each rank has four mirrored file zones. The old
@@ -249,6 +254,10 @@ extern const float*   L2_WEIGHTS;
 extern const float*   L2_BIASES;
 extern const float*   OUTPUT_WEIGHTS;
 extern float          OUTPUT_BIAS;
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+extern const float*   OUTPUT_BIASES;
+extern int            OUTPUT_BUCKETS;
+#endif
 extern bool           INPUT_LAYOUT_SCRAMBLED;
 extern uint64_t       NETWORK_GENERATION;
 
@@ -283,6 +292,28 @@ inline constexpr size_t LEGACY_NETWORK_SIZE =
     + sizeof(float)   * N_L3
     + sizeof(float)   * N_L3 * N_OUTPUT
     + sizeof(float);
+
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+inline constexpr size_t BUCKETED_HEAD_NETWORK_SIZE =
+      sizeof(int16_t) * N_FEATURES * N_HIDDEN
+    + sizeof(int16_t) * N_HIDDEN
+    + sizeof(int8_t)  * N_L1 * N_L2
+    + sizeof(int32_t) * N_L2
+    + sizeof(float)   * N_OUTPUT_BUCKETS * N_L2 * N_L3
+    + sizeof(float)   * N_OUTPUT_BUCKETS * N_L3
+    + sizeof(float)   * N_OUTPUT_BUCKETS * N_L3 * N_OUTPUT
+    + sizeof(float)   * N_OUTPUT_BUCKETS;
+
+inline constexpr size_t LEGACY_BUCKETED_HEAD_NETWORK_SIZE =
+      sizeof(int16_t) * LEGACY_N_FEATURES * N_HIDDEN
+    + sizeof(int16_t) * N_HIDDEN
+    + sizeof(int8_t)  * N_L1 * N_L2
+    + sizeof(int32_t) * N_L2
+    + sizeof(float)   * N_OUTPUT_BUCKETS * N_L2 * N_L3
+    + sizeof(float)   * N_OUTPUT_BUCKETS * N_L3
+    + sizeof(float)   * N_OUTPUT_BUCKETS * N_L3 * N_OUTPUT
+    + sizeof(float)   * N_OUTPUT_BUCKETS;
+#endif
 
 // ---------------------------------------------------------------------
 // Delta: up to 32 features to add and 32 to remove between two
@@ -537,6 +568,10 @@ int ScaleEval(const enyo::Board& b, int score);
 // both accumulators from scratch, runs Propagate. No incremental update,
 // no king-bucket refresh cache. Phase-4-v1 correctness-first path.
 int EvaluateFromScratch(const enyo::Board& b);
+
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+int CheckStateBucket(const enyo::Board& b);
+#endif
 
 // Phase 6: runtime toggle for the new eval. When `enabled` is true and
 // a network is loaded, the engine's `evaluate()` routes through
@@ -1086,7 +1121,13 @@ inline __m128 hadd_psx4(__m256* regs) {
 
 // L2AffineReLU — dense float matmul + ReLU. dest: float[N_L3],
 // src: float[N_L2].
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+inline void L2AffineReLU(float* dest, const float* src, int bucket) {
+    const int weight_base = bucket * N_L2 * N_L3;
+    const int bias_base = bucket * N_L3;
+#else
 inline void L2AffineReLU(float* dest, const float* src) {
+#endif
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
     const float32x4_t src0 = vld1q_f32(&src[0]);
     const float32x4_t src1 = vld1q_f32(&src[4]);
@@ -1094,11 +1135,32 @@ inline void L2AffineReLU(float* dest, const float* src) {
     const float32x4_t src3 = vld1q_f32(&src[12]);
     for (int i = 0; i < N_L3; ++i) {
         const int offset = i * N_L2;
-        float32x4_t s0 = vmulq_f32(src0, vld1q_f32(&L2_WEIGHTS[offset + 0]));
-        float32x4_t s1 = vmulq_f32(src1, vld1q_f32(&L2_WEIGHTS[offset + 4]));
-        float32x4_t s2 = vmulq_f32(src2, vld1q_f32(&L2_WEIGHTS[offset + 8]));
-        float32x4_t s3 = vmulq_f32(src3, vld1q_f32(&L2_WEIGHTS[offset + 12]));
-        const float s = L2_BIASES[i]
+        float32x4_t s0 = vmulq_f32(src0, vld1q_f32(&L2_WEIGHTS[
+            #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            weight_base +
+            #endif
+            offset + 0]));
+        float32x4_t s1 = vmulq_f32(src1, vld1q_f32(&L2_WEIGHTS[
+            #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            weight_base +
+            #endif
+            offset + 4]));
+        float32x4_t s2 = vmulq_f32(src2, vld1q_f32(&L2_WEIGHTS[
+            #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            weight_base +
+            #endif
+            offset + 8]));
+        float32x4_t s3 = vmulq_f32(src3, vld1q_f32(&L2_WEIGHTS[
+            #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            weight_base +
+            #endif
+            offset + 12]));
+        const float s =
+            #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            L2_BIASES[bias_base + i]
+            #else
+            L2_BIASES[i]
+            #endif
             + vaddvq_f32(vaddq_f32(vaddq_f32(s0, s1), vaddq_f32(s2, s3)));
         dest[i] = s < 0.0f ? 0.0f : s;
     }
@@ -1118,7 +1180,11 @@ inline void L2AffineReLU(float* dest, const float* src) {
             for (size_t k = 0; k < out_cc; ++k) {
                 const size_t output = out_cc * i + k;
                 const __m256 weights = _mm256_loadu_ps(
-                    &L2_WEIGHTS[output * N_L2 + j * in_width]);
+                    &L2_WEIGHTS[
+                        #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+                        weight_base +
+                        #endif
+                        output * N_L2 + j * in_width]);
                 regs[k] = _mm256_fmadd_ps(in, weights, regs[k]);
             }
         }
@@ -1126,38 +1192,73 @@ inline void L2AffineReLU(float* dest, const float* src) {
         const __m128 s0 = hadd_psx4(regs);
         const __m128 s1 = hadd_psx4(&regs[4]);
         __m256 sum = _mm256_insertf128_ps(_mm256_castps128_ps256(s0), s1, 1);
-        const __m256 bias = _mm256_loadu_ps(&L2_BIASES[i * out_cc]);
+        const __m256 bias = _mm256_loadu_ps(&L2_BIASES[
+            #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            bias_base +
+            #endif
+            i * out_cc]);
         sum = _mm256_max_ps(_mm256_add_ps(sum, bias), _mm256_setzero_ps());
         _mm256_storeu_ps(&dest[i * out_cc], sum);
     }
 #else
     for (int i = 0; i < N_L3; ++i) {
         const int offset = i * N_L2;
-        float s = L2_BIASES[i];
+        float s =
+            #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            L2_BIASES[bias_base + i];
+            #else
+            L2_BIASES[i];
+            #endif
         for (int j = 0; j < N_L2; ++j)
-            s += src[j] * L2_WEIGHTS[offset + j];
+            s += src[j] * L2_WEIGHTS[
+                #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+                weight_base +
+                #endif
+                offset + j];
         dest[i] = s < 0.0f ? 0.0f : s;
     }
 #endif
 }
 
 // L3Transform returns post-shift units; Propagate divides by 32.
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+inline float L3Transform(const float* src, int bucket) {
+    const int weight_base = bucket * N_L3 * N_OUTPUT;
+#else
 inline float L3Transform(const float* src) {
+#endif
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
     float32x4_t acc = vdupq_n_f32(0.0f);
     for (size_t i = 0; i < N_L3; i += 4)
-        acc = vfmaq_f32(acc, vld1q_f32(&src[i]), vld1q_f32(&OUTPUT_WEIGHTS[i]));
-    return vaddvq_f32(acc) + OUTPUT_BIAS;
+        acc = vfmaq_f32(acc, vld1q_f32(&src[i]), vld1q_f32(&OUTPUT_WEIGHTS[
+            #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            weight_base +
+            #endif
+            i]));
+    return vaddvq_f32(acc) +
+        #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+        OUTPUT_BIASES[bucket];
+        #else
+        OUTPUT_BIAS;
+        #endif
 #elif defined(__AVX512F__)
     __m512 acc0 = _mm512_setzero_ps();
     __m512 acc1 = _mm512_setzero_ps();
     acc0 = _mm512_fmadd_ps(
         _mm512_loadu_ps(&src[0]),
-        _mm512_loadu_ps(&OUTPUT_WEIGHTS[0]),
+        _mm512_loadu_ps(&OUTPUT_WEIGHTS[
+            #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            weight_base +
+            #endif
+            0]),
         acc0);
     acc1 = _mm512_fmadd_ps(
         _mm512_loadu_ps(&src[16]),
-        _mm512_loadu_ps(&OUTPUT_WEIGHTS[16]),
+        _mm512_loadu_ps(&OUTPUT_WEIGHTS[
+            #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            weight_base +
+            #endif
+            16]),
         acc1);
     const __m512 acc = _mm512_add_ps(acc0, acc1);
     const __m256 lo = _mm512_castps512_ps256(acc);
@@ -1168,13 +1269,22 @@ inline float L3Transform(const float* src) {
         _mm256_extractf128_ps(sum8, 1));
     const __m128 sum2 = _mm_add_ps(sum4, _mm_movehl_ps(sum4, sum4));
     const __m128 sum1 = _mm_add_ss(sum2, _mm_shuffle_ps(sum2, sum2, 0x1));
-    return _mm_cvtss_f32(sum1) + OUTPUT_BIAS;
+    return _mm_cvtss_f32(sum1) +
+        #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+        OUTPUT_BIASES[bucket];
+        #else
+        OUTPUT_BIAS;
+        #endif
 #elif defined(__AVX2__)
     __m256 acc = _mm256_setzero_ps();
     for (size_t i = 0; i < N_L3; i += 8) {
         acc = _mm256_fmadd_ps(
             _mm256_loadu_ps(&src[i]),
-            _mm256_loadu_ps(&OUTPUT_WEIGHTS[i]),
+            _mm256_loadu_ps(&OUTPUT_WEIGHTS[
+                #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+                weight_base +
+                #endif
+                i]),
             acc);
     }
     const __m128 sum4 = _mm_add_ps(
@@ -1182,31 +1292,59 @@ inline float L3Transform(const float* src) {
         _mm256_extractf128_ps(acc, 1));
     const __m128 sum2 = _mm_add_ps(sum4, _mm_movehl_ps(sum4, sum4));
     const __m128 sum1 = _mm_add_ss(sum2, _mm_shuffle_ps(sum2, sum2, 0x1));
-    return _mm_cvtss_f32(sum1) + OUTPUT_BIAS;
+    return _mm_cvtss_f32(sum1) +
+        #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+        OUTPUT_BIASES[bucket];
+        #else
+        OUTPUT_BIAS;
+        #endif
 #else
-    float s = OUTPUT_BIAS;
+    float s =
+        #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+        OUTPUT_BIASES[bucket];
+        #else
+        OUTPUT_BIAS;
+        #endif
     for (int i = 0; i < N_L3; ++i)
-        s += src[i] * OUTPUT_WEIGHTS[i];
+        s += src[i] * OUTPUT_WEIGHTS[
+            #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+            weight_base +
+            #endif
+            i];
     return s;
 #endif
 }
 
 // Full forward pass, scalar only. Returns eval in centipawns (stm-relative).
+#if ENYO_ENABLE_CHECK_BUCKET_NNUE
+inline int Propagate(const Accumulator* acc, int stm, int bucket) {
+#else
 inline int Propagate(const Accumulator* acc, int stm) {
+#endif
 #if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__ARM_FEATURE_DOTPROD)
     alignas(64) float x1[N_L2];
     alignas(64) float x2[N_L3];
     L1AffineReLUFromAccumulator(x1, acc, stm);
+    #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+    L2AffineReLU(x2, x1, bucket);
+    return static_cast<int>(L3Transform(x2, bucket) / 32.0f);
+    #else
     L2AffineReLU(x2, x1);
     return static_cast<int>(L3Transform(x2) / 32.0f);
+    #endif
 #else
     alignas(64) int8_t x0[N_L1];
     alignas(64) float  x1[N_L2];
     alignas(64) float  x2[N_L3];
     InputReLU(x0, acc, stm);
     L1AffineReLU(x1, x0);
+    #if ENYO_ENABLE_CHECK_BUCKET_NNUE
+    L2AffineReLU(x2, x1, bucket);
+    return static_cast<int>(L3Transform(x2, bucket) / 32.0f);
+    #else
     L2AffineReLU(x2, x1);
     return static_cast<int>(L3Transform(x2) / 32.0f);
+    #endif
 #endif
 }
 
