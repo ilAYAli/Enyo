@@ -615,7 +615,8 @@ int Uci::operator()(const std::string& command)
                 return 0;
             }
             if (BulletNetwork::enabled && BulletNetwork::IsLoaded()) {
-                const int cp = BulletNetwork::EvaluateFromScratch(b);
+                SearchInfo si(b, 1);
+                const int cp = si.nnue.EvaluateBullet(si.board);
                 fmt::print("evalnet {} cp (stm={}, bullet)\n", cp,
                            b.side == white ? "white" : "black");
                 return 0;
@@ -625,7 +626,8 @@ int Uci::operator()(const std::string& command)
                            "'evalnet load <path>' first\n");
                 return 0;
             }
-            const int cp = Network::EvaluateFromScratch(b);
+            SearchInfo si(b, 1);
+            const int cp = si.nnue.Evaluate2(si.board, si.board.side);
             fmt::print("evalnet {} cp (stm={})\n", cp,
                        b.side == white ? "white" : "black");
         } else if (token == "pgn") {
