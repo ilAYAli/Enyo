@@ -5,6 +5,7 @@
 
 #include "types.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +14,10 @@
 
 #ifndef ENYO_ENABLE_CHECK_BUCKET_NNUE
 #define ENYO_ENABLE_CHECK_BUCKET_NNUE 0
+#endif
+
+#ifndef ENYO_CHECK_BUCKET_DELTA_CLAMP_CP
+#define ENYO_CHECK_BUCKET_DELTA_CLAMP_CP 0
 #endif
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
@@ -1327,7 +1332,20 @@ inline int Propagate(const Accumulator* acc, int stm) {
     L1AffineReLUFromAccumulator(x1, acc, stm);
     #if ENYO_ENABLE_CHECK_BUCKET_NNUE
     L2AffineReLU(x2, x1, bucket);
-    return static_cast<int>(L3Transform(x2, bucket) / 32.0f);
+    const int bucket_score = static_cast<int>(L3Transform(x2, bucket) / 32.0f);
+    #if ENYO_CHECK_BUCKET_DELTA_CLAMP_CP > 0
+    if (bucket != 0) {
+        alignas(64) float base_x2[N_L3];
+        L2AffineReLU(base_x2, x1, 0);
+        const int base_score =
+            static_cast<int>(L3Transform(base_x2, 0) / 32.0f);
+        return std::clamp(
+            bucket_score,
+            base_score - ENYO_CHECK_BUCKET_DELTA_CLAMP_CP,
+            base_score + ENYO_CHECK_BUCKET_DELTA_CLAMP_CP);
+    }
+    #endif
+    return bucket_score;
     #else
     L2AffineReLU(x2, x1);
     return static_cast<int>(L3Transform(x2) / 32.0f);
@@ -1340,7 +1358,20 @@ inline int Propagate(const Accumulator* acc, int stm) {
     L1AffineReLU(x1, x0);
     #if ENYO_ENABLE_CHECK_BUCKET_NNUE
     L2AffineReLU(x2, x1, bucket);
-    return static_cast<int>(L3Transform(x2, bucket) / 32.0f);
+    const int bucket_score = static_cast<int>(L3Transform(x2, bucket) / 32.0f);
+    #if ENYO_CHECK_BUCKET_DELTA_CLAMP_CP > 0
+    if (bucket != 0) {
+        alignas(64) float base_x2[N_L3];
+        L2AffineReLU(base_x2, x1, 0);
+        const int base_score =
+            static_cast<int>(L3Transform(base_x2, 0) / 32.0f);
+        return std::clamp(
+            bucket_score,
+            base_score - ENYO_CHECK_BUCKET_DELTA_CLAMP_CP,
+            base_score + ENYO_CHECK_BUCKET_DELTA_CLAMP_CP);
+    }
+    #endif
+    return bucket_score;
     #else
     L2AffineReLU(x2, x1);
     return static_cast<int>(L3Transform(x2) / 32.0f);
