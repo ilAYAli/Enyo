@@ -29,9 +29,14 @@ alignas(64) int8_t  s_l1_weights    [N_L1 * N_L2];
 alignas(64) int8_t  s_l1_weights_t  [N_L1 * N_L2];
 alignas(64) int8_t  s_l1_weights_sparse[N_L1 * N_L2];
 alignas(64) int32_t s_l1_biases     [N_L2];
-alignas(64) float   s_l2_weights    [N_L2 * N_L3];
-alignas(64) float   s_l2_biases     [N_L3];
-alignas(64) float   s_output_weights[N_L3 * N_OUTPUT];
+alignas(64) float   s_l2_weights    [N_OUTPUT_BUCKETS * N_L2 * N_L3];
+alignas(64) float   s_l2_biases     [N_OUTPUT_BUCKETS * N_L3];
+alignas(64) float   s_output_weights[N_OUTPUT_BUCKETS * N_L3 * N_OUTPUT];
+alignas(64) float   s_output_biases [N_OUTPUT_BUCKETS];
+#if ENYO_ENABLE_THREAT_NNUE
+alignas(64) int8_t  s_threat_weights[N_THREAT_FEATURES * N_HIDDEN];
+alignas(64) uint8_t s_threat_feature_active[N_THREAT_FEATURES];
+#endif
 }
 
 // Weight-pointer definitions referenced from network.hpp. Start as nullptr;
@@ -46,7 +51,12 @@ const int32_t* L1_BIASES     = nullptr;
 const float*  L2_WEIGHTS     = nullptr;
 const float*  L2_BIASES      = nullptr;
 const float*  OUTPUT_WEIGHTS = nullptr;
-float         OUTPUT_BIAS    = 0.0f;
+const float*  OUTPUT_BIASES  = nullptr;
+#if ENYO_ENABLE_THREAT_NNUE
+const int8_t* THREAT_WEIGHTS = nullptr;
+const uint8_t* THREAT_FEATURE_ACTIVE = nullptr;
+#endif
+int           OUTPUT_BUCKETS = 1;
 bool          INPUT_LAYOUT_SCRAMBLED = false;
 uint64_t      NETWORK_GENERATION = 0;
 
@@ -170,6 +180,12 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
     INPUT_BIASES  = biases;
     L1_WEIGHTS_T  = nullptr;
     L1_WEIGHTS_SPARSE = nullptr;
+    OUTPUT_BIASES = s_output_biases;
+#if ENYO_ENABLE_THREAT_NNUE
+    THREAT_WEIGHTS = nullptr;
+    THREAT_FEATURE_ACTIVE = nullptr;
+#endif
+    OUTPUT_BUCKETS = 1;
     INPUT_LAYOUT_SCRAMBLED = false;
     ++NETWORK_GENERATION;
 }
@@ -183,10 +199,10 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
 //   [N_HIDDEN]              int16  INPUT_BIASES
 //   [N_L1 * N_L2]           int8   L1_WEIGHTS     (scalar layout: w[j*N_L1+i])
 //   [N_L2]                  int32  L1_BIASES
-//   [N_L2 * N_L3]           float  L2_WEIGHTS     (row-major, output-major)
-//   [N_L3]                  float  L2_BIASES
-//   [N_L3 * N_OUTPUT]       float  OUTPUT_WEIGHTS
-//   [1]                     float  OUTPUT_BIAS
+//   [head_buckets * N_L2 * N_L3]     float  L2_WEIGHTS
+//   [head_buckets * N_L3]            float  L2_BIASES
+//   [head_buckets * N_L3 * N_OUTPUT] float  OUTPUT_WEIGHTS
+//   [head_buckets]                   float  OUTPUT_BIASES
 //
 // Legacy 16-bucket files are accepted by expanding each old bucket into its
 // new 32-bucket children. Other size mismatches are hard failures.
@@ -209,11 +225,47 @@ bool LoadNetwork(const char* path) {
     const long sz = std::ftell(fh);
     if (sz < 0) { std::fclose(fh); return false; }
     const auto file_size = static_cast<size_t>(sz);
-    const bool legacy_layout = file_size == LEGACY_NETWORK_SIZE;
-    if (file_size != NETWORK_SIZE && !legacy_layout) {
+    const bool legacy_layout =
+        file_size == LEGACY_NETWORK_SIZE ||
+        file_size == LEGACY_BUCKETED_HEAD_NETWORK_SIZE
+#if ENYO_ENABLE_THREAT_NNUE
+        || file_size == LEGACY_NETWORK_SIZE + THREAT_WEIGHTS_BYTES
+        || file_size == LEGACY_BUCKETED_HEAD_NETWORK_SIZE + THREAT_WEIGHTS_BYTES
+#endif
+        ;
+    const bool bucketed_head =
+        file_size == BUCKETED_HEAD_NETWORK_SIZE ||
+        file_size == LEGACY_BUCKETED_HEAD_NETWORK_SIZE
+#if ENYO_ENABLE_THREAT_NNUE
+        || file_size == BUCKETED_HEAD_NETWORK_SIZE + THREAT_WEIGHTS_BYTES
+        || file_size == LEGACY_BUCKETED_HEAD_NETWORK_SIZE + THREAT_WEIGHTS_BYTES
+#endif
+        ;
+#if ENYO_ENABLE_THREAT_NNUE
+    const bool threat_layout =
+        file_size == NETWORK_SIZE + THREAT_WEIGHTS_BYTES
+        || file_size == BUCKETED_HEAD_NETWORK_SIZE + THREAT_WEIGHTS_BYTES
+        || file_size == LEGACY_NETWORK_SIZE + THREAT_WEIGHTS_BYTES
+        || file_size == LEGACY_BUCKETED_HEAD_NETWORK_SIZE + THREAT_WEIGHTS_BYTES;
+#endif
+    if (file_size != NETWORK_SIZE
+        && file_size != BUCKETED_HEAD_NETWORK_SIZE
+        && !legacy_layout
+#if ENYO_ENABLE_THREAT_NNUE
+        && !threat_layout
+#endif
+        ) {
         std::fprintf(stderr,
-            "network: '%s' is %ld bytes, expected %zu or %zu\n",
-            path, sz, LEGACY_NETWORK_SIZE, NETWORK_SIZE);
+            "network: '%s' is %ld bytes, expected %zu, %zu, %zu, or %zu",
+            path, sz,
+            LEGACY_NETWORK_SIZE,
+            NETWORK_SIZE,
+            LEGACY_BUCKETED_HEAD_NETWORK_SIZE,
+            BUCKETED_HEAD_NETWORK_SIZE);
+#if ENYO_ENABLE_THREAT_NNUE
+        std::fprintf(stderr, " (+ optional %zu threat bytes)", THREAT_WEIGHTS_BYTES);
+#endif
+        std::fprintf(stderr, "\n");
         std::fclose(fh);
         return false;
     }
@@ -242,10 +294,49 @@ bool LoadNetwork(const char* path) {
     if (!read(s_input_biases,   sizeof(s_input_biases),   "INPUT_BIASES"))  { std::fclose(fh); return false; }
     if (!read(s_l1_weights,     sizeof(s_l1_weights),     "L1_WEIGHTS"))    { std::fclose(fh); return false; }
     if (!read(s_l1_biases,      sizeof(s_l1_biases),      "L1_BIASES"))     { std::fclose(fh); return false; }
-    if (!read(s_l2_weights,     sizeof(s_l2_weights),     "L2_WEIGHTS"))    { std::fclose(fh); return false; }
-    if (!read(s_l2_biases,      sizeof(s_l2_biases),      "L2_BIASES"))     { std::fclose(fh); return false; }
-    if (!read(s_output_weights, sizeof(s_output_weights), "OUTPUT_WEIGHTS")){ std::fclose(fh); return false; }
-    if (!read(&OUTPUT_BIAS,     sizeof(OUTPUT_BIAS),      "OUTPUT_BIAS"))   { std::fclose(fh); return false; }
+
+    const size_t head_buckets = bucketed_head
+        ? static_cast<size_t>(N_OUTPUT_BUCKETS)
+        : 1;
+    const size_t l2_weights_bytes =
+        head_buckets * N_L2 * N_L3 * sizeof(float);
+    const size_t l2_biases_bytes =
+        head_buckets * N_L3 * sizeof(float);
+    const size_t output_weights_bytes =
+        head_buckets * N_L3 * N_OUTPUT * sizeof(float);
+    const size_t output_biases_bytes =
+        head_buckets * sizeof(float);
+
+    if (!read(s_l2_weights,     l2_weights_bytes,      "L2_WEIGHTS"))     { std::fclose(fh); return false; }
+    if (!read(s_l2_biases,      l2_biases_bytes,       "L2_BIASES"))      { std::fclose(fh); return false; }
+    if (!read(s_output_weights, output_weights_bytes,  "OUTPUT_WEIGHTS")) { std::fclose(fh); return false; }
+    if (!read(s_output_biases,  output_biases_bytes,   "OUTPUT_BIASES"))  { std::fclose(fh); return false; }
+#if ENYO_ENABLE_THREAT_NNUE
+    if (threat_layout) {
+        if (!read(s_threat_weights, sizeof(s_threat_weights), "THREAT_WEIGHTS")) {
+            std::fclose(fh);
+            return false;
+        }
+        bool any_threat_weight = false;
+        for (int feature = 0; feature < N_THREAT_FEATURES; ++feature) {
+            const int8_t* row = &s_threat_weights[
+                static_cast<size_t>(feature) * N_HIDDEN];
+            bool row_active = false;
+            for (int hidden = 0; hidden < N_HIDDEN; ++hidden) {
+                if (row[hidden] != 0) {
+                    row_active = true;
+                    any_threat_weight = true;
+                    break;
+                }
+            }
+            s_threat_feature_active[feature] = static_cast<uint8_t>(row_active);
+        }
+        if (!any_threat_weight) {
+            std::memset(s_threat_weights, 0, sizeof(s_threat_weights));
+            std::memset(s_threat_feature_active, 0, sizeof(s_threat_feature_active));
+        }
+    }
+#endif
 
     // Sanity: trailing-byte check (should be exactly EOF now).
     unsigned char probe;
@@ -273,7 +364,24 @@ bool LoadNetwork(const char* path) {
     L2_WEIGHTS     = s_l2_weights;
     L2_BIASES      = s_l2_biases;
     OUTPUT_WEIGHTS = s_output_weights;
-    // OUTPUT_BIAS already assigned via &OUTPUT_BIAS read.
+    OUTPUT_BIASES  = s_output_biases;
+#if ENYO_ENABLE_THREAT_NNUE
+    if (threat_layout) {
+        bool any_threat_weight = false;
+        for (const uint8_t active : s_threat_feature_active) {
+            if (active != 0) {
+                any_threat_weight = true;
+                break;
+            }
+        }
+        THREAT_WEIGHTS = any_threat_weight ? s_threat_weights : nullptr;
+        THREAT_FEATURE_ACTIVE = any_threat_weight ? s_threat_feature_active : nullptr;
+    } else {
+        THREAT_WEIGHTS = nullptr;
+        THREAT_FEATURE_ACTIVE = nullptr;
+    }
+#endif
+    OUTPUT_BUCKETS = static_cast<int>(head_buckets);
     ++NETWORK_GENERATION;
 
     return true;

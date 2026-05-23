@@ -15,6 +15,13 @@
 #define ENYO_USE_SYZYGY 0
 #endif
 
+#ifndef ENYO_ENABLE_THREAT_NNUE
+#define ENYO_ENABLE_THREAT_NNUE 0
+#endif
+#ifndef ENYO_ENABLE_KING_PRESSURE_BUCKETS
+#define ENYO_ENABLE_KING_PRESSURE_BUCKETS 0
+#endif
+
 
 #ifdef Release
     #define BREAKPOINT(message)

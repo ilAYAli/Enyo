@@ -1029,9 +1029,32 @@ int32_t Net::Evaluate2(enyo::Board &board, enyo::Color side) {
 
     ensure_network(board);
 
+    const int bucket = Network::OUTPUT_BUCKETS == 1
+        ? 0
+        : Network::MaterialBucket(board);
+#if ENYO_ENABLE_THREAT_NNUE
+    if (Network::THREAT_WEIGHTS != nullptr) {
+        Network::Accumulator combined;
+        std::memcpy(&combined, &accumulator, sizeof(Network::Accumulator));
+        Network::AddThreatsToAccumulator(&combined, board, enyo::white);
+        Network::AddThreatsToAccumulator(&combined, board, enyo::black);
+        const int32_t eval = Network::ScaleEval(
+            board,
+            Network::Propagate(&combined, static_cast<int>(side), bucket));
+        accumulator.eval[side] = eval;
+        accumulator.eval_correct[side] = 1;
+        if (entry.hash != board.hash) {
+            entry.hash = board.hash;
+            entry.valid = 0;
+        }
+        entry.eval = eval;
+        entry.valid = 1;
+        return eval;
+    }
+#endif
     const int32_t eval = Network::ScaleEval(
         board,
-        Network::Propagate(&accumulator, static_cast<int>(side)));
+        Network::Propagate(&accumulator, static_cast<int>(side), bucket));
     accumulator.eval[side] = eval;
     accumulator.eval_correct[side] = 1;
     if (entry.hash != board.hash) {

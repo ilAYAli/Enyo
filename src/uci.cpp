@@ -83,7 +83,17 @@ bool load_eval_file(const std::string & value)
         return false;
     }
 
-    if (size == Network::NETWORK_SIZE || size == Network::LEGACY_NETWORK_SIZE) {
+    if (size == Network::NETWORK_SIZE
+        || size == Network::BUCKETED_HEAD_NETWORK_SIZE
+        || size == Network::LEGACY_NETWORK_SIZE
+        || size == Network::LEGACY_BUCKETED_HEAD_NETWORK_SIZE
+#if ENYO_ENABLE_THREAT_NNUE
+        || size == Network::NETWORK_SIZE + Network::THREAT_WEIGHTS_BYTES
+        || size == Network::BUCKETED_HEAD_NETWORK_SIZE + Network::THREAT_WEIGHTS_BYTES
+        || size == Network::LEGACY_NETWORK_SIZE + Network::THREAT_WEIGHTS_BYTES
+        || size == Network::LEGACY_BUCKETED_HEAD_NETWORK_SIZE + Network::THREAT_WEIGHTS_BYTES
+#endif
+    ) {
         if (Network::LoadNetwork(path.c_str())) {
 #if ENYO_ENABLE_BULLET_NNUE
             BulletNetwork::enabled = false;
@@ -624,15 +634,20 @@ int Uci::operator()(const std::string& command)
                     SearchInfo si(b, 1);
                     const auto * acc =
                         &si.nnue.network_accumulator_stack[si.nnue.currentAccumulator];
-                    int (* volatile propagate)(const Network::Accumulator*, int) =
+                    int (* volatile propagate)(const Network::Accumulator*, int, int) =
                         &Network::Propagate;
                     int (* volatile scale)(const Board&, int) =
                         &Network::ScaleEval;
+                    const int bucket = Network::OUTPUT_BUCKETS == 1
+                        ? 0
+                        : Network::MaterialBucket(si.board);
                     int64_t sum = 0;
                     const auto start = std::chrono::steady_clock::now();
                     for (int i = 0; i < iterations; ++i) {
                         std::atomic_signal_fence(std::memory_order_acq_rel);
-                        sum += scale(si.board, propagate(acc, static_cast<int>(si.board.side)));
+                        sum += scale(
+                            si.board,
+                            propagate(acc, static_cast<int>(si.board.side), bucket));
                     }
                     const auto end = std::chrono::steady_clock::now();
                     const auto us =
