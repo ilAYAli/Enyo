@@ -1680,9 +1680,16 @@ TEST(syzygy_root, piece_count_boundaries) {
         const auto filtered = syzygy::root_WDL_filter(b, legal, &filter_complete);
 
         EXPECT_EQ(syzygy::WDL_probe(b), syzygy::Status::Win);
-        EXPECT_EQ(status, syzygy::Status::Error);
-        EXPECT_EQ(score, 0);
-        EXPECT_FALSE(move);
+        if (move) {
+            EXPECT_EQ(status, syzygy::Status::Win);
+            EXPECT_EQ(score, Value::tb_win_in_max_ply);
+            EXPECT_TRUE(std::ranges::any_of(legal, [&](Move candidate) {
+                return candidate == move;
+            }));
+        } else {
+            EXPECT_EQ(status, syzygy::Status::Error);
+            EXPECT_EQ(score, 0);
+        }
         EXPECT_TRUE(filter_complete);
         EXPECT_EQ(filtered.size(), 1u);
     }
@@ -1744,7 +1751,7 @@ TEST(syzygy_root, init_rejects_explicit_incomplete_tablebase_dir) {
     fs::remove_all(root);
 }
 
-TEST(syzygy_root, wdl_only_root_moves_immediately) {
+TEST(syzygy_root, six_piece_root_moves_immediately) {
     if (!init_test_syzygy(6))
         GTEST_SKIP() << "6-man Syzygy tablebases not available";
 
@@ -1795,6 +1802,26 @@ TEST(syzygy_root, wdl_only_root_moves_immediately) {
     cfgmgr.use_syzygy = old_use_syzygy;
 }
 
+TEST(syzygy_root, available_six_piece_dtz_returns_root_move) {
+    if (!init_test_syzygy(6))
+        GTEST_SKIP() << "6-man Syzygy tablebases not available";
+
+    Board b{"7k/8/5KQ1/8/2BB4/8/P7/8 w - - 0 1"};
+    ASSERT_EQ(count_bits(b.color_bb[white] | b.color_bb[black]), 6);
+
+    syzygy::Status status = syzygy::Status::Error;
+    const auto [score, move] = syzygy::DTZ_probe(b, status);
+    if (!move)
+        GTEST_SKIP() << "selected 6-man DTZ material is not installed";
+
+    EXPECT_EQ(status, syzygy::Status::Win);
+    EXPECT_EQ(score, Value::tb_win_in_max_ply);
+    const auto legal = generate_legal_moves<white>(b);
+    EXPECT_TRUE(std::ranges::any_of(legal, [&](Move candidate) {
+        return candidate == move;
+    }));
+}
+
 TEST(syzygy_root, immediate_mate_reports_mate_before_tablebase_cp) {
     if (!init_test_syzygy(3))
         GTEST_SKIP() << "Syzygy tablebases not available";
@@ -1822,6 +1849,33 @@ TEST(syzygy_root, immediate_mate_reports_mate_before_tablebase_cp) {
     EXPECT_NE(out.find("score mate 1"), std::string::npos) << out;
     EXPECT_NE(out.find("bestmove g6g7"), std::string::npos) << out;
     EXPECT_EQ(out.find("string tbhit win"), std::string::npos) << out;
+
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+}
+
+TEST(uci_root, lost_tablebase_root_does_not_search_after_tbhit) {
+    if (!init_test_syzygy(3))
+        GTEST_SKIP() << "Syzygy tablebases not available";
+
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = true;
+
+    Board b;
+    Uci uci{b};
+    uci("position fen 6k1/2Q5/5K2/8/8/8/8/8 b - - 10 96");
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    uci("go wtime 82790 btime 68419 winc 5000 binc 5000");
+    const auto out = testing::internal::GetCapturedStdout();
+
+    EXPECT_NE(out.find("string tbhit loss"), std::string::npos) << out;
+    EXPECT_NE(out.find("bestmove "), std::string::npos) << out;
+    EXPECT_EQ(out.find("info depth 2 score"), std::string::npos) << out;
 
     cfgmgr.num_threads = old_threads;
     cfgmgr.use_syzygy = old_use_syzygy;
