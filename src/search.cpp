@@ -53,6 +53,18 @@ bool move_gives_check(Board & b, NNUE::Net * nnue, Move move)
     return gives_check;
 }
 
+int tablebase_uci_score(syzygy::Status status, int dtz)
+{
+    constexpr int tb_cp = 20000;
+    const int plies = std::max(0, dtz);
+
+    switch (status) {
+        case syzygy::Status::Win:  return tb_cp - plies;
+        case syzygy::Status::Loss: return -tb_cp + plies;
+        default:                   return Value::draw;
+    }
+}
+
 }
 
 int lmr_reductions[MAX_PLY][MAX_MOVES];
@@ -917,21 +929,19 @@ void search_position(Worker & worker)
          && num_pieces <= tb_max
          && !board.gamestate.can_castle(CastlingRights::any_castling)) {
             syzygy::Status tb_status = syzygy::Status::Error;
-            auto [tb_score, tb_move] = syzygy::DTZ_probe(board, tb_status);
-            if (tb_status == syzygy::Status::Error) {
+            int tb_dtz = -1;
+            auto [tb_score, tb_move] = syzygy::DTZ_probe(board, tb_status, &tb_dtz);
+            (void)tb_score;
+            if (tb_status == syzygy::Status::Error)
                 tb_status = syzygy::WDL_probe(board);
-                tb_score =
-                    tb_status == syzygy::Status::Win  ? Value::tb_win_in_max_ply
-                  : tb_status == syzygy::Status::Loss ? Value::tb_loss_in_max_ply
-                                                      : Value::draw;
-            }
 
             if (tb_status != syzygy::Status::Error) {
                 const char* verdict =
                     tb_status == syzygy::Status::Win  ? "win"
                   : tb_status == syzygy::Status::Loss ? "loss"
                                                       : "draw";
-                ucilog("info depth 1 score cp {} string tbhit {}\n", tb_score, verdict);
+                const auto tb_uci_score = tablebase_uci_score(tb_status, tb_dtz);
+                ucilog("info depth 1 score cp {} string tbhit {}\n", tb_uci_score, verdict);
                 if (tb_move && is_active_root_move(tb_move)) {
                     thread::pool.stop = true;
                     ucilog("bestmove {}\n", tb_move);

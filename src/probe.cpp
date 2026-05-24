@@ -339,9 +339,11 @@ Status WDL_probe(Board &board)
 #endif
 }
 
-std::pair<int, Move> DTZ_probe(Board & board, Status & status)
+std::pair<int, Move> DTZ_probe(Board & board, Status & status, int * dtz)
 {
     status = Status::Error;
+    if (dtz)
+        *dtz = -1;
 #if !ENYO_USE_SYZYGY
     (void)board;
     return {0, Move{}};
@@ -370,6 +372,9 @@ std::pair<int, Move> DTZ_probe(Board & board, Status & status)
         return {0, Move{}};
 
     const int wdl = TB_GET_WDL(TBresult);
+    if (dtz)
+        *dtz = static_cast<int>(TB_GET_DTZ(TBresult));
+
     int score = 0;
     switch (wdl) {
         case TB_WIN:          score = Value::tb_win_in_max_ply;  status = Status::Win;  break;
