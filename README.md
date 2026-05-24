@@ -36,9 +36,6 @@ H1 indexed: white king =  3, black king = 59
 Legal move generation for standard chess<br>
 Incremental make/unmake with hash, NNUE, castling, en-passant, halfmove and fullmove state<br>
 <br>
-perft:
-<pre>
-echo 'position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -\nbench depth 5\nquit' | ./build/enyo
 </pre>
 
 <h3>Search</h3>
