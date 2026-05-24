@@ -52,16 +52,22 @@ bool move_gives_check(Board & b, NNUE::Net * nnue, Move move)
     return gives_check;
 }
 
-int tablebase_uci_score(syzygy::Status status, int dtz)
+const char* tablebase_verdict(syzygy::Status status)
 {
-    constexpr int tb_cp = 20000;
-    const int plies = std::max(0, dtz);
-
     switch (status) {
-        case syzygy::Status::Win:  return tb_cp - plies;
-        case syzygy::Status::Loss: return -tb_cp + plies;
-        default:                   return Value::draw;
+        case syzygy::Status::Win:  return "win";
+        case syzygy::Status::Loss: return "loss";
+        default:                   return "draw";
     }
+}
+
+void log_tablebase_root_hit(syzygy::Status status, int dtz)
+{
+    const char* verdict = tablebase_verdict(status);
+    if (dtz >= 0)
+        ucilog("info depth 1 string tbhit {} dtz {}\n", verdict, dtz);
+    else
+        ucilog("info depth 1 string tbhit {}\n", verdict);
 }
 
 }
@@ -927,12 +933,8 @@ void search_position(Worker & worker)
                 tb_status = syzygy::WDL_probe(board);
 
             if (tb_status != syzygy::Status::Error) {
-                const char* verdict =
-                    tb_status == syzygy::Status::Win  ? "win"
-                  : tb_status == syzygy::Status::Loss ? "loss"
-                                                      : "draw";
-                const auto tb_uci_score = tablebase_uci_score(tb_status, tb_dtz);
-                ucilog("info depth 1 score cp {} string tbhit {}\n", tb_uci_score, verdict);
+                const char* verdict = tablebase_verdict(tb_status);
+                log_tablebase_root_hit(tb_status, tb_dtz);
                 if (tb_move && is_active_root_move(tb_move)) {
                     thread::pool.stop = true;
                     ucilog("bestmove {}\n", tb_move);
