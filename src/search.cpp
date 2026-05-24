@@ -950,15 +950,8 @@ void search_position(Worker & worker)
                         verdict, filtered.size(), root_candidates.size());
                 }
                 if (filter_complete && !filtered.empty()) {
-                    for (const auto move : filtered) {
-                        if (!is_active_root_move(move))
-                            continue;
-                        thread::pool.stop = true;
-                        ucilog("info string tbhit {} WDL root move {}/{}\n",
-                            verdict, filtered.size(), root_candidates.size());
-                        ucilog("bestmove {}\n", move);
-                        return;
-                    }
+                    ucilog("info string tbhit {} WDL root filter complete {}/{}\n",
+                        verdict, filtered.size(), root_candidates.size());
                 }
             }
         }

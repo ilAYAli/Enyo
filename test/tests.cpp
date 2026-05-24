@@ -1751,7 +1751,7 @@ TEST(syzygy_root, init_rejects_explicit_incomplete_tablebase_dir) {
     fs::remove_all(root);
 }
 
-TEST(syzygy_root, six_piece_root_moves_immediately) {
+TEST(syzygy_root, six_piece_root_uses_dtz_immediate_or_wdl_filter) {
     if (!init_test_syzygy(6))
         GTEST_SKIP() << "6-man Syzygy tablebases not available";
 
@@ -1796,9 +1796,16 @@ TEST(syzygy_root, six_piece_root_moves_immediately) {
 
     EXPECT_NE(out.find("string tbhit win"), std::string::npos) << out;
     EXPECT_NE(out.find("bestmove "), std::string::npos) << out;
-    EXPECT_EQ(out.find("info depth 2 score"), std::string::npos) << out;
-    EXPECT_EQ(out.find("score cp "), std::string::npos) << out;
-    EXPECT_EQ(out.find("score mate "), std::string::npos) << out;
+    if (dtz_move) {
+        EXPECT_EQ(out.find("info depth 2 score"), std::string::npos) << out;
+        EXPECT_EQ(out.find("score cp "), std::string::npos) << out;
+        EXPECT_EQ(out.find("score mate "), std::string::npos) << out;
+    } else {
+        EXPECT_EQ(out.find("WDL root move"), std::string::npos) << out;
+        EXPECT_NE(out.find("WDL root filter complete"), std::string::npos) << out;
+        EXPECT_TRUE(out.find("score cp ") != std::string::npos
+                 || out.find("score mate ") != std::string::npos) << out;
+    }
 
     cfgmgr.num_threads = old_threads;
     cfgmgr.use_syzygy = old_use_syzygy;
@@ -1880,6 +1887,35 @@ TEST(uci_root, lost_tablebase_root_does_not_search_after_tbhit) {
     EXPECT_EQ(out.find("info depth 2 score"), std::string::npos) << out;
     EXPECT_EQ(out.find("score cp "), std::string::npos) << out;
     EXPECT_EQ(out.find("score mate "), std::string::npos) << out;
+
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+}
+
+TEST(uci_root, wdl_only_root_does_not_repeat_first_filtered_move) {
+    if (!init_test_syzygy(6))
+        GTEST_SKIP() << "6-man Syzygy tablebases not available";
+
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = true;
+
+    Board b;
+    Uci uci{b};
+    uci("position startpos moves g1f3 d7d5 g2g3 c7c5 f1g2 a7a6 e1g1 b8c6 d2d4 h7h6 c2c4 e7e6 c1e3 g8e7 d4c5 e7f5 e3d4 f5d4 f3d4 f8c5 d4b3 c5a7 c4d5 e6d5 d1d5 d8d5 g2d5 c8g4 f1c1 e8g8 e2e3 f8d8 d5g2 a8b8 g2c6 b7c6 b1d2 g4e6 c1c6 a6a5 d2c4 a5a4 b3d2 d8c8 c6c8 b8c8 a1c1 c8b8 g1f1 g7g6 f1e2 a7c5 c1c2 c5f8 e3e4 b8c8 b2b3 a4b3 a2b3 c8b8 c4e3 g8g7 c2c1 f8b4 d2c4 b4c5 c1c3 c5d4 c3d3 d4c5 e3d5 b8a8 c4e3 a8a2 d3d2 a2a3 b3b4 c5e3 d5e3 a3b3 d2d4 b3b2 e2f3 g7f6 d4d6 f6e5 d6b6 h6h5 h2h4 b2b3 b6b5 e5d4 b5g5 d4c3 b4b5 c3d3 g3g4 h5g4 e3g4 d3d2 f3f4 b3h3 f4e5 h3h4 g4f6 h4h1 e5d6 d2e2 g5c5 e2f2 b5b6 h1b1 d6c7 e6c8 f6e8 c8g4 b6b7 f2f3 e8d6 b1b7 d6b7 f3e4 b7d6 e4f4 d6f7 g4e6 f7g5 e6f5 g5h7 g6g5 h7f6 f5h3 f6h5 f4g4");
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    uci("go depth 8");
+    const auto out = testing::internal::GetCapturedStdout();
+
+    EXPECT_NE(out.find("string tbhit win"), std::string::npos) << out;
+    EXPECT_EQ(out.find("WDL root move"), std::string::npos) << out;
+    EXPECT_NE(out.find("score cp "), std::string::npos) << out;
+    EXPECT_NE(out.find("bestmove "), std::string::npos) << out;
+    EXPECT_EQ(out.find("bestmove h5f6"), std::string::npos) << out;
 
     cfgmgr.num_threads = old_threads;
     cfgmgr.use_syzygy = old_use_syzygy;
