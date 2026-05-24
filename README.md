@@ -8,7 +8,7 @@
 </p>
 
 <h3>Engine</h3>
-Enyo is a C++23 UCI chess engine built around iterative deepening negamax/PVS
+Enyo is a C++23 <a href="https://www.chessprogramming.org/UCI" rel="nofollow">UCI</a> chess engine built around iterative deepening negamax/PVS
 alpha-beta search and NNUE evaluation.<br>
 Enyo's NNUE training work has used self-play positions and deeper offline teacher
 labels, public evaluation data, and curated engine-training positions.<br>
@@ -49,7 +49,7 @@ Incremental make/unmake with hash, NNUE, castling, en-passant, halfmove and full
 <a href="https://www.chessprogramming.org/Reverse_Futility_Pruning" rel="nofollow">Reverse Futility Pruning</a><br>
 <a href="https://www.chessprogramming.org/Razoring" rel="nofollow">Razoring</a><br>
 <a href="https://www.chessprogramming.org/Null_Move_Pruning" rel="nofollow">Null Move Pruning</a><br>
-<a href="https://www.chessprogramming.org/ProbCut" rel="nofollow">ProbCut</a> (experimental, SPRT pending)<br>
+<a href="https://www.chessprogramming.org/ProbCut" rel="nofollow">ProbCut</a><br>
 <a href="https://www.chessprogramming.org/Futility_Pruning" rel="nofollow">Futility Pruning</a><br>
 <a href="https://www.chessprogramming.org/Move_Count_Based_Pruning" rel="nofollow">Late Move Pruning</a><br>
 <a href="https://www.chessprogramming.org/Late_Move_Reductions" rel="nofollow">Late Move Reductions</a><br>
@@ -64,29 +64,21 @@ Root tablebase move selection when Syzygy DTZ is available<br>
 
 <h3>Evaluation</h3>
 <a href="https://www.chessprogramming.org/NNUE" rel="nofollow">NNUE</a><br>
-Embedded 512-hidden Enyo NNUE evaluator<br>
-Optional 1024-hidden Network evaluator via UCI <code>nnue_file</code><br>
-The Network path uses sparse king-relative features, 1024 hidden values per
-perspective, incremental accumulators, and a compact fully connected head.<br>
-Incremental NNUE and Network accumulators with refresh-table support<br>
-Network SIMD paths for ARM NEON and x86 AVX2/AVX-512 where available<br>
-Classical fallback evaluation for debugging<br>
+Network training and exporter tooling lives in the sibling <code>nnue</code> repo<br>
+
 
 <h3>Tools</H3>
+<a href="https://github.com/Disservin/fastchess" rel="nofollow">Fastchess</a>
+CLI tool for running SPRT validation<br>
+
+
+<h3>Acknowledgments</h3>
 <a href="https://github.com/jw1912/bullet" rel="nofollow">Bullet</a>
 ML library for NNUE training<br>
 <a href="https://github.com/Disservin/binpack-rust" rel="nofollow">Binpack</a>
 Rust port of the Stockfish binpack reader<br>
-<a href="https://github.com/Disservin/fastchess" rel="nofollow">Fastchess</a>
-CLI tool for running chess engine tournaments<br>
 <a href="https://github.com/AndyGrant/Pyrrhic" rel="nofollow">Pyrrhic</a>
 Syzygy WDL/DTZ probing<br>
-<a href="https://www.chessprogramming.org/UCI" rel="nofollow">UCI</a>
-interface with configurable <code>Threads</code>, <code>Hash</code>, <code>SyzygyPath</code> and <code>nnue_file</code><br>
-Replay tooling for lichess logs and Stockfish validation<br>
-Network training and exporter tooling lives in the sibling <code>nnue</code> repo<br>
-
-<h3>Acknowledgments</h3>
 Bluefever Software: Chess Engine In C <a href="https://github.com/bluefeversoft/vice" rel="nofollow">Vice</a><br>
 Chess Programming <a href="https://www.youtube.com/playlist?list=PLmN0neTso3Jxh8ZIylk74JpwfiWNI76Cs" rel="nofollow">BBC</a></br>
 
