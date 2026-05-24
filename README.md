@@ -64,6 +64,9 @@ Root tablebase move selection when Syzygy DTZ is available<br>
 
 <h3>Evaluation</h3>
 <a href="https://www.chessprogramming.org/NNUE" rel="nofollow">NNUE</a><br>
+The native Enyo NNUE is an Enyo-owned network trained from scratch with Bullet. It uses Enyo’s
+feature layout, accumulator code, and evaluation pipeline, with architecture choices such as input
+king buckets and hidden width selected at build time.
 Network training and exporter tooling lives in the sibling <code>nnue</code> repo<br>
 
 
