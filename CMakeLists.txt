@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(ENYO_USE_SYZYGY "Enable Syzygy tablebase probing via Fathom" ON)
+option(ENYO_USE_SYZYGY "Enable Syzygy tablebase probing via Pyrrhic" ON)
 
 #---[ git versioning/output ]--------------------------------------------------
 string(ASCII 27 Esc)
@@ -125,11 +125,11 @@ set(ENYO_ENGINE_SOURCES
 )
 
 if(ENYO_USE_SYZYGY)
-    if(EXISTS "${CMAKE_SOURCE_DIR}/3rdparty/Fathom/src/tbprobe.c" AND EXISTS "${CMAKE_SOURCE_DIR}/3rdparty/Fathom/src/tbprobe.h")
-        add_library(fathom_lib STATIC 3rdparty/Fathom/src/tbprobe.c)
-        target_include_directories(fathom_lib PUBLIC 3rdparty/Fathom/src)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/3rdparty/Pyrrhic/tbprobe.c" AND EXISTS "${CMAKE_SOURCE_DIR}/3rdparty/Pyrrhic/tbprobe.h")
+        add_library(pyrrhic_lib STATIC 3rdparty/Pyrrhic/tbprobe.c)
+        target_include_directories(pyrrhic_lib PUBLIC 3rdparty/Pyrrhic)
     else()
-        message(WARNING "ENYO_USE_SYZYGY is ON, but 3rdparty/Fathom sources were not found. Building without Syzygy support.")
+        message(WARNING "ENYO_USE_SYZYGY is ON, but 3rdparty/Pyrrhic sources were not found. Building without Syzygy support.")
         set(ENYO_USE_SYZYGY OFF)
     endif()
 endif()
@@ -182,7 +182,7 @@ if(WIN32)
 endif()
 
 if(ENYO_USE_SYZYGY)
-    target_link_libraries(enyo PRIVATE fathom_lib)
+    target_link_libraries(enyo PRIVATE pyrrhic_lib)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Profile")
@@ -191,7 +191,7 @@ endif()
 
 target_include_directories(enyo PRIVATE
     ${CMAKE_BINARY_DIR}
-    3rdparty/Fathom/src)
+    3rdparty/Pyrrhic)
 
 option(BUILD_TESTS "Build the gtest target" ON)
 if(BUILD_TESTS)
@@ -222,7 +222,7 @@ if(BUILD_TESTS)
     endif()
 
     if(ENYO_USE_SYZYGY)
-        target_link_libraries(test PRIVATE fathom_lib)
+        target_link_libraries(test PRIVATE pyrrhic_lib)
     endif()
 endif()
 

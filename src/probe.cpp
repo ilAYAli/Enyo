@@ -1,6 +1,8 @@
 #include "probe.hpp"
 #if ENYO_USE_SYZYGY
-#include "3rdparty/Fathom/src/tbprobe.h"
+extern "C" {
+#include "3rdparty/Pyrrhic/tbprobe.h"
+}
 #endif
 
 #include <algorithm>
@@ -94,13 +96,13 @@ bool is_tablebase_file(const std::filesystem::path & path)
     return ext == ".rtbw" || ext == ".rtbz";
 }
 
-bool has_tablebase_files(const std::filesystem::path & path)
+bool has_any_tablebase_file(const std::filesystem::path & path)
 {
     std::error_code ec;
     if (!std::filesystem::is_directory(path, ec))
         return false;
     for (std::filesystem::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec)) {
-        if (is_complete_tablebase_file(it->path()))
+        if (is_tablebase_file(it->path()))
             return true;
     }
     return false;
@@ -122,6 +124,26 @@ bool is_hidden_directory(const std::filesystem::path & path)
 {
     const auto name = path.filename().string();
     return !name.empty() && name.front() == '.';
+}
+
+void append_unique(std::vector<std::string> & paths, const std::filesystem::path & path);
+
+void collect_tablebase_paths(std::vector<std::string> & paths, const std::filesystem::path & path)
+{
+    if (is_hidden_directory(path))
+        return;
+
+    std::error_code ec;
+    if (!std::filesystem::is_directory(path, ec))
+        return;
+
+    if (has_any_tablebase_file(path))
+        append_unique(paths, path);
+
+    for (std::filesystem::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec)) {
+        if (it->is_directory(ec))
+            collect_tablebase_paths(paths, it->path());
+    }
 }
 
 bool index_tablebase_files(const std::string & resolved_path)
@@ -222,18 +244,9 @@ std::string resolve_path(const std::string & tb_path)
             continue;
 
         const std::filesystem::path path(expand_home_path(segment));
-        if (has_tablebase_files(path))
-            append_unique(resolved, path);
-
-        std::error_code ec;
-        if (std::filesystem::is_directory(path, ec)) {
-            for (std::filesystem::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec)) {
-                if (it->is_directory(ec) && !is_hidden_directory(it->path()) && has_tablebase_files(it->path()))
-                    append_unique(resolved, it->path());
-            }
-        }
-
-        if (resolved.empty())
+        const auto before = resolved.size();
+        collect_tablebase_paths(resolved, path);
+        if (resolved.size() == before)
             append_unique(resolved, path);
     }
     return join_path_list(resolved);
@@ -270,10 +283,8 @@ unsigned largest()
 #endif
 }
 
-static inline constexpr uint8_t fathom_ep_square(square_t ep)
+static inline constexpr uint8_t tablebase_ep_square(square_t ep)
 {
-    // Enyo stores "no EP" as 0. Fathom also uses 0 as its no-EP sentinel,
-    // so only convert real EP squares.
     return ep ? sqconv(ep) : 0;
 }
 
@@ -299,7 +310,7 @@ pos board2pos(Board & b)
         // and made DTZ score moves off a rule50 that lagged reality.
         .rule50 = static_cast<uint8_t>(std::min(255,
             b.half_moves + static_cast<int>(b.gamestate.half_moves))),
-        .ep = fathom_ep_square(b.gamestate.enpassant_square),
+        .ep = tablebase_ep_square(b.gamestate.enpassant_square),
         .turn = b.side == white,
         .move = static_cast<uint16_t>(b.histply + 1),
     };
@@ -321,7 +332,7 @@ Status WDL_probe(Board &board)
         return Status::Error;
 
     auto ret =
-        tb_probe_wdl_impl(
+        tb_probe_wdl(
             pos.white, pos.black,
             pos.kings, pos.queens, pos.rooks, pos.bishops, pos.knights, pos.pawns,
             pos.ep,
@@ -354,13 +365,14 @@ std::pair<int, Move> DTZ_probe(Board & board, Status & status, int * dtz)
         return {0, Move{}};
 
     auto pos = board2pos(board);
+    if (pos.castling != 0)
+        return {0, Move{}};
 
     unsigned TBresult =
         tb_probe_root(
             pos.white, pos.black,
             pos.kings, pos.queens, pos.rooks, pos.bishops, pos.knights, pos.pawns,
             pos.rule50,
-            pos.castling,
             pos.ep,
             pos.turn,
             nullptr // results
@@ -387,13 +399,11 @@ std::pair<int, Move> DTZ_probe(Board & board, Status & status, int * dtz)
 
     const int promo = TB_GET_PROMOTES(TBresult);
     const PieceType promoTranslation[] = {no_piece_type, queen, rook, bishop, knight};
-    if (promo > TB_PROMOTES_KNIGHT)
+    if (promo > PYRRHIC_FLAG_NPROMO)
         return {0, Move{}};
 
-    // Fathom hands back A1=0 squares; compare against legal moves in Enyo's
-    // native H1=0 layout by translating the legal move into A1=0.
-    const auto fathom_from = unsigned(TB_GET_FROM(TBresult));
-    const auto fathom_to   = unsigned(TB_GET_TO(TBresult));
+    const auto tablebase_from = unsigned(TB_GET_FROM(TBresult));
+    const auto tablebase_to   = unsigned(TB_GET_TO(TBresult));
 
     Movelist legalmoves;
     if (board.side == white)
@@ -402,12 +412,12 @@ std::pair<int, Move> DTZ_probe(Board & board, Status & status, int * dtz)
         legalmoves = generate_legal_moves<black>(board);
 
     for (auto move : legalmoves) {
-        if (sqconv(move.src_sq()) != fathom_from) continue;
-        if (sqconv(move.dst_sq()) != fathom_to)   continue;
+        if (sqconv(move.src_sq()) != tablebase_from) continue;
+        if (sqconv(move.dst_sq()) != tablebase_to)   continue;
         if (promoTranslation[promo] == no_piece_type) {
             if (move.flags() != Move::Flags::promote)
                 return {score, move};
-        } else if (promo < 5) {
+        } else if (promo <= PYRRHIC_FLAG_NPROMO) {
             if (move.flags() == Move::Flags::promote
              && move.promo_piece() == promoTranslation[promo])
                 return {score, move};
@@ -433,13 +443,15 @@ Movelist root_WDL_filter(Board & board, const Movelist & root_moves, bool * comp
         return root_moves;
 
     auto pos = board2pos(board);
+    if (pos.castling != 0)
+        return root_moves;
+
     const bool use_rule50 = pos.rule50 != 0 && has_table_for(board, available_dtz);
     TbRootMoves results {};
     const int ok = tb_probe_root_wdl(
         pos.white, pos.black,
         pos.kings, pos.queens, pos.rooks, pos.bishops, pos.knights, pos.pawns,
         use_rule50 ? pos.rule50 : 0,
-        pos.castling,
         pos.ep,
         pos.turn,
         use_rule50,
@@ -472,14 +484,14 @@ Movelist root_WDL_filter(Board & board, const Movelist & root_moves, bool * comp
     }
 
     const PieceType promo_translation[] = {no_piece_type, queen, rook, bishop, knight};
-    const auto matches = [&](Move move, TbMove tb_move) {
-        if (sqconv(move.src_sq()) != TB_MOVE_FROM(tb_move))
+    const auto matches = [&](Move move, PyrrhicMove tb_move) {
+        if (sqconv(move.src_sq()) != PYRRHIC_MOVE_FROM(tb_move))
             return false;
-        if (sqconv(move.dst_sq()) != TB_MOVE_TO(tb_move))
+        if (sqconv(move.dst_sq()) != PYRRHIC_MOVE_TO(tb_move))
             return false;
 
-        const auto promo = TB_MOVE_PROMOTES(tb_move);
-        if (promo == TB_PROMOTES_NONE)
+        const auto promo = PYRRHIC_MOVE_FLAGS(tb_move) & PYRRHIC_MASK_PROMO_FLAGS;
+        if (promo == PYRRHIC_FLAG_NONE)
             return move.flags() != Move::Flags::promote;
         if (static_cast<size_t>(promo) >= std::size(promo_translation))
             return false;

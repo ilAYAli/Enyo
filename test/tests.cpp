@@ -211,7 +211,7 @@ TEST(fen, fullmove_counter_advances_correctly_from_black_to_move_start) {
 // (capture, pawn move, en-passant, promotion) zeroed b.half_moves but
 // left b.gamestate.half_moves at the parsed base, the emitted FEN still
 // showed the stale base instead of 0. Syzygy rule50 (which reads the
-// same sum via board2pos) then fed Fathom an inflated counter and its
+// same sum via board2pos) then fed tablebase probing an inflated counter and its
 // WDL wrapper rejected legal probes under "nonzero rule50."
 //
 // Fix: reset_halfmove_clock() clears both fields together; Undo captures
@@ -1529,7 +1529,7 @@ TEST(network_audit, special_moves_match_refresh) {
     }
 }
 
-// Fathom/Syzygy expects bitboards in A1=0 layout: a1=bit0, h1=bit7, a8=bit56.
+// Syzygy probing expects bitboards in A1=0 layout: a1=bit0, h1=bit7, a8=bit56.
 // Enyo internally uses H1=0. board2pos() applies bbconv()/sqconv() to bridge
 // the two. These tests pin down that conversion against hand-computed
 // expected values for a handful of asymmetry-sensitive positions.
@@ -1598,12 +1598,12 @@ TEST(syzygy_bbconv, ep_square_conversion) {
     Board b{"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"};
     auto p = syzygy::board2pos(b);
 
-    // sqconv() maps the board's H1=0 square index to Fathom's A1=0 index.
+    // sqconv() maps the board's H1=0 square index to the tablebase A1=0 index.
     // We don't compare the raw square_t here — just the probe-ready uint8_t.
     EXPECT_EQ(p.ep, 20u);  // e3 in A1=0 layout
 }
 
-TEST(syzygy_bbconv, no_ep_square_stays_fathom_sentinel) {
+TEST(syzygy_bbconv, no_ep_square_stays_tablebase_sentinel) {
     Board b{"startpos"};
     auto p = syzygy::board2pos(b);
 
@@ -1718,8 +1718,10 @@ TEST(syzygy_root, resolve_path_ignores_hidden_staging_dirs) {
     const auto root = fs::temp_directory_path() / fmt::format("enyo_tb_root_{}", stamp);
     const auto hidden = root / ".6-dtz";
     const auto visible = root / "6-wdl";
+    const auto nested_visible = root / "6-dtz" / "6-dtz";
     fs::create_directories(hidden);
     fs::create_directories(visible);
+    fs::create_directories(nested_visible);
 
     {
         std::ofstream file(hidden / "KQvK.rtbw", std::ios::binary);
@@ -1729,9 +1731,14 @@ TEST(syzygy_root, resolve_path_ignores_hidden_staging_dirs) {
         std::ofstream file(visible / "KRvK.rtbw", std::ios::binary);
         file << std::string(16, '\0');
     }
+    {
+        std::ofstream file(nested_visible / "KQvK.rtbz", std::ios::binary);
+        file << std::string(16, '\0');
+    }
 
     const auto resolved = syzygy::resolve_path(root.string());
     EXPECT_NE(resolved.find(visible.string()), std::string::npos) << resolved;
+    EXPECT_NE(resolved.find(nested_visible.string()), std::string::npos) << resolved;
     EXPECT_EQ(resolved.find(hidden.string()), std::string::npos) << resolved;
 
     fs::remove_all(root);
@@ -1743,6 +1750,21 @@ TEST(syzygy_root, init_rejects_explicit_incomplete_tablebase_dir) {
     fs::create_directories(root);
     {
         std::ofstream file(root / "KQvK.rtbw", std::ios::binary);
+        file.put('\0');
+    }
+
+    EXPECT_FALSE(syzygy::init(root.string()));
+
+    fs::remove_all(root);
+}
+
+TEST(syzygy_root, init_rejects_nested_incomplete_tablebase_dir) {
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = fs::temp_directory_path() / fmt::format("enyo_nested_incomplete_tb_{}", stamp);
+    const auto nested = root / "6-dtz" / "6-dtz";
+    fs::create_directories(nested);
+    {
+        std::ofstream file(nested / "KQvK.rtbz", std::ios::binary);
         file.put('\0');
     }
 

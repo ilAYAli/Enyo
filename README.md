@@ -76,7 +76,13 @@ Network SIMD paths for ARM NEON and x86 AVX2/AVX-512 where available<br>
 Classical fallback evaluation for debugging<br>
 
 <h3>Tools</H3>
-<a href="https://github.com/jdart1/Fathom" rel="nofollow">Fathom</a><br>
+<a href="https://github.com/jw1912/bullet" rel="nofollow">Bullet</a>
+ML library for NNUE training<br>
+<a href="https://github.com/Disservin/binpack-rust" rel="nofollow">Binpack</a>
+Rust port of the Stockfish binpack reader<br>
+<a href="https://github.com/Disservin/fastchess" rel="nofollow">Fastchess</a>
+CLI tool for running chess engine tournaments<br>
+<a href="https://github.com/AndyGrant/Pyrrhic" rel="nofollow">Pyrrhic</a>
 Syzygy WDL/DTZ probing<br>
 UCI interface with configurable <code>Threads</code>, <code>Hash</code>, <code>SyzygyPath</code> and <code>nnue_file</code><br>
 Replay tooling for lichess logs and Stockfish validation<br>
