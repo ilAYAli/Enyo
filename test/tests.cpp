@@ -20,7 +20,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
-#include <limits>
 #include <ranges>
 #include <vector>
 #include <nlohmann/json.hpp>
@@ -71,14 +70,6 @@ bool init_test_syzygy(int min_pieces)
             return true;
     }
     return false;
-}
-
-int first_uci_cp_score(std::string const & out)
-{
-    const auto pos = out.find("score cp ");
-    if (pos == std::string::npos)
-        return std::numeric_limits<int>::min();
-    return std::stoi(out.substr(pos + 9));
 }
 
 #if 1
@@ -1764,7 +1755,7 @@ TEST(syzygy_root, six_piece_root_moves_immediately) {
     if (!init_test_syzygy(6))
         GTEST_SKIP() << "6-man Syzygy tablebases not available";
 
-    Board b{"8/1k6/1PnK4/2B5/P7/8/8/8 w - - 5 89"};
+    Board b{"6k1/8/5K2/8/8/8/P1QBB3/8 w - - 0 1"};
     ASSERT_EQ(count_bits(b.color_bb[white] | b.color_bb[black]), 6);
 
     syzygy::Status status = syzygy::Status::Error;
@@ -1806,11 +1797,8 @@ TEST(syzygy_root, six_piece_root_moves_immediately) {
     EXPECT_NE(out.find("string tbhit win"), std::string::npos) << out;
     EXPECT_NE(out.find("bestmove "), std::string::npos) << out;
     EXPECT_EQ(out.find("info depth 2 score"), std::string::npos) << out;
-    const auto score_cp = first_uci_cp_score(out);
-    EXPECT_GT(score_cp, 19000) << out;
-    EXPECT_LE(score_cp, 20000) << out;
-    EXPECT_NE(score_cp, Value::tb_win_in_max_ply) << out;
-    EXPECT_EQ(out.find("score cp 29872"), std::string::npos) << out;
+    EXPECT_EQ(out.find("score cp "), std::string::npos) << out;
+    EXPECT_EQ(out.find("score mate "), std::string::npos) << out;
 
     cfgmgr.num_threads = old_threads;
     cfgmgr.use_syzygy = old_use_syzygy;
@@ -1890,11 +1878,8 @@ TEST(uci_root, lost_tablebase_root_does_not_search_after_tbhit) {
     EXPECT_NE(out.find("string tbhit loss"), std::string::npos) << out;
     EXPECT_NE(out.find("bestmove "), std::string::npos) << out;
     EXPECT_EQ(out.find("info depth 2 score"), std::string::npos) << out;
-    const auto score_cp = first_uci_cp_score(out);
-    EXPECT_GE(score_cp, -20000) << out;
-    EXPECT_LT(score_cp, -19000) << out;
-    EXPECT_NE(score_cp, Value::tb_loss_in_max_ply) << out;
-    EXPECT_EQ(out.find("score cp -29872"), std::string::npos) << out;
+    EXPECT_EQ(out.find("score cp "), std::string::npos) << out;
+    EXPECT_EQ(out.find("score mate "), std::string::npos) << out;
 
     cfgmgr.num_threads = old_threads;
     cfgmgr.use_syzygy = old_use_syzygy;
