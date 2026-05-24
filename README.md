@@ -81,7 +81,8 @@ Rust port of the Stockfish binpack reader<br>
 CLI tool for running chess engine tournaments<br>
 <a href="https://github.com/AndyGrant/Pyrrhic" rel="nofollow">Pyrrhic</a>
 Syzygy WDL/DTZ probing<br>
-UCI interface with configurable <code>Threads</code>, <code>Hash</code>, <code>SyzygyPath</code> and <code>nnue_file</code><br>
+<a href="https://www.chessprogramming.org/UCI" rel="nofollow">UCI</a>
+interface with configurable <code>Threads</code>, <code>Hash</code>, <code>SyzygyPath</code> and <code>nnue_file</code><br>
 Replay tooling for lichess logs and Stockfish validation<br>
 Network training and exporter tooling lives in the sibling <code>nnue</code> repo<br>
 
@@ -89,7 +90,7 @@ Network training and exporter tooling lives in the sibling <code>nnue</code> rep
 Bluefever Software: Chess Engine In C <a href="https://github.com/bluefeversoft/vice" rel="nofollow">Vice</a><br>
 Chess Programming <a href="https://www.youtube.com/playlist?list=PLmN0neTso3Jxh8ZIylk74JpwfiWNI76Cs" rel="nofollow">BBC</a></br>
 
-<h3>Inspired by</h3>
+<h3>Inspirations</h3>
 * Stockfish<br>
 * Rice<br>
 * Smallbrain<br>
