@@ -3,6 +3,7 @@
 #include "types.hpp"
 #include "board.hpp"
 #include "config.hpp"
+#include "movelist.hpp"
 #include "fmt/core.h"
 
 
@@ -21,7 +22,8 @@ enum Status {
 
 
 Status WDL_probe(enyo::Board & board);
-std::pair<int, enyo::Move> DTZ_probe(enyo::Board&  board, Status & status);
+std::pair<int, enyo::Move> DTZ_probe(enyo::Board&  board, Status & status, int * dtz = nullptr);
+::Movelist root_WDL_filter(enyo::Board & board, const ::Movelist & root_moves, bool * complete = nullptr);
 
 struct pos {
     uint64_t white {};

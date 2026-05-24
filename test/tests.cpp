@@ -18,7 +18,11 @@
 #include "pgn.hpp"
 
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
+#include <limits>
 #include <ranges>
+#include <vector>
 #include <nlohmann/json.hpp>
 
 using namespace enyo;
@@ -50,6 +54,31 @@ constexpr Color get_side_to_move(std::string_view fen) {
         return (side == 'w') ? Color::white : Color::black;
     }
     return white;
+}
+
+bool init_test_syzygy(int min_pieces)
+{
+    std::vector<std::string> candidates;
+    if (const char * env_path = std::getenv("ENYO_TEST_SYZYGY_PATH"); env_path && *env_path)
+        candidates.emplace_back(env_path);
+    if (!cfgmgr.syzygy_path.empty())
+        candidates.push_back(cfgmgr.syzygy_path);
+    candidates.emplace_back("~/code/cpp/chess/assets/tablebases");
+    candidates.emplace_back("../assets/tablebases");
+
+    for (const auto & path : candidates) {
+        if (syzygy::init(path) && static_cast<int>(syzygy::largest()) >= min_pieces)
+            return true;
+    }
+    return false;
+}
+
+int first_uci_cp_score(std::string const & out)
+{
+    const auto pos = out.find("score cp ");
+    if (pos == std::string::npos)
+        return std::numeric_limits<int>::min();
+    return std::stoi(out.substr(pos + 9));
 }
 
 #if 1
@@ -1588,6 +1617,403 @@ TEST(syzygy_bbconv, no_ep_square_stays_fathom_sentinel) {
     auto p = syzygy::board2pos(b);
 
     EXPECT_EQ(p.ep, 0u);
+}
+
+TEST(syzygy_root, filters_root_promotions_that_lose_wdl) {
+    if (!init_test_syzygy(6))
+        GTEST_SKIP() << "6-man Syzygy tablebases not available";
+
+    Board b{"8/8/8/8/1k6/2n1KP2/p7/5R2 b - - 0 77"};
+    const auto legal = generate_legal_moves<black>(b);
+    const auto winning = syzygy::root_WDL_filter(b, legal);
+
+    auto knight_move = uci_to_move(b, "c3b1");
+    auto promotion = uci_to_move(b, "a2a1q");
+    ASSERT_TRUE(knight_move);
+    ASSERT_TRUE(promotion);
+
+    const auto contains = [&](Move move) {
+        return std::ranges::any_of(winning, [&](Move candidate) {
+            return candidate == move;
+        });
+    };
+
+    EXPECT_TRUE(contains(*knight_move));
+    EXPECT_FALSE(contains(*promotion));
+    EXPECT_EQ(b.fen(), "8/8/8/8/1k6/2n1KP2/p7/5R2 b - - 0 77");
+}
+
+TEST(syzygy_root, dtz_returns_move_for_lost_root_position) {
+    if (!init_test_syzygy(3))
+        GTEST_SKIP() << "Syzygy tablebases not available";
+
+    Board b{"6k1/2Q5/5K2/8/8/8/8/8 b - - 10 96"};
+    syzygy::Status status = syzygy::Status::Error;
+    const auto [score, move] = syzygy::DTZ_probe(b, status);
+
+    EXPECT_EQ(status, syzygy::Status::Loss);
+    EXPECT_EQ(score, Value::tb_loss_in_max_ply);
+    ASSERT_TRUE(move);
+    const auto legal = generate_legal_moves<black>(b);
+    EXPECT_TRUE(std::ranges::any_of(legal, [&](Move candidate) {
+        return candidate == move;
+    }));
+}
+
+TEST(syzygy_root, piece_count_boundaries) {
+    if (!init_test_syzygy(6))
+        GTEST_SKIP() << "6-man Syzygy tablebases not available";
+    ASSERT_LT(syzygy::largest(), 7u);
+
+    {
+        Board b{"8/8/8/3n4/1k6/5P2/4K3/R7 b - - 0 79"};
+        ASSERT_EQ(count_bits(b.color_bb[white] | b.color_bb[black]), 5);
+
+        syzygy::Status status = syzygy::Status::Error;
+        const auto [score, move] = syzygy::DTZ_probe(b, status);
+
+        EXPECT_EQ(syzygy::WDL_probe(b), syzygy::Status::Loss);
+        EXPECT_EQ(status, syzygy::Status::Loss);
+        EXPECT_EQ(score, Value::tb_loss_in_max_ply);
+        EXPECT_TRUE(move);
+    }
+
+    {
+        Board b{"8/8/8/8/1k6/2n1KP2/p7/5R2 b - - 0 77"};
+        ASSERT_EQ(count_bits(b.color_bb[white] | b.color_bb[black]), 6);
+
+        syzygy::Status status = syzygy::Status::Error;
+        const auto [score, move] = syzygy::DTZ_probe(b, status);
+        const auto legal = generate_legal_moves<black>(b);
+        bool filter_complete = false;
+        const auto filtered = syzygy::root_WDL_filter(b, legal, &filter_complete);
+
+        EXPECT_EQ(syzygy::WDL_probe(b), syzygy::Status::Win);
+        if (move) {
+            EXPECT_EQ(status, syzygy::Status::Win);
+            EXPECT_EQ(score, Value::tb_win_in_max_ply);
+            EXPECT_TRUE(std::ranges::any_of(legal, [&](Move candidate) {
+                return candidate == move;
+            }));
+        } else {
+            EXPECT_EQ(status, syzygy::Status::Error);
+            EXPECT_EQ(score, 0);
+        }
+        EXPECT_TRUE(filter_complete);
+        EXPECT_EQ(filtered.size(), 1u);
+    }
+
+    {
+        Board b{"8/8/8/8/1k6/2n1KP2/p7/4NR2 b - - 0 77"};
+        ASSERT_EQ(count_bits(b.color_bb[white] | b.color_bb[black]), 7);
+
+        syzygy::Status status = syzygy::Status::Error;
+        const auto [score, move] = syzygy::DTZ_probe(b, status);
+        const auto legal = generate_legal_moves<black>(b);
+        bool filter_complete = true;
+        const auto filtered = syzygy::root_WDL_filter(b, legal, &filter_complete);
+
+        EXPECT_EQ(syzygy::WDL_probe(b), syzygy::Status::Error);
+        EXPECT_EQ(status, syzygy::Status::Error);
+        EXPECT_EQ(score, 0);
+        EXPECT_FALSE(move);
+        EXPECT_FALSE(filter_complete);
+        EXPECT_EQ(filtered.size(), legal.size());
+    }
+}
+
+TEST(syzygy_root, resolve_path_ignores_hidden_staging_dirs) {
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = fs::temp_directory_path() / fmt::format("enyo_tb_root_{}", stamp);
+    const auto hidden = root / ".6-dtz";
+    const auto visible = root / "6-wdl";
+    fs::create_directories(hidden);
+    fs::create_directories(visible);
+
+    {
+        std::ofstream file(hidden / "KQvK.rtbw", std::ios::binary);
+        file << std::string(16, '\0');
+    }
+    {
+        std::ofstream file(visible / "KRvK.rtbw", std::ios::binary);
+        file << std::string(16, '\0');
+    }
+
+    const auto resolved = syzygy::resolve_path(root.string());
+    EXPECT_NE(resolved.find(visible.string()), std::string::npos) << resolved;
+    EXPECT_EQ(resolved.find(hidden.string()), std::string::npos) << resolved;
+
+    fs::remove_all(root);
+}
+
+TEST(syzygy_root, init_rejects_explicit_incomplete_tablebase_dir) {
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = fs::temp_directory_path() / fmt::format("enyo_incomplete_tb_{}", stamp);
+    fs::create_directories(root);
+    {
+        std::ofstream file(root / "KQvK.rtbw", std::ios::binary);
+        file.put('\0');
+    }
+
+    EXPECT_FALSE(syzygy::init(root.string()));
+
+    fs::remove_all(root);
+}
+
+TEST(syzygy_root, six_piece_root_moves_immediately) {
+    if (!init_test_syzygy(6))
+        GTEST_SKIP() << "6-man Syzygy tablebases not available";
+
+    Board b{"8/1k6/1PnK4/2B5/P7/8/8/8 w - - 5 89"};
+    ASSERT_EQ(count_bits(b.color_bb[white] | b.color_bb[black]), 6);
+
+    syzygy::Status status = syzygy::Status::Error;
+    const auto [score, dtz_move] = syzygy::DTZ_probe(b, status);
+    const auto legal = generate_legal_moves<white>(b);
+    bool filter_complete = false;
+    const auto filtered = syzygy::root_WDL_filter(b, legal, &filter_complete);
+
+    if (dtz_move) {
+        EXPECT_EQ(status, syzygy::Status::Win);
+        EXPECT_EQ(score, Value::tb_win_in_max_ply);
+    } else {
+        EXPECT_EQ(status, syzygy::Status::Error);
+        EXPECT_EQ(score, 0);
+    }
+    ASSERT_EQ(syzygy::WDL_probe(b), syzygy::Status::Win);
+    ASSERT_TRUE(filter_complete);
+    ASSERT_FALSE(filtered.empty());
+
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = true;
+
+    SearchInfo si{b, 8};
+    si.board = b;
+    si.nnue.refresh(si.board);
+    si.starttime = std::chrono::high_resolution_clock::now();
+    si.stoptime = si.starttime + std::chrono::hours(1);
+    si.soft_stoptime = si.stoptime;
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    thread::pool.init_threads(si, 1);
+    thread::pool.wait();
+    const auto out = testing::internal::GetCapturedStdout();
+
+    EXPECT_NE(out.find("string tbhit win"), std::string::npos) << out;
+    EXPECT_NE(out.find("bestmove "), std::string::npos) << out;
+    EXPECT_EQ(out.find("info depth 2 score"), std::string::npos) << out;
+    const auto score_cp = first_uci_cp_score(out);
+    EXPECT_GT(score_cp, 19000) << out;
+    EXPECT_LE(score_cp, 20000) << out;
+    EXPECT_NE(score_cp, Value::tb_win_in_max_ply) << out;
+    EXPECT_EQ(out.find("score cp 29872"), std::string::npos) << out;
+
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+}
+
+TEST(syzygy_root, available_six_piece_dtz_returns_root_move) {
+    if (!init_test_syzygy(6))
+        GTEST_SKIP() << "6-man Syzygy tablebases not available";
+
+    Board b{"7k/8/5KQ1/8/2BB4/8/P7/8 w - - 0 1"};
+    ASSERT_EQ(count_bits(b.color_bb[white] | b.color_bb[black]), 6);
+
+    syzygy::Status status = syzygy::Status::Error;
+    const auto [score, move] = syzygy::DTZ_probe(b, status);
+    if (!move)
+        GTEST_SKIP() << "selected 6-man DTZ material is not installed";
+
+    EXPECT_EQ(status, syzygy::Status::Win);
+    EXPECT_EQ(score, Value::tb_win_in_max_ply);
+    const auto legal = generate_legal_moves<white>(b);
+    EXPECT_TRUE(std::ranges::any_of(legal, [&](Move candidate) {
+        return candidate == move;
+    }));
+}
+
+TEST(syzygy_root, immediate_mate_reports_mate_before_tablebase_cp) {
+    if (!init_test_syzygy(3))
+        GTEST_SKIP() << "Syzygy tablebases not available";
+
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = true;
+
+    Board b{"7k/8/5KQ1/8/8/8/8/8 w - - 0 1"};
+    SearchInfo si{b, 8};
+    si.board = b;
+    si.nnue.refresh(si.board);
+    si.starttime = std::chrono::high_resolution_clock::now();
+    si.stoptime = si.starttime + std::chrono::hours(1);
+    si.soft_stoptime = si.stoptime;
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    thread::pool.init_threads(si, 1);
+    thread::pool.wait();
+    const auto out = testing::internal::GetCapturedStdout();
+
+    EXPECT_NE(out.find("score mate 1"), std::string::npos) << out;
+    EXPECT_NE(out.find("bestmove g6g7"), std::string::npos) << out;
+    EXPECT_EQ(out.find("string tbhit win"), std::string::npos) << out;
+
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+}
+
+TEST(uci_root, lost_tablebase_root_does_not_search_after_tbhit) {
+    if (!init_test_syzygy(3))
+        GTEST_SKIP() << "Syzygy tablebases not available";
+
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = true;
+
+    Board b;
+    Uci uci{b};
+    uci("position fen 6k1/2Q5/5K2/8/8/8/8/8 b - - 10 96");
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    uci("go wtime 82790 btime 68419 winc 5000 binc 5000");
+    const auto out = testing::internal::GetCapturedStdout();
+
+    EXPECT_NE(out.find("string tbhit loss"), std::string::npos) << out;
+    EXPECT_NE(out.find("bestmove "), std::string::npos) << out;
+    EXPECT_EQ(out.find("info depth 2 score"), std::string::npos) << out;
+    const auto score_cp = first_uci_cp_score(out);
+    EXPECT_GE(score_cp, -20000) << out;
+    EXPECT_LT(score_cp, -19000) << out;
+    EXPECT_NE(score_cp, Value::tb_loss_in_max_ply) << out;
+    EXPECT_EQ(out.find("score cp -29872"), std::string::npos) << out;
+
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+}
+
+TEST(search_root, reports_mate_distance_when_search_finds_mate) {
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = false;
+
+    Board b{"8/8/8/8/3Q4/k7/8/1K6 w - - 0 1"};
+    SearchInfo si{b, 5};
+    si.board = b;
+    si.nnue.refresh(si.board);
+    si.starttime = std::chrono::high_resolution_clock::now();
+    si.stoptime = si.starttime + std::chrono::hours(1);
+    si.soft_stoptime = si.stoptime;
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    thread::pool.init_threads(si, 1);
+    thread::pool.wait();
+    const auto out = testing::internal::GetCapturedStdout();
+
+    EXPECT_NE(out.find("score mate 2"), std::string::npos) << out;
+    EXPECT_NE(out.find("bestmove "), std::string::npos) << out;
+    EXPECT_EQ(out.find("string tbhit"), std::string::npos) << out;
+
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+}
+
+TEST(syzygy_root, game_tb_positions_filter_to_best_wdl) {
+    if (!init_test_syzygy(6))
+        GTEST_SKIP() << "6-man Syzygy tablebases not available";
+
+    const std::vector<std::string> fens = {
+        "8/8/8/8/1k6/2n1KP2/p7/5R2 b - - 0 77",
+        "8/8/8/8/1k6/2n1KP2/8/R7 b - - 0 78",
+        "8/8/8/3n4/1k6/5P2/4K3/R7 b - - 2 79",
+        "8/8/8/8/1k3n2/5P2/8/R4K2 b - - 4 80",
+        "8/8/8/8/5n2/1k3P2/5K2/R7 b - - 6 81",
+        "8/8/8/8/1k3n2/5P2/5K2/5R2 b - - 8 82",
+        "8/8/8/8/5n2/1k2KP2/8/5R2 b - - 10 83",
+        "8/8/8/8/5n2/4KP2/1k6/2R5 b - - 12 84",
+        "8/8/8/8/5K2/5P2/8/2k5 b - - 0 85",
+        "8/8/8/8/8/4KP2/8/1k6 b - - 2 86",
+        "8/8/8/8/5P2/4K3/k7/8 b - - 0 87",
+        "8/8/8/5P2/8/k3K3/8/8 b - - 0 88",
+        "8/8/5P2/8/1k6/4K3/8/8 b - - 0 89",
+        "8/5P2/8/8/8/2k1K3/8/8 b - - 0 90",
+        "5Q2/8/8/8/2k5/4K3/8/8 b - - 0 91",
+        "3Q4/8/8/3k4/8/4K3/8/8 b - - 2 92",
+        "3Q4/8/4k3/8/4K3/8/8/8 b - - 4 93",
+        "3Q4/5k2/8/5K2/8/8/8/8 b - - 6 94",
+        "8/2Q3k1/8/5K2/8/8/8/8 b - - 8 95",
+        "6k1/2Q5/5K2/8/8/8/8/8 b - - 10 96",
+    };
+
+    const auto root_rank = [](syzygy::Status status) {
+        switch (status) {
+            case syzygy::Status::Win:  return 2;
+            case syzygy::Status::Draw: return 1;
+            case syzygy::Status::Loss: return 0;
+            default:                   return -1;
+        }
+    };
+    const auto child_to_root_rank = [&](syzygy::Status child_status) {
+        return root_rank(
+            child_status == syzygy::Status::Win  ? syzygy::Status::Loss
+          : child_status == syzygy::Status::Loss ? syzygy::Status::Win
+                                                 : syzygy::Status::Draw);
+    };
+    const auto tablebase_status = [](Board & board) {
+        syzygy::Status status = syzygy::Status::Error;
+        syzygy::DTZ_probe(board, status);
+        if (status == syzygy::Status::Error)
+            status = syzygy::WDL_probe(board);
+        const int rule50 = board.half_moves + static_cast<int>(board.gamestate.half_moves);
+        if (status == syzygy::Status::Error && rule50 <= 20) {
+            Board zero_rule50 = board;
+            zero_rule50.half_moves = 0;
+            zero_rule50.gamestate.half_moves = 0;
+            status = syzygy::WDL_probe(zero_rule50);
+        }
+        return status;
+    };
+    const auto apply_for_side = [](Board & board, Move move) {
+        if (board.side == white)
+            apply_move<white, true, false>(board, move);
+        else
+            apply_move<black, true, false>(board, move);
+    };
+
+    for (const auto & fen : fens) {
+        Board b{fen};
+        const auto original = b.fen();
+        const auto legal = b.side == white
+            ? generate_legal_moves<white>(b)
+            : generate_legal_moves<black>(b);
+        const auto filtered = syzygy::root_WDL_filter(b, legal);
+
+        const auto root_status = tablebase_status(b);
+        ASSERT_NE(root_status, syzygy::Status::Error) << fen;
+        const int root_best_rank = root_rank(root_status);
+        ASSERT_FALSE(filtered.empty()) << fen;
+
+        for (auto move : filtered) {
+            Board child = b;
+            apply_for_side(child, move);
+            const auto child_status = tablebase_status(child);
+            ASSERT_NE(child_status, syzygy::Status::Error) << fen << " move " << mv2str(move);
+            EXPECT_EQ(child_to_root_rank(child_status), root_best_rank)
+                << fen << " move " << mv2str(move);
+        }
+        EXPECT_EQ(b.fen(), original);
+    }
 }
 
 // --- AccumulatorCache pieces_hash regression ---------------------------------

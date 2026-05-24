@@ -52,44 +52,16 @@ bool move_gives_check(Board & b, NNUE::Net * nnue, Move move)
     return gives_check;
 }
 
-constexpr int root_wdl_rank(syzygy::Status status)
+int tablebase_uci_score(syzygy::Status status, int dtz)
 {
+    constexpr int tb_cp = 20000;
+    const int plies = std::max(0, dtz);
+
     switch (status) {
-        case syzygy::Status::Win:  return 2;
-        case syzygy::Status::Draw: return 1;
-        case syzygy::Status::Loss: return 0;
-        default:                   return -1;
+        case syzygy::Status::Win:  return tb_cp - plies;
+        case syzygy::Status::Loss: return -tb_cp + plies;
+        default:                   return Value::draw;
     }
-}
-
-template <Color Us>
-Movelist filter_root_tb_moves(Board & board, const Movelist & legal_moves)
-{
-    Movelist filtered;
-    int best_rank = -1;
-
-    for (const auto move : legal_moves) {
-        apply_move<Us, true, false>(board, move);
-        const auto child_status = syzygy::WDL_probe(board);
-        revert_move<Us, true, false>(board);
-
-        if (child_status == syzygy::Status::Error)
-            continue;
-
-        const auto rank = root_wdl_rank(
-            child_status == syzygy::Status::Win  ? syzygy::Status::Loss
-          : child_status == syzygy::Status::Loss ? syzygy::Status::Win
-                                                 : syzygy::Status::Draw);
-
-        if (rank > best_rank) {
-            filtered.clear();
-            best_rank = rank;
-        }
-        if (rank == best_rank)
-            filtered.emplace(move);
-    }
-
-    return filtered.empty() ? legal_moves : filtered;
 }
 
 }
@@ -853,6 +825,30 @@ Value aspiration_window(Value prev_eval, int depth, Worker & worker, Stack * ss)
     return score;
 }
 
+Move find_immediate_mate(
+    Board const & root,
+    Movelist const & candidates,
+    Movelist const & legal_root)
+{
+    for (const auto move : candidates) {
+        if (!move || std::ranges::find(legal_root, move) == legal_root.end())
+            continue;
+
+        Board child {root};
+        if (root.side == white) {
+            apply_move<white>(child, move);
+            if (is_check<black>(child) && generate_legal_moves<black>(child).empty())
+                return move;
+        } else {
+            apply_move<black>(child, move);
+            if (is_check<white>(child) && generate_legal_moves<white>(child).empty())
+                return move;
+        }
+    }
+
+    return Move {};
+}
+
 }
 
 void search_position(Worker & worker)
@@ -902,6 +898,18 @@ void search_position(Worker & worker)
             legal_fallback.empty() ? Move{} : legal_fallback[0]);
     }
 
+    const auto& root_candidates = si.has_searchmoves ? si.searchmoves : legal_fallback;
+    if (worker.id == 0) {
+        const auto mate_move = find_immediate_mate(board, root_candidates, legal_fallback);
+        if (mate_move && is_active_root_move(mate_move)) {
+            thread::pool.stop = true;
+            ucilog("info depth 1 score mate 1 nodes 1 nps 0 time 0 hashfull {} pv {}\n",
+                tt::ttable.get_hashfull(), mate_move);
+            ucilog("bestmove {}\n", mate_move);
+            return;
+        }
+    }
+
     // Root DTZ is reliable when available, but 6-man installs often have
     // WDL without DTZ. Always use root WDL as a correctness filter so search
     // cannot move from draw to loss just because DTZ is missing.
@@ -912,35 +920,43 @@ void search_position(Worker & worker)
          && num_pieces <= tb_max
          && !board.gamestate.can_castle(CastlingRights::any_castling)) {
             syzygy::Status tb_status = syzygy::Status::Error;
-            auto [tb_score, tb_move] = syzygy::DTZ_probe(board, tb_status);
-            if (tb_status == syzygy::Status::Error) {
+            int tb_dtz = -1;
+            auto [tb_score, tb_move] = syzygy::DTZ_probe(board, tb_status, &tb_dtz);
+            (void)tb_score;
+            if (tb_status == syzygy::Status::Error)
                 tb_status = syzygy::WDL_probe(board);
-                tb_score =
-                    tb_status == syzygy::Status::Win  ? Value::tb_win_in_max_ply
-                  : tb_status == syzygy::Status::Loss ? Value::tb_loss_in_max_ply
-                                                      : Value::draw;
-            }
 
             if (tb_status != syzygy::Status::Error) {
                 const char* verdict =
                     tb_status == syzygy::Status::Win  ? "win"
                   : tb_status == syzygy::Status::Loss ? "loss"
                                                       : "draw";
-                ucilog("info depth 1 score cp {} string tbhit {}\n", tb_score, verdict);
-                if (tb_move && tb_status != syzygy::Status::Loss && is_active_root_move(tb_move)) {
+                const auto tb_uci_score = tablebase_uci_score(tb_status, tb_dtz);
+                ucilog("info depth 1 score cp {} string tbhit {}\n", tb_uci_score, verdict);
+                if (tb_move && is_active_root_move(tb_move)) {
+                    thread::pool.stop = true;
                     ucilog("bestmove {}\n", tb_move);
                     return;
                 }
 
-                const auto& root_candidates = si.has_searchmoves ? si.searchmoves : legal_fallback;
-                const auto filtered = board.side == white
-                    ? filter_root_tb_moves<white>(board, root_candidates)
-                    : filter_root_tb_moves<black>(board, root_candidates);
+                bool filter_complete = false;
+                const auto filtered = syzygy::root_WDL_filter(board, root_candidates, &filter_complete);
                 if (!filtered.empty() && filtered.size() < root_candidates.size()) {
                     si.searchmoves = filtered;
                     si.has_searchmoves = true;
                     ucilog("info string tbhit {} filtered root moves {}/{}\n",
                         verdict, filtered.size(), root_candidates.size());
+                }
+                if (filter_complete && !filtered.empty()) {
+                    for (const auto move : filtered) {
+                        if (!is_active_root_move(move))
+                            continue;
+                        thread::pool.stop = true;
+                        ucilog("info string tbhit {} WDL root move {}/{}\n",
+                            verdict, filtered.size(), root_candidates.size());
+                        ucilog("bestmove {}\n", move);
+                        return;
+                    }
                 }
             }
         }
