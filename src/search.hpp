@@ -67,6 +67,7 @@ struct SearchInfo {
     int movetime {-1};
     Movelist searchmoves{};
     bool has_searchmoves = false;
+    bool suppress_tablebase_cutoffs = false;
 
     uint64_t tbhits = 0; //
     uint64_t nodes {};

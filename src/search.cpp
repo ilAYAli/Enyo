@@ -70,6 +70,15 @@ void log_tablebase_root_hit(syzygy::Status status, int dtz)
         ucilog("info depth 1 string tbhit {}\n", verdict);
 }
 
+bool is_tablebase_tt_value(Value value)
+{
+    const auto v = static_cast<int>(value);
+    return (v >= static_cast<int>(Value::tb_win_in_max_ply) - MAX_PLY
+            && v < static_cast<int>(Value::mate_in_max_ply))
+        || (v <= static_cast<int>(Value::tb_loss_in_max_ply) + MAX_PLY
+            && v > static_cast<int>(Value::mated_in_max_ply));
+}
+
 }
 
 int lmr_reductions[MAX_PLY][MAX_MOVES];
@@ -267,7 +276,9 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         tt_value = tt::value_from(tthit->value, ss->ply);
         tt_move = tthit->move;
 
-        if (Node != NodeType::PV && tt_value != Value::none) {
+        const bool can_use_tt_cut =
+            !si.suppress_tablebase_cutoffs || !is_tablebase_tt_value(tt_value);
+        if (Node != NodeType::PV && tt_value != Value::none && can_use_tt_cut) {
             if (tthit->flag == tt::type::ExactBound
             || (tthit->flag == tt::type::UpperBound && (tt_value <= alpha))
             || (tthit->flag == tt::type::LowerBound && (tt_value >= beta)))
@@ -434,7 +445,11 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         tt::ttable.hit++;
         tt_value = tt::value_from(tte->value, ss->ply);
         tt_move = tte->move;
+        const bool can_use_tt_cut =
+            !si.suppress_tablebase_cutoffs || !is_tablebase_tt_value(tt_value);
         const bool can_tt_cut =
+            can_use_tt_cut
+            &&
             tt_value != Value::none
             && tte->depth >= depth
             && (tte->flag == tt::type::ExactBound
@@ -467,6 +482,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             const auto num_pieces = count_bits(board.color_bb[Us] | board.color_bb[Them]);
             const auto tb_max = static_cast<int>(syzygy::largest());
             if (NT != NodeType::Root
+                && !worker.si.suppress_tablebase_cutoffs
                 && tb_max > 0
                 && num_pieces <= tb_max
                 && !board.gamestate.can_castle(CastlingRights::any_castling)) {
@@ -1032,7 +1048,7 @@ void search_position(Worker & worker)
     // Root WDL is the correctness gate. DTZ is useful as a fallback and
     // tie-break, but it is not distance-to-mate, so TB wins still go through
     // search after filtering out non-winning root moves.
-    if (worker.id == 0 && Constexpr::use_syzygy && cfgmgr.use_syzygy) {
+    if (Constexpr::use_syzygy && cfgmgr.use_syzygy) {
         const auto num_pieces = count_bits(board.color_bb[white] | board.color_bb[black]);
         const auto tb_max = static_cast<int>(syzygy::largest());
         if (tb_max > 0
@@ -1047,7 +1063,8 @@ void search_position(Worker & worker)
 
             if (tb_status != syzygy::Status::Error) {
                 const char* verdict = tablebase_verdict(tb_status);
-                log_tablebase_root_hit(tb_status, tb_dtz);
+                if (worker.id == 0)
+                    log_tablebase_root_hit(tb_status, tb_dtz);
                 const auto root_candidate_count = root_candidates.size();
                 bool let_search_choose = false;
                 bool wdl_filter_complete = false;
@@ -1058,8 +1075,11 @@ void search_position(Worker & worker)
 
                     si.searchmoves = filtered;
                     si.has_searchmoves = true;
-                    ucilog("info string tbhit {} {} root moves {}/{}\n",
-                        verdict, description, filtered.size(), root_candidate_count);
+                    if (tb_status == syzygy::Status::Win && num_pieces <= 5)
+                        si.suppress_tablebase_cutoffs = true;
+                    if (worker.id == 0)
+                        ucilog("info string tbhit {} {} root moves {}/{}\n",
+                            verdict, description, filtered.size(), root_candidate_count);
                     return true;
                 };
 
@@ -1067,12 +1087,13 @@ void search_position(Worker & worker)
                     const auto filtered = syzygy::root_WDL_filter(board, root_candidates, &wdl_filter_complete);
                     if (wdl_filter_complete && !filtered.empty()) {
                         let_search_choose = use_root_filter(filtered, "winning");
-                        ucilog("info string tbhit {} WDL root filter complete {}/{}\n",
-                            verdict, filtered.size(), root_candidate_count);
+                        if (worker.id == 0)
+                            ucilog("info string tbhit {} WDL root filter complete {}/{}\n",
+                                verdict, filtered.size(), root_candidate_count);
                     }
                 }
 
-                if (!let_search_choose && tb_dtz >= 0) {
+                if (worker.id == 0 && !let_search_choose && tb_dtz >= 0) {
                     bool tb_root_complete = false;
                     const auto tb_root_moves = syzygy::root_moves(board, root_candidates, &tb_root_complete);
                     const bool has_dtz_ranking = std::ranges::all_of(tb_root_moves, [](const auto & move) {
@@ -1094,7 +1115,7 @@ void search_position(Worker & worker)
                     }
                 }
 
-                if (!let_search_choose) {
+                if (worker.id == 0 && !let_search_choose) {
                     if (tb_move && is_active_root_move(tb_move)) {
                         thread::pool.stop = true;
                         ucilog("bestmove {}\n", tb_move);
