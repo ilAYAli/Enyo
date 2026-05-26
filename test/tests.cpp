@@ -1928,7 +1928,7 @@ TEST(syzygy_root, init_rejects_nested_incomplete_tablebase_dir) {
     fs::remove_all(root);
 }
 
-TEST(syzygy_root, six_piece_root_uses_dtz_immediate_or_wdl_filter) {
+TEST(syzygy_root, six_piece_win_root_searches_winning_moves) {
     if (!init_test_syzygy(6))
         GTEST_SKIP() << "6-man Syzygy tablebases not available";
 
@@ -1957,7 +1957,7 @@ TEST(syzygy_root, six_piece_root_uses_dtz_immediate_or_wdl_filter) {
     cfgmgr.num_threads = 1;
     cfgmgr.use_syzygy = true;
 
-    SearchInfo si{b, 8};
+    SearchInfo si{b, 2};
     si.board = b;
     si.nnue.refresh(si.board);
     si.starttime = std::chrono::high_resolution_clock::now();
@@ -1973,16 +1973,9 @@ TEST(syzygy_root, six_piece_root_uses_dtz_immediate_or_wdl_filter) {
 
     EXPECT_NE(out.find("string tbhit win"), std::string::npos) << out;
     EXPECT_NE(out.find("bestmove "), std::string::npos) << out;
-    if (dtz_move) {
-        EXPECT_EQ(out.find("info depth 2 score"), std::string::npos) << out;
-        EXPECT_EQ(out.find("score cp "), std::string::npos) << out;
-        EXPECT_EQ(out.find("score mate "), std::string::npos) << out;
-    } else {
-        EXPECT_EQ(out.find("WDL root move"), std::string::npos) << out;
-        EXPECT_NE(out.find("WDL root filter complete"), std::string::npos) << out;
-        EXPECT_TRUE(out.find("score cp ") != std::string::npos
-                 || out.find("score mate ") != std::string::npos) << out;
-    }
+    EXPECT_EQ(out.find("WDL root move"), std::string::npos) << out;
+    EXPECT_TRUE(out.find("score cp ") != std::string::npos
+             || out.find("score mate ") != std::string::npos) << out;
 
     cfgmgr.num_threads = old_threads;
     cfgmgr.use_syzygy = old_use_syzygy;
