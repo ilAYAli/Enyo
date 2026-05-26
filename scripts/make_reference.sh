@@ -4,6 +4,59 @@ set -euo pipefail
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(git -C "$script_dir" rev-parse --show-toplevel)"
 
+cleanup_old=false
+dry_run=false
+keep_count="${KEEP_ENGINES:-10}"
+
+usage() {
+    cat <<'EOF'
+Usage: scripts/make_reference.sh [--cleanup] [--dry-run] [--keep N]
+
+Build clean main as assets/engines/enyo_<hash>, move the old reference to
+candidate, and update reference to the new build.
+
+Options:
+  --cleanup   Remove old unreferenced enyo_<hash> binaries after promotion.
+  --dry-run   With --cleanup, print removals without deleting files.
+  --keep N    With --cleanup, keep the newest N unreferenced engines.
+  -h, --help  Show this help text.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --cleanup)
+            cleanup_old=true
+            ;;
+        --dry-run)
+            dry_run=true
+            ;;
+        --keep)
+            if [[ $# -lt 2 || ! "$2" =~ ^[0-9]+$ ]]; then
+                echo "ERROR: --keep needs a non-negative integer" >&2
+                exit 1
+            fi
+            keep_count="$2"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "ERROR: unknown argument: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+if [[ ! "$keep_count" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: KEEP_ENGINES needs a non-negative integer" >&2
+    exit 1
+fi
+
 main_ref="${MAIN_REF:-main}"
 build_type="${BUILD_TYPE:-Release}"
 jobs="${JOBS:-}"
@@ -80,3 +133,70 @@ install -m 755 "$build_dir/enyo" "$dest"
 echo "candidate -> $old_reference"
 echo "reference -> enyo_$short_hash"
 printf 'uci\nquit\n' | "$assets_dir/reference" | grep -E '^(id name|option name root_repetition_contempt|uciok)'
+
+if [[ "$cleanup_old" != true ]]; then
+    exit 0
+fi
+
+reference_target="$(readlink "$assets_dir/reference" || true)"
+candidate_target="$(readlink "$assets_dir/candidate" || true)"
+keep_paths=()
+for target in "$reference_target" "$candidate_target"; do
+    if [[ -z "$target" ]]; then
+        continue
+    fi
+    if [[ "$target" == /* ]]; then
+        keep_paths+=("$(cd "$(dirname "$target")" && pwd -P)/$(basename "$target")")
+    else
+        keep_paths+=("$assets_dir/$target")
+    fi
+done
+
+old_engines=()
+shopt -s nullglob
+engine_candidates=("$assets_dir"/enyo_[0-9a-f]*)
+shopt -u nullglob
+if [[ ${#engine_candidates[@]} -gt 0 ]]; then
+    while IFS= read -r engine; do
+        if [[ -f "$engine" && ! -L "$engine" ]]; then
+            old_engines+=("$engine")
+        fi
+    done < <(ls -1t "${engine_candidates[@]}")
+fi
+
+remove=()
+unreferenced_seen=0
+for engine in "${old_engines[@]}"; do
+    keep=false
+    for keep_path in "${keep_paths[@]}"; do
+        if [[ "$engine" == "$keep_path" ]]; then
+            keep=true
+            break
+        fi
+    done
+
+    if [[ "$keep" == true ]]; then
+        continue
+    fi
+
+    if (( unreferenced_seen < keep_count )); then
+        ((unreferenced_seen += 1))
+        continue
+    fi
+
+    remove+=("$engine")
+done
+
+if [[ ${#remove[@]} -eq 0 ]]; then
+    echo "cleanup: nothing to remove"
+    exit 0
+fi
+
+for engine in "${remove[@]}"; do
+    if [[ "$dry_run" == true ]]; then
+        echo "cleanup: would remove $engine"
+    else
+        echo "cleanup: removing $engine"
+        rm -f -- "$engine"
+    fi
+done
