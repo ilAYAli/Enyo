@@ -996,6 +996,7 @@ void search_position(Worker & worker)
     Value prev_iter_value = Value::none;
     bool score_swung_last_iter = false;
     constexpr int score_swing_cp = 100;
+    Move last_legal_bestmove {};
 
     for (auto depth = 1; depth <= max_depth; ++depth) {
         if (worker.time_expired())
@@ -1087,12 +1088,30 @@ void search_position(Worker & worker)
         if (worker.id)
             continue;
 
+        if (is_active_root_move(worker.bestmove))
+            last_legal_bestmove = worker.bestmove;
+
         const auto pvbm = worker.pvline.bestmove();
         auto mate_distance = mate_in_moves(value);
         if (pvbm) {
-            if (mate_distance > 0 && mate_distance < shortest_mate.moves)
-                shortest_mate = {mate_distance, pvbm};
-            worker.bestmove = pvbm;
+            if (!is_active_root_move(pvbm)) {
+                eventlog::log<eventlog::Log::error>(
+                    "pv bestmove={} is NOT legal/active at root, depth={}. "
+                    "prev_bestmove={} last_legal_bestmove={} pv_str='{}' len[0]={} fen={}\n",
+                    pvbm,
+                    depth,
+                    bestmove_before_iter,
+                    last_legal_bestmove,
+                    worker.pvline.str(),
+                    static_cast<int>(worker.pvline.len[0]),
+                    board.fen());
+                worker.bestmove = last_legal_bestmove;
+            } else {
+                if (mate_distance > 0 && mate_distance < shortest_mate.moves)
+                    shortest_mate = {mate_distance, pvbm};
+                worker.bestmove = pvbm;
+                last_legal_bestmove = pvbm;
+            }
             // TM: record whether this iteration changed the bestmove,
             // for the next iteration's soft-time extension check. Only
             // meaningful from depth 2 onward (depth 1 has no previous).
@@ -1100,7 +1119,9 @@ void search_position(Worker & worker)
             // just-updated worker.bestmove — the latter is rewritten
             // mid-iteration by the Root incremental-publish path.
             bestmove_changed_last_iter =
-                (depth > 1) && (pvbm != bestmove_before_iter);
+                (depth > 1)
+                && is_active_root_move(worker.bestmove)
+                && worker.bestmove != bestmove_before_iter;
             // TM: track score volatility for the next iteration's
             // soft-time extension check. A sharp swing (>= 100 cp)
             // means the tree is re-evaluating a key branch — worth
@@ -1138,11 +1159,17 @@ void search_position(Worker & worker)
                 worker.pvline.str(),
                 static_cast<int>(worker.pvline.len[0]),
                 board.fen());
+            worker.bestmove = last_legal_bestmove;
         }
 
         const std::string score_info = mate_distance
             ? fmt::format("mate {}", mate_distance)
             : fmt::format("cp {}", value);
+        const auto info_pv = is_active_root_move(pvbm)
+            ? worker.pvline.str()
+            : fmt::format("{}", is_active_root_move(worker.bestmove)
+                ? worker.bestmove
+                : active_root_fallback());
 
         std::string info_string = fmt::format("info depth {} score {} nodes {} nps {} time {} hashfull {} pv {}",
             depth,
@@ -1151,7 +1178,7 @@ void search_position(Worker & worker)
             thread::pool.get_nps(),
             std::chrono::duration_cast<std::chrono::milliseconds>(si.elapsed_time).count(),
             tt::ttable.get_hashfull(),
-            worker.pvline.str());
+            info_pv);
 
         ucilog("{}\n", info_string);
 
@@ -1168,14 +1195,19 @@ void search_position(Worker & worker)
 
         Move out = is_active_root_move(shortest_mate.move) ? shortest_mate.move : worker.bestmove;
 
+        if (!is_active_root_move(out) && is_active_root_move(last_legal_bestmove))
+            out = last_legal_bestmove;
+
         if (!is_active_root_move(out)) {
             const auto fallback = active_root_fallback();
             eventlog::log<eventlog::Log::error>(
                 "bestmove fallback fired. pre_fallback_out={} worker.bestmove={} shortest_mate.move={} "
-                "pvline.bestmove()={} pv_str='{}' len[0]={} legal_fallback[0]={} active_fallback={} fen={}\n",
+                "last_legal_bestmove={} pvline.bestmove()={} pv_str='{}' len[0]={} legal_fallback[0]={} "
+                "active_fallback={} fen={}\n",
                 out,
                 worker.bestmove,
                 shortest_mate.move,
+                last_legal_bestmove,
                 worker.pvline.bestmove(),
                 worker.pvline.str(),
                 static_cast<int>(worker.pvline.len[0]),

@@ -654,6 +654,21 @@ TEST(search, qsearch_pv_does_not_copy_stale_tail) {
     EXPECT_EQ(worker.pvline.str(), "e2e4");
 }
 
+TEST(search, pv_setlen_clears_stale_bestmove) {
+    Board b{"startpos"};
+    QuadraticPV pv;
+    const auto move = resolve_move<white>(b, pawn, e2, e4);
+
+    pv.setmove(move, 0);
+    ASSERT_EQ(pv.bestmove(), move);
+    ASSERT_EQ(pv.str(), "e2e4");
+
+    pv.setlen(0);
+
+    EXPECT_EQ(pv.bestmove(), Move {});
+    EXPECT_EQ(pv.str(), "");
+}
+
 TEST(search, root_repetition_is_penalized_when_not_worse) {
     Board b{"startpos"};
 
@@ -747,6 +762,30 @@ TEST(search, hypersion_check_net_root_evasions_find_safer_defenses) {
     }
 
     cfgmgr.num_threads = old_threads;
+}
+
+TEST(search, repeated_check_root_keeps_legal_previous_bestmove) {
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = false;
+
+    Board b;
+    Uci uci{b};
+    uci("position startpos moves e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 a7a6 c1e3 e7e5 d4b3 c8e6 f2f3 h7h5 c3d5 e6d5 e4d5 b8d7 d1d2 g7g6 e1c1 d7b6 c1b1 b6d5 e3g5 f8e7 f1d3 d8c7 h1e1 f6d7 f3f4 e7g5 f4g5 d5b6 d3e4 b6c4 d2b4 a8b8 b3d2 c4b6 d2f1 d7c5 f1e3 c5e4 b4e4 e8g8 e1f1 f8d8 c2c4 b8c8 h2h4 c7c6 e4d3 b6c4 e3d5 c6b5 f1f2 c8c5 d5e7 g8f8 d3f3 c4a3 b1a1 a3c2 a1b1 c2a3 f3a3 f8e7 a3f3 b5c4 f3f6 e7e8 f6h8 e8e7 h8f6");
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    uci("go nodes 200000");
+    const auto out = testing::internal::GetCapturedStdout();
+
+    EXPECT_NE(out.find("bestmove e7e8"), std::string::npos) << out;
+    EXPECT_EQ(out.find("bestmove e7d7"), std::string::npos) << out;
+    EXPECT_EQ(out.find(" pv h1g8"), std::string::npos) << out;
+
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
 }
 
 // Qsearch-in-check regression. Pre-fix, qsearch unconditionally
