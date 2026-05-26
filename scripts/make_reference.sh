@@ -17,7 +17,7 @@ candidate, and update reference to the new build.
 
 Options:
   --cleanup   Remove old unreferenced enyo_<hash> binaries after promotion.
-  --dry-run   With --cleanup, print removals without deleting files.
+  --dry-run   Print what would happen without building or changing files.
   --keep N    With --cleanup, keep the newest N unreferenced engines.
   -h, --help  Show this help text.
 EOF
@@ -88,9 +88,93 @@ if [[ ! -e "$old_reference_path" ]]; then
     exit 1
 fi
 
+target_path() {
+    local target="$1"
+    if [[ "$target" == /* ]]; then
+        printf '%s\n' "$(cd "$(dirname "$target")" && pwd -P)/$(basename "$target")"
+    else
+        printf '%s\n' "$assets_dir/$target"
+    fi
+}
+
+cleanup_old_engines() {
+    local reference_target candidate_target target keep_path engine keep
+    local keep_paths=()
+    local old_engines=()
+    local remove=()
+    local unreferenced_seen=0
+
+    reference_target="$(readlink "$assets_dir/reference" || true)"
+    candidate_target="$(readlink "$assets_dir/candidate" || true)"
+
+    for target in "$reference_target" "$candidate_target"; do
+        if [[ -n "$target" ]]; then
+            keep_paths+=("$(target_path "$target")")
+        fi
+    done
+
+    shopt -s nullglob
+    local engine_candidates=("$assets_dir"/enyo_[0-9a-f]*)
+    shopt -u nullglob
+    if [[ ${#engine_candidates[@]} -gt 0 ]]; then
+        while IFS= read -r engine; do
+            if [[ -f "$engine" && ! -L "$engine" ]]; then
+                old_engines+=("$engine")
+            fi
+        done < <(ls -1t "${engine_candidates[@]}")
+    fi
+
+    for engine in "${old_engines[@]}"; do
+        keep=false
+        for keep_path in "${keep_paths[@]}"; do
+            if [[ "$engine" == "$keep_path" ]]; then
+                keep=true
+                break
+            fi
+        done
+
+        if [[ "$keep" == true ]]; then
+            continue
+        fi
+
+        if (( unreferenced_seen < keep_count )); then
+            ((unreferenced_seen += 1))
+            continue
+        fi
+
+        remove+=("$engine")
+    done
+
+    if [[ ${#remove[@]} -eq 0 ]]; then
+        echo "cleanup: nothing to remove"
+        return 0
+    fi
+
+    for engine in "${remove[@]}"; do
+        if [[ "$dry_run" == true ]]; then
+            echo "cleanup: would remove $engine"
+        else
+            echo "cleanup: removing $engine"
+            rm -f -- "$engine"
+        fi
+    done
+}
+
+if [[ "$dry_run" == true && "$cleanup_old" == true ]]; then
+    cleanup_old_engines
+    exit 0
+fi
+
 main_commit="$(git -C "$repo_root" rev-parse --verify "$main_ref^{commit}")"
 short_hash="$(git -C "$repo_root" rev-parse --short "$main_commit")"
 dest="$assets_dir/enyo_$short_hash"
+
+if [[ "$dry_run" == true ]]; then
+    echo "dry-run: would build $main_ref ($short_hash) as $dest"
+    echo "dry-run: would set candidate -> $old_reference"
+    echo "dry-run: would set reference -> enyo_$short_hash"
+    exit 0
+fi
 
 if [[ -e "$dest" ]]; then
     echo "ERROR: destination already exists: $dest" >&2
@@ -138,65 +222,4 @@ if [[ "$cleanup_old" != true ]]; then
     exit 0
 fi
 
-reference_target="$(readlink "$assets_dir/reference" || true)"
-candidate_target="$(readlink "$assets_dir/candidate" || true)"
-keep_paths=()
-for target in "$reference_target" "$candidate_target"; do
-    if [[ -z "$target" ]]; then
-        continue
-    fi
-    if [[ "$target" == /* ]]; then
-        keep_paths+=("$(cd "$(dirname "$target")" && pwd -P)/$(basename "$target")")
-    else
-        keep_paths+=("$assets_dir/$target")
-    fi
-done
-
-old_engines=()
-shopt -s nullglob
-engine_candidates=("$assets_dir"/enyo_[0-9a-f]*)
-shopt -u nullglob
-if [[ ${#engine_candidates[@]} -gt 0 ]]; then
-    while IFS= read -r engine; do
-        if [[ -f "$engine" && ! -L "$engine" ]]; then
-            old_engines+=("$engine")
-        fi
-    done < <(ls -1t "${engine_candidates[@]}")
-fi
-
-remove=()
-unreferenced_seen=0
-for engine in "${old_engines[@]}"; do
-    keep=false
-    for keep_path in "${keep_paths[@]}"; do
-        if [[ "$engine" == "$keep_path" ]]; then
-            keep=true
-            break
-        fi
-    done
-
-    if [[ "$keep" == true ]]; then
-        continue
-    fi
-
-    if (( unreferenced_seen < keep_count )); then
-        ((unreferenced_seen += 1))
-        continue
-    fi
-
-    remove+=("$engine")
-done
-
-if [[ ${#remove[@]} -eq 0 ]]; then
-    echo "cleanup: nothing to remove"
-    exit 0
-fi
-
-for engine in "${remove[@]}"; do
-    if [[ "$dry_run" == true ]]; then
-        echo "cleanup: would remove $engine"
-    else
-        echo "cleanup: removing $engine"
-        rm -f -- "$engine"
-    fi
-done
+cleanup_old_engines
