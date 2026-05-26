@@ -88,17 +88,19 @@ struct QuadraticPV {
 
     void setmove(Move move, int ply) {
         table[ply][ply] = move;
-        std::ranges::copy(
-            std::views::drop(
-                table[ply + 1],
-                ply + 1) | std::views::take(len[ply + 1] - ply - 1),
-                std::ranges::begin(table[ply]) + ply + 1
-        );
-        len[ply] = len[ply + 1];
+        const int child_len = len[ply + 1];
+        const int tail_begin = ply + 1;
+        const int tail_len = std::max(0, child_len - tail_begin);
+        std::ranges::copy_n(
+            std::ranges::begin(table[ply + 1]) + tail_begin,
+            tail_len,
+            std::ranges::begin(table[ply]) + tail_begin);
+        len[ply] = static_cast<uint8_t>(tail_begin + tail_len);
     }
 
     void setlen(int ply) {
         len[ply] = static_cast<uint8_t>(ply);
+        table[ply][ply] = Move {};
     }
 
     void clear() {
@@ -111,7 +113,7 @@ struct QuadraticPV {
     }
 
     constexpr Move bestmove() const {
-        return table[0][0];
+        return len[0] > 0 ? table[0][0] : Move {};
     }
 
     uint8_t len[MAX_PLY] = {};
