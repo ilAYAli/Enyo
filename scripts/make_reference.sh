@@ -114,11 +114,11 @@ cleanup_old_engines() {
     done
 
     shopt -s nullglob
-    local engine_candidates=("$assets_dir"/enyo_[0-9a-f]*)
+    local engine_candidates=("$assets_dir"/enyo_*)
     shopt -u nullglob
     if [[ ${#engine_candidates[@]} -gt 0 ]]; then
         while IFS= read -r engine; do
-            if [[ -f "$engine" && ! -L "$engine" ]]; then
+            if [[ -f "$engine" && ! -L "$engine" && "$(basename "$engine")" =~ ^enyo_[0-9a-f]+$ ]]; then
                 old_engines+=("$engine")
             fi
         done < <(ls -1t "${engine_candidates[@]}")
