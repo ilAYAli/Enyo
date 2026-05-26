@@ -134,6 +134,70 @@ Value evaluate(Board & b, NNUE::Net * nnue)
     }
 }
 
+int tablebase_status_rank(syzygy::Status status)
+{
+    switch (status) {
+        case syzygy::Status::Win:  return 2;
+        case syzygy::Status::Draw: return 1;
+        case syzygy::Status::Loss: return 0;
+        default:                   return -1;
+    }
+}
+
+template <Color Us>
+Value static_root_score_after(Board & b, NNUE::Net * nnue, Move move)
+{
+    apply_move<Us, true, true>(b, move, nnue);
+    const auto score = static_cast<Value>(-evaluate<~Us, true>(b, nnue));
+    revert_move<Us, true, true>(b, nnue);
+    return score;
+}
+
+Value static_root_score_after(Board & b, NNUE::Net * nnue, Move move)
+{
+    return b.side == white
+        ? static_root_score_after<white>(b, nnue, move)
+        : static_root_score_after<black>(b, nnue, move);
+}
+
+bool better_tablebase_root_move(
+    syzygy::RootMove candidate,
+    Value candidate_eval,
+    syzygy::RootMove current,
+    Value current_eval)
+{
+    const auto candidate_rank = tablebase_status_rank(candidate.status);
+    const auto current_rank = tablebase_status_rank(current.status);
+    if (candidate_rank != current_rank)
+        return candidate_rank > current_rank;
+
+    if (candidate.dtz >= 0 && current.dtz >= 0 && candidate.dtz != current.dtz) {
+        if (candidate.status == syzygy::Status::Win)
+            return candidate.dtz < current.dtz;
+        return candidate.dtz > current.dtz;
+    }
+
+    return candidate_eval > current_eval;
+}
+
+Move select_tablebase_root_move(Board & b, NNUE::Net * nnue, const std::vector<syzygy::RootMove> & moves)
+{
+    Move best_move {};
+    syzygy::RootMove best {};
+    Value best_eval = -Value::infinite;
+
+    for (const auto tb_move : moves) {
+        const auto eval = static_root_score_after(b, nnue, tb_move.move);
+        if (!best_move || better_tablebase_root_move(tb_move, eval, best, best_eval)) {
+            best_move = tb_move.move;
+            best = tb_move;
+            best_eval = eval;
+        }
+    }
+
+    return best_move;
+}
+
 template <Color Us, NodeType Node>
 Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int beta)
 {
@@ -954,6 +1018,23 @@ void search_position(Worker & worker)
             if (tb_status != syzygy::Status::Error) {
                 const char* verdict = tablebase_verdict(tb_status);
                 log_tablebase_root_hit(tb_status, tb_dtz);
+
+                if (tb_dtz >= 0) {
+                    bool tb_root_complete = false;
+                    const auto tb_root_moves = syzygy::root_moves(board, root_candidates, &tb_root_complete);
+                    const bool has_dtz_ranking = std::ranges::all_of(tb_root_moves, [](const auto & move) {
+                        return move.dtz >= 0;
+                    });
+                    if (tb_root_complete && !tb_root_moves.empty() && has_dtz_ranking) {
+                        const auto selected = select_tablebase_root_move(board, &si.nnue, tb_root_moves);
+                        if (selected && is_active_root_move(selected)) {
+                            thread::pool.stop = true;
+                            ucilog("bestmove {}\n", selected);
+                            return;
+                        }
+                    }
+                }
+
                 if (tb_move && is_active_root_move(tb_move)) {
                     thread::pool.stop = true;
                     ucilog("bestmove {}\n", tb_move);

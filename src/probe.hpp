@@ -6,6 +6,8 @@
 #include "movelist.hpp"
 #include "fmt/core.h"
 
+#include <vector>
+
 
 namespace syzygy {
 
@@ -20,9 +22,16 @@ enum Status {
     Loss,
 };
 
+struct RootMove {
+    enyo::Move move {};
+    Status status {Error};
+    int dtz {-1};
+};
+
 
 Status WDL_probe(enyo::Board & board);
 std::pair<int, enyo::Move> DTZ_probe(enyo::Board&  board, Status & status, int * dtz = nullptr);
+std::vector<RootMove> root_moves(enyo::Board & board, const ::Movelist & root_moves, bool * complete = nullptr);
 ::Movelist root_WDL_filter(enyo::Board & board, const ::Movelist & root_moves, bool * complete = nullptr);
 
 struct pos {

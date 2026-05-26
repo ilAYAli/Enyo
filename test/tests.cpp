@@ -1787,6 +1787,25 @@ TEST(syzygy_root, dtz_returns_move_for_lost_root_position) {
     }));
 }
 
+TEST(syzygy_root, root_moves_reports_complete_dtz_candidates) {
+    if (!init_test_syzygy(3))
+        GTEST_SKIP() << "Syzygy tablebases not available";
+
+    Board b{"6k1/2Q5/5K2/8/8/8/8/8 b - - 10 96"};
+    const auto legal = generate_legal_moves<black>(b);
+    bool complete = false;
+    const auto moves = syzygy::root_moves(b, legal, &complete);
+
+    ASSERT_TRUE(complete);
+    ASSERT_EQ(moves.size(), legal.size());
+    EXPECT_TRUE(std::ranges::all_of(moves, [](const auto & move) {
+        return move.dtz >= 0;
+    }));
+    EXPECT_TRUE(std::ranges::any_of(moves, [](const auto & move) {
+        return move.status == syzygy::Status::Loss;
+    }));
+}
+
 TEST(syzygy_root, piece_count_boundaries) {
     if (!init_test_syzygy(6))
         GTEST_SKIP() << "6-man Syzygy tablebases not available";

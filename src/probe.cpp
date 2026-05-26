@@ -215,6 +215,32 @@ bool has_table_for(Board const & board, const std::unordered_set<std::string> & 
     return tables.contains(names[0]) || tables.contains(names[1]);
 }
 
+syzygy::Status status_from_wdl(int wdl)
+{
+    switch (wdl) {
+        case TB_WIN:  return syzygy::Status::Win;
+        case TB_LOSS: return syzygy::Status::Loss;
+        default:      return syzygy::Status::Draw;
+    }
+}
+
+bool move_matches_tablebase_result(Move move, unsigned result)
+{
+    if (sqconv(move.src_sq()) != TB_GET_FROM(result))
+        return false;
+    if (sqconv(move.dst_sq()) != TB_GET_TO(result))
+        return false;
+
+    const PieceType promo_translation[] = {no_piece_type, queen, rook, bishop, knight};
+    const auto promo = TB_GET_PROMOTES(result);
+    if (promo == PYRRHIC_FLAG_NONE)
+        return move.flags() != Move::Flags::promote;
+    if (static_cast<size_t>(promo) >= std::size(promo_translation))
+        return false;
+    return move.flags() == Move::Flags::promote
+        && move.promo_piece() == promo_translation[promo];
+}
+
 void append_unique(std::vector<std::string> & paths, const std::filesystem::path & path)
 {
     const auto str = path.string();
@@ -424,6 +450,116 @@ std::pair<int, Move> DTZ_probe(Board & board, Status & status, int * dtz)
         }
     }
     return {0, Move{}};
+#endif
+}
+
+std::vector<RootMove> root_moves(Board & board, const Movelist & root_moves, bool * complete)
+{
+    if (complete)
+        *complete = false;
+#if !ENYO_USE_SYZYGY
+    (void)board;
+    (void)root_moves;
+    return {};
+#else
+    if (!initialized)
+        return {};
+    if (!has_table_for(board, available_wdl))
+        return {};
+
+    auto pos = board2pos(board);
+    if (pos.castling != 0)
+        return {};
+
+    std::vector<RootMove> out;
+    out.reserve(root_moves.size());
+
+    if (has_table_for(board, available_dtz)) {
+        std::array<unsigned, TB_MAX_MOVES + 1> results {};
+        const unsigned root_result = tb_probe_root(
+            pos.white, pos.black,
+            pos.kings, pos.queens, pos.rooks, pos.bishops, pos.knights, pos.pawns,
+            pos.rule50,
+            pos.ep,
+            pos.turn,
+            results.data());
+
+        if (root_result != TB_RESULT_FAILED
+         && root_result != TB_RESULT_CHECKMATE
+         && root_result != TB_RESULT_STALEMATE) {
+            for (const auto root_move : root_moves) {
+                bool found = false;
+                for (const auto tb_result : results) {
+                    if (tb_result == TB_RESULT_FAILED)
+                        break;
+                    if (!move_matches_tablebase_result(root_move, tb_result))
+                        continue;
+
+                    out.emplace_back(
+                        root_move,
+                        status_from_wdl(static_cast<int>(TB_GET_WDL(tb_result))),
+                        static_cast<int>(TB_GET_DTZ(tb_result)));
+                    found = true;
+                    break;
+                }
+                if (!found)
+                    return {};
+            }
+            if (complete)
+                *complete = true;
+            return out;
+        }
+    }
+
+    const bool use_rule50 = pos.rule50 != 0 && has_table_for(board, available_dtz);
+    TbRootMoves results {};
+    const int ok = tb_probe_root_wdl(
+        pos.white, pos.black,
+        pos.kings, pos.queens, pos.rooks, pos.bishops, pos.knights, pos.pawns,
+        use_rule50 ? pos.rule50 : 0,
+        pos.ep,
+        pos.turn,
+        use_rule50,
+        &results);
+    if (!ok)
+        return {};
+
+    const PieceType promo_translation[] = {no_piece_type, queen, rook, bishop, knight};
+    const auto matches = [&](Move move, PyrrhicMove tb_move) {
+        if (sqconv(move.src_sq()) != PYRRHIC_MOVE_FROM(tb_move))
+            return false;
+        if (sqconv(move.dst_sq()) != PYRRHIC_MOVE_TO(tb_move))
+            return false;
+
+        const auto promo = PYRRHIC_MOVE_FLAGS(tb_move) & PYRRHIC_MASK_PROMO_FLAGS;
+        if (promo == PYRRHIC_FLAG_NONE)
+            return move.flags() != Move::Flags::promote;
+        if (static_cast<size_t>(promo) >= std::size(promo_translation))
+            return false;
+        return move.flags() == Move::Flags::promote
+            && move.promo_piece() == promo_translation[promo];
+    };
+
+    for (const auto root_move : root_moves) {
+        bool found = false;
+        for (unsigned i = 0; i < results.size; ++i) {
+            if (!matches(root_move, results.moves[i].move))
+                continue;
+            const auto status =
+                results.moves[i].tbRank > 0 ? Status::Win
+              : results.moves[i].tbRank < 0 ? Status::Loss
+                                            : Status::Draw;
+            out.emplace_back(root_move, status, -1);
+            found = true;
+            break;
+        }
+        if (!found)
+            return {};
+    }
+
+    if (complete)
+        *complete = true;
+    return out;
 #endif
 }
 
