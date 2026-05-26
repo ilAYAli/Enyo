@@ -654,6 +654,68 @@ TEST(search, qsearch_pv_does_not_copy_stale_tail) {
     EXPECT_EQ(worker.pvline.str(), "e2e4");
 }
 
+TEST(search, root_repetition_is_penalized_when_not_worse) {
+    Board b{"startpos"};
+
+    apply_move<white>(b, resolve_move<white>(b, knight, g1, f3));
+    apply_move<black>(b, resolve_move<black>(b, knight, g8, f6));
+    apply_move<white>(b, resolve_move<white>(b, knight, f3, g1));
+    apply_move<black>(b, resolve_move<black>(b, knight, f6, g8));
+    apply_move<white>(b, resolve_move<white>(b, knight, g1, f3));
+    apply_move<black>(b, resolve_move<black>(b, knight, g8, f6));
+    apply_move<white>(b, resolve_move<white>(b, knight, f3, g1));
+    apply_move<black>(b, resolve_move<black>(b, knight, f6, g8));
+
+    const int old_contempt = cfgmgr.root_repetition_contempt;
+    cfgmgr.root_repetition_contempt = 24;
+
+    SearchInfo si{b, 1};
+    si.board = b;
+    si.searchmoves.emplace(resolve_move<white>(b, knight, g1, f3));
+    si.has_searchmoves = true;
+    si.nnue.refresh(si.board);
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    tt::ttable.prepare();
+
+    Worker worker{si, 0};
+    worker.pvline.clear();
+    worker.pvline.table[1][1] = resolve_move<black>(b, knight, g8, f6);
+    worker.pvline.len[1] = 2;
+
+    Stack stack[MAX_PLY + 5];
+    stack[0].ply = 4;
+    stack[1].ply = 3;
+    stack[2].ply = 2;
+    stack[3].ply = 1;
+    for (int i = 0; i <= MAX_PLY; i++)
+        stack[i + 4].ply = i;
+    Stack * ss = stack + 4;
+
+    const auto value = negamax<white, NodeType::Root>(
+        1, worker, ss, -Value::infinite, Value::infinite);
+
+    EXPECT_EQ(value, static_cast<Value>(-cfgmgr.root_repetition_contempt));
+    EXPECT_EQ(worker.pvline.bestmove(), resolve_move<white>(b, knight, g1, f3));
+    EXPECT_EQ(worker.pvline.len[0], 1);
+    EXPECT_EQ(worker.pvline.str(), "g1f3");
+
+    cfgmgr.root_repetition_contempt = old_contempt;
+}
+
+TEST(search, root_repetition_contempt_is_configurable) {
+    const int old_contempt = cfgmgr.root_repetition_contempt;
+
+    EXPECT_TRUE(cfgmgr.setopt("root_repetition_contempt", "48"));
+    EXPECT_EQ(cfgmgr.root_repetition_contempt, 48);
+
+    EXPECT_TRUE(cfgmgr.setopt("root_repetition_contempt", "-1"));
+    EXPECT_EQ(cfgmgr.root_repetition_contempt, 0);
+
+    cfgmgr.root_repetition_contempt = old_contempt;
+}
+
 TEST(search, hypersion_check_net_root_evasions_find_safer_defenses) {
     const struct {
         std::string_view fen;

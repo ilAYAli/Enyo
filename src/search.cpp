@@ -659,48 +659,62 @@ moves_loop:
         // make move
         apply_move<Us, true, true>(b, move, &worker.si.nnue);
 
-        // LMR: Late Move Reductions
-        if (depth >= 3 && !ss->in_check && !protect_quiet_check && ss->move_count > 3 + 2 * pv_node) {
-            int R = lmr_reductions[depth][ss->move_count];
-
-            R += !improving;
-            R -= NT != NodeType::NonPV;
-            R -= is_capture;
-            if (is_quiet) {
-                const int h = worker.history[Us][move.src_sq()][move.dst_sq()];
-                R -= std::clamp(h / 8192, -2, 2);
-            }
-            R = std::clamp(new_depth - R, 1, new_depth + 1);
-
-            if (worker.time_expired()) {
-                revert_move<Us, true, true>(b, &worker.si.nnue);
-                return Value::draw;
-            }
-
-            value = -negamax<Them, NodeType::NonPV>(R, worker, ss + 1, -alpha -1, -alpha);
-
-            do_fullsearch = value > alpha && R < new_depth;
+        // A root move that immediately creates a claimable repetition is a
+        // voluntary draw. If the root static eval is not worse, treat that
+        // draw as slightly worse than continuing play so Enyo does not pick
+        // threefolds as equal-score tie breaks.
+        const bool root_repetition =
+            NT == NodeType::Root
+            && cfgmgr.root_repetition_contempt > 0
+            && ss->eval >= Value::draw
+            && is_repetition(b);
+        if (root_repetition) {
+            worker.pvline.setlen(ss->ply + 1);
+            value = static_cast<Value>(-cfgmgr.root_repetition_contempt);
         } else {
-            do_fullsearch = !pv_node || ss->move_count > 1;
-        }
+            // LMR: Late Move Reductions
+            if (depth >= 3 && !ss->in_check && !protect_quiet_check && ss->move_count > 3 + 2 * pv_node) {
+                int R = lmr_reductions[depth][ss->move_count];
 
-        if (do_fullsearch) {
-            if (worker.time_expired()) {
-                revert_move<Us, true, true>(b, &worker.si.nnue);
-                return Value::draw;
+                R += !improving;
+                R -= NT != NodeType::NonPV;
+                R -= is_capture;
+                if (is_quiet) {
+                    const int h = worker.history[Us][move.src_sq()][move.dst_sq()];
+                    R -= std::clamp(h / 8192, -2, 2);
+                }
+                R = std::clamp(new_depth - R, 1, new_depth + 1);
+
+                if (worker.time_expired()) {
+                    revert_move<Us, true, true>(b, &worker.si.nnue);
+                    return Value::draw;
+                }
+
+                value = -negamax<Them, NodeType::NonPV>(R, worker, ss + 1, -alpha -1, -alpha);
+
+                do_fullsearch = value > alpha && R < new_depth;
+            } else {
+                do_fullsearch = !pv_node || ss->move_count > 1;
             }
 
-            value = -negamax<Them, NodeType::NonPV>(new_depth, worker, ss + 1, -alpha -1, -alpha);
-        }
+            if (do_fullsearch) {
+                if (worker.time_expired()) {
+                    revert_move<Us, true, true>(b, &worker.si.nnue);
+                    return Value::draw;
+                }
 
-        // PVS: Principal Variation Search
-        if (NT != NodeType::NonPV && ((value > alpha && value < beta) || ss->move_count == 1)) {
-            if (worker.time_expired()) {
-                revert_move<Us, true, true>(b, &worker.si.nnue);
-                return Value::draw;
+                value = -negamax<Them, NodeType::NonPV>(new_depth, worker, ss + 1, -alpha -1, -alpha);
             }
 
-            value = -negamax<Them, NodeType::PV>(new_depth, worker, ss + 1, -beta, -alpha);
+            // PVS: Principal Variation Search
+            if (NT != NodeType::NonPV && ((value > alpha && value < beta) || ss->move_count == 1)) {
+                if (worker.time_expired()) {
+                    revert_move<Us, true, true>(b, &worker.si.nnue);
+                    return Value::draw;
+                }
+
+                value = -negamax<Them, NodeType::PV>(new_depth, worker, ss + 1, -beta, -alpha);
+            }
         }
 
         // revert move

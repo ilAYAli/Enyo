@@ -107,6 +107,7 @@ class ConfigManager {
 public:
     int num_threads         = 1;
     int hash_size           = 1024;
+    int root_repetition_contempt = 24;
     bool use_chess_960      = false;
     bool use_tt             = true;
     bool use_tt_exact_cutoff = true;
@@ -140,6 +141,7 @@ public:
         return
             concat("Threads",       "spin", num_threads, int(1), int(64)) +
             concat("Hash",          "spin", hash_size, int(1), int(33554432)) +
+            concat("root_repetition_contempt", "spin", root_repetition_contempt, int(0), int(1000)) +
             concat("use_tt",        "check", use_tt) +
             concat("use_tt_exact_cutoff", "check", use_tt_exact_cutoff) +
             concat("use_tt_lower_cutoff", "check", use_tt_lower_cutoff) +
@@ -162,6 +164,8 @@ public:
             num_threads = std::stoi(value);
         else if (lc == "hash")
             hash_size = std::stoi(value);
+        else if (lc == "root_repetition_contempt")
+            root_repetition_contempt = std::max(0, std::stoi(value));
         else if (lc == "uci_chess960")
             use_chess_960 = true;
         else if (lc == "use_tt")
@@ -204,6 +208,9 @@ private:
 
             num_threads = c.value("threads",   num_threads);
             hash_size   = c.value("Hash",      hash_size);
+            root_repetition_contempt = std::max(
+                0,
+                c.value("root_repetition_contempt", root_repetition_contempt));
             nnue_file   = c.value("nnue_file", nnue_file);
             logfile     = c.value("logfile",   logfile);
             syzygy_path = c.value("syzygy_path", c.value("SyzygyPath", syzygy_path));
