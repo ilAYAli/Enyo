@@ -12,11 +12,11 @@ usage() {
     cat <<'EOF'
 Usage: scripts/make_reference.sh [--cleanup] [--dry-run] [--keep N]
 
-Build clean main as assets/engines/enyo_<hash>, move the old reference to
-candidate, and update reference to the new build.
+With no options, build clean main as assets/engines/enyo_<hash>, move the old
+reference to candidate, and update reference to the new build.
 
 Options:
-  --cleanup   Remove old unreferenced enyo_<hash> binaries after promotion.
+  --cleanup   Remove old unreferenced enyo_<hash> binaries, without building.
   --dry-run   Print what would happen without building or changing files.
   --keep N    With --cleanup, keep the newest N unreferenced engines.
   -h, --help  Show this help text.
@@ -160,7 +160,7 @@ cleanup_old_engines() {
     done
 }
 
-if [[ "$dry_run" == true && "$cleanup_old" == true ]]; then
+if [[ "$cleanup_old" == true ]]; then
     cleanup_old_engines
     exit 0
 fi
