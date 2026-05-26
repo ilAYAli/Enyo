@@ -142,8 +142,11 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     }
 
     constexpr Color Them = ~Us;
+    constexpr bool pv_node = Node != NodeType::NonPV;
 
     auto & si = worker.si;
+    if constexpr (pv_node)
+        worker.pvline.setlen(ss->ply);
 
     // negamax sets ss->in_check for the frame it hands us, but recursive
     // qsearch->qsearch calls use ss+1, which was never touched by negamax.
@@ -244,6 +247,8 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
             best_value = score;
             if (score > alpha) {
                 best_move = move;
+                if constexpr (pv_node)
+                    worker.pvline.setmove(move, ss->ply);
 
                 if (score < beta)
                     alpha = score;
