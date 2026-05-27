@@ -87,8 +87,15 @@ struct QuadraticPV {
         clear();
     }
 
-    void setmove(Move move, int ply) {
+    void setmove(Move move, int ply, bool copy_tail = true) {
         table[ply][ply] = move;
+        if (!copy_tail) {
+            len[ply] = static_cast<uint8_t>(ply + 1);
+            if (ply + 1 < MAX_PLY)
+                table[ply][ply + 1] = Move {};
+            return;
+        }
+
         const int child_len = len[ply + 1];
         const int tail_begin = ply + 1;
         const int tail_len = std::max(0, child_len - tail_begin);

@@ -240,16 +240,18 @@ Movelist tablebase_moves_with_status(
 template <Color Us, NodeType Node>
 Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int beta)
 {
-    if (worker.time_expired()) {
-        return Value::draw;
-    }
-
     constexpr Color Them = ~Us;
     constexpr bool pv_node = Node != NodeType::NonPV;
 
     auto & si = worker.si;
-    if constexpr (pv_node)
-        worker.pvline.setlen(ss->ply);
+    if constexpr (pv_node) {
+        if (ss->ply < MAX_PLY)
+            worker.pvline.setlen(ss->ply);
+    }
+
+    if (worker.time_expired()) {
+        return Value::draw;
+    }
 
     // negamax sets ss->in_check for the frame it hands us, but recursive
     // qsearch->qsearch calls use ss+1, which was never touched by negamax.
@@ -394,6 +396,9 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
 template <Color Us, NodeType NT>
 Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
 {
+    if (ss->ply < MAX_PLY)
+        worker.pvline.setlen(ss->ply);
+
     if (worker.time_expired()) {
         return Value::draw;
     }
@@ -412,8 +417,6 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             ? evaluate<Us, true>(b, &si.nnue)
             : Value::draw;
     }
-
-    worker.pvline.setlen(ss->ply);
 
     ss->in_check = is_check<Us>(b);
     ss->eval = Value::none;
@@ -461,7 +464,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
                     ? si.searchmoves
                     : generate_legal_moves<Us>(b);
                 if (std::ranges::find(root_moves, tt_move) != root_moves.end()) {
-                    worker.pvline.setmove(tt_move, ss->ply);
+                    worker.pvline.setmove(tt_move, ss->ply, false);
                     worker.bestmove = tt_move;
                     tt::ttable.cut++;
                     return tt_value;
@@ -768,6 +771,7 @@ moves_loop:
 
         // make move
         apply_move<Us, true, true>(b, move, &worker.si.nnue);
+        bool child_pv_valid = false;
 
         // A root move that immediately creates a claimable repetition is a
         // voluntary draw. If the root static eval is not worse, treat that
@@ -824,6 +828,7 @@ moves_loop:
                 }
 
                 value = -negamax<Them, NodeType::PV>(new_depth, worker, ss + 1, -beta, -alpha);
+                child_pv_valid = true;
             }
         }
 
@@ -839,7 +844,7 @@ moves_loop:
                 alpha = value;
                 best_move = move;
 
-                worker.pvline.setmove(move, ss->ply);
+                worker.pvline.setmove(move, ss->ply, child_pv_valid);
 
                 // Publish the best root move incrementally. If the ID loop
                 // is interrupted mid-iteration (hard-time fires after some
@@ -1325,20 +1330,23 @@ void search_position(Worker & worker)
         const std::string score_info = mate_distance
             ? fmt::format("mate {}", mate_distance)
             : fmt::format("cp {}", value);
+
         const auto info_pv = is_active_root_move(pvbm)
             ? worker.pvline.str()
             : fmt::format("{}", is_active_root_move(worker.bestmove)
                 ? worker.bestmove
                 : active_root_fallback());
 
-        std::string info_string = fmt::format("info depth {} score {} nodes {} nps {} time {} hashfull {} pv {}",
+        std::string info_string = fmt::format("info depth {} score {} nodes {} nps {} time {} hashfull {}",
             depth,
             score_info,
             thread::pool.get_nodes(),
             thread::pool.get_nps(),
             std::chrono::duration_cast<std::chrono::milliseconds>(si.elapsed_time).count(),
-            tt::ttable.get_hashfull(),
-            info_pv);
+            tt::ttable.get_hashfull());
+
+        if (!info_pv.empty())
+            info_string += fmt::format(" pv {}", info_pv);
 
         ucilog("{}\n", info_string);
 

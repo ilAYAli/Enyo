@@ -669,6 +669,21 @@ TEST(search, pv_setlen_clears_stale_bestmove) {
     EXPECT_EQ(pv.str(), "");
 }
 
+TEST(search, pv_setmove_without_tail_does_not_copy_stale_child) {
+    Board b{"startpos"};
+    QuadraticPV pv;
+
+    pv.table[1][1] = resolve_move<black>(b, pawn, a7, a6);
+    pv.len[1] = 2;
+
+    const auto move = resolve_move<white>(b, pawn, e2, e4);
+    pv.setmove(move, 0, false);
+
+    EXPECT_EQ(pv.bestmove(), move);
+    EXPECT_EQ(pv.len[0], 1);
+    EXPECT_EQ(pv.str(), "e2e4");
+}
+
 TEST(search, root_repetition_is_penalized_when_not_worse) {
     Board b{"startpos"};
 
