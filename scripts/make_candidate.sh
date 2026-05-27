@@ -10,16 +10,16 @@ keep_count="${KEEP_ENGINES:-10}"
 
 usage() {
     cat <<'EOF'
-Usage: scripts/make_reference.sh [--cleanup] [--dry-run] [--keep N]
+Usage: scripts/make_candidate.sh [--cleanup] [--dry-run] [--keep N]
 
 With no options, build clean main as assets/engines/enyo_<hash>, move the old
-reference to candidate, and update reference to the new build.
+reference to candidate, and update candidate to the new build.
 
 Options:
-  --cleanup   Remove old unreferenced enyo_<hash> binaries, without building.
-  --dry-run   Print what would happen without building or changing files.
-  --keep N    With --cleanup, keep the newest N unreferenced engines.
-  -h, --help  Show this help text.
+  --cleanup    Remove old uncandidated enyo_<hash> binaries, without building.
+  --dry-run    Print what would happen without building or changing files.
+  --keep N     With --cleanup, keep the newest N uncandidated engines.
+  -h, --help   Show this help text.
 EOF
 }
 
@@ -84,7 +84,7 @@ else
 fi
 
 if [[ ! -e "$old_reference_path" ]]; then
-    echo "ERROR: old reference target does not exist: $old_reference_path" >&2
+    echo "ERROR: old candidate target does not exist: $old_reference_path" >&2
     exit 1
 fi
 
@@ -98,30 +98,30 @@ target_path() {
 }
 
 cleanup_old_engines() {
-    local reference_target candidate_target target keep_path engine keep
+    local candidate_target reference_target target keep_path engine keep
     local keep_paths=()
     local old_engines=()
     local remove=()
-    local unreferenced_seen=0
+    local uncandidated_seen=0
 
-    reference_target="$(readlink "$assets_dir/reference" || true)"
     candidate_target="$(readlink "$assets_dir/candidate" || true)"
+    reference_target="$(readlink "$assets_dir/reference" || true)"
 
-    for target in "$reference_target" "$candidate_target"; do
+    for target in "$candidate_target" "$reference_target"; do
         if [[ -n "$target" ]]; then
             keep_paths+=("$(target_path "$target")")
         fi
     done
 
     shopt -s nullglob
-    local engine_candidates=("$assets_dir"/enyo_*)
+    local engine_references=("$assets_dir"/enyo_*)
     shopt -u nullglob
-    if [[ ${#engine_candidates[@]} -gt 0 ]]; then
+    if [[ ${#engine_references[@]} -gt 0 ]]; then
         while IFS= read -r engine; do
             if [[ -f "$engine" && ! -L "$engine" && "$(basename "$engine")" =~ ^enyo_[0-9a-f]+$ ]]; then
                 old_engines+=("$engine")
             fi
-        done < <(ls -1t "${engine_candidates[@]}")
+        done < <(ls -1t "$assets_dir"/enyo_*)
     fi
 
     for engine in "${old_engines[@]}"; do
@@ -137,8 +137,8 @@ cleanup_old_engines() {
             continue
         fi
 
-        if (( unreferenced_seen < keep_count )); then
-            ((unreferenced_seen += 1))
+        if (( uncandidated_seen < keep_count )); then
+            ((uncandidated_seen += 1))
             continue
         fi
 
@@ -171,18 +171,16 @@ dest="$assets_dir/enyo_$short_hash"
 
 if [[ "$dry_run" == true ]]; then
     echo "dry-run: would build $main_ref ($short_hash) as $dest"
-    echo "dry-run: would set candidate -> $old_reference"
-    echo "dry-run: would set reference -> enyo_$short_hash"
+    echo "dry-run: would set reference -> $old_reference"
+    echo "dry-run: would set candidate -> enyo_$short_hash"
     exit 0
 fi
 
 if [[ -e "$dest" ]]; then
-    echo "ERROR: destination already exists: $dest" >&2
-    echo "Remove it first if this rebuild is intentional." >&2
-    exit 1
+    rm -f -- "$dest"
 fi
 
-tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/enyo-reference-${short_hash}.XXXXXX")"
+tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/enyo-candidate-${short_hash}.XXXXXX")"
 worktree="$tmp_root/src"
 build_dir="$tmp_root/build"
 
@@ -210,16 +208,10 @@ install -m 755 "$build_dir/enyo" "$dest"
 
 (
     cd "$assets_dir"
-    ln -sfn "$old_reference" candidate
-    ln -sfn "enyo_$short_hash" reference
+    ln -sfn "$old_reference" reference
+    ln -sfn "enyo_$short_hash" candidate
 )
 
-echo "candidate -> $old_reference"
-echo "reference -> enyo_$short_hash"
-printf 'uci\nquit\n' | "$assets_dir/reference" | grep -E '^(id name|option name root_repetition_contempt|uciok)'
-
-if [[ "$cleanup_old" != true ]]; then
-    exit 0
-fi
-
-cleanup_old_engines
+echo "reference -> $old_reference"
+echo "candidate -> enyo_$short_hash"
+printf 'uci\nquit\n' | "$assets_dir/candidate" | grep -E '^(id name|option name root_repetition_contempt|uciok)'
