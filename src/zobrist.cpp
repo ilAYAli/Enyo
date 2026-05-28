@@ -8,8 +8,8 @@ namespace zobrist {
 uint64_t generate_hash(Board const & b)
 {
     uint64_t zkey = 0;
-    for (unsigned c = 0; c < color_nb; c++) {
-        for (int pt = pawn; pt <= king; pt++) {
+    for (int c = white; c < color_nb; c++) {
+        for (int pt = static_cast<int>(pawn); pt <= static_cast<int>(king); pt++) {
             auto bb = b.pt_bb[c][pt];
             while (bb) {
                 const auto sq = pop_lsb(bb);

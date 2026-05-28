@@ -383,7 +383,7 @@ struct Gamestate {
     inline unsigned set_castle(CastlingRights cr, bool val) {
         return val
             ? castling_rights |= cr
-            : castling_rights &= ~cr;
+            : castling_rights &= ~static_cast<unsigned>(cr);
     }
 };
 
