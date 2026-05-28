@@ -460,9 +460,9 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
              || (tte->flag == tt::type::LowerBound && tt_value >= beta));
         if constexpr (NT == NodeType::Root) {
             if (can_tt_cut && tt_move) {
-                const auto root_moves = !si.searchmoves.empty()
+                const auto & root_moves = !si.searchmoves.empty()
                     ? si.searchmoves
-                    : generate_legal_moves<Us>(b);
+                    : worker.root_moves;
                 if (std::ranges::find(root_moves, tt_move) != root_moves.end()) {
                     worker.pvline.setmove(tt_move, ss->ply, false);
                     worker.bestmove = tt_move;
@@ -694,9 +694,13 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     }
 
 moves_loop:
-    auto const lm = (NT == NodeType::Root && !si.searchmoves.empty())
-        ? si.searchmoves
-        : generate_legal_moves<Us>(b);
+    auto const lm = [&] {
+        if constexpr (NT == NodeType::Root) {
+            if (!si.searchmoves.empty()) return si.searchmoves;
+            if (!worker.root_moves.empty()) return worker.root_moves;
+        }
+        return generate_legal_moves<Us>(b);
+    }();
     if (lm.empty()) {
         if (ss->in_check) {
             auto prev_move = b.history[b.histply-1].move;
@@ -1007,6 +1011,8 @@ void search_position(Worker & worker)
     const auto legal_fallback = board.side == white
         ? generate_legal_moves<white>(board)
         : generate_legal_moves<black>(board);
+
+    worker.root_moves = legal_fallback;
 
     const auto is_legal_root_move = [&](Move move) {
         return std::ranges::find(legal_fallback, move) != legal_fallback.end();

@@ -142,6 +142,7 @@ struct Worker {
     Stack * ss { nullptr };
     Move killers[2] { 0, 0 };
     Move bestmove{};
+    Movelist root_moves {};
     QuadraticPV pvline {};
     std::array<std::array<std::array<int16_t, square_nb>, square_nb>, color_nb> history{};
     std::array<std::array<std::array<Move, square_nb>, square_nb>, color_nb> countermove{};
