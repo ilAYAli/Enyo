@@ -82,6 +82,12 @@ git config user.email "petter@wahlman.no"
 ```
 
 - Stage only files that belong to the requested change.
+- Keep one feature, fix, or experiment in one logical commit whenever
+  practical, so it is easy to revert.
+- Refactor or cleanup work found while developing should preferably be amended
+  or squashed into the commit that introduced the code. Use a separate refactor
+  commit only when the refactor is independently useful and does not change
+  behavior.
 - Squash local fixup churn before merge.
 - Do not commit unrelated NNUE run artifacts.
 - If a commit message is needed, request it from the Coding Agent.
