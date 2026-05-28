@@ -8,13 +8,19 @@
 </p>
 
 <h3>Engine</h3>
-Enyo is a C++23 <a href="https://www.chessprogramming.org/UCI" rel="nofollow">UCI</a> chess engine built around iterative deepening negamax/PVS
-alpha-beta search and NNUE evaluation.<br>
-Enyo's NNUE training work has used self-play positions and deeper offline teacher
-labels, public evaluation data, and curated engine-training positions.<br>
+Enyo is a C++23 <a href="https://www.chessprogramming.org/UCI" rel="nofollow">UCI</a> chess engine built around iterative deepening negamax/PVS alpha-beta search and <a href="https://www.chessprogramming.org/NNUE" rel="nofollow">NNUE</a> evaluation.<br>
 
 <h3>Board representation</h3>
-<br>
+Enyo's board representation was originally written from first principles rather
+than modeled after another engine, and one of those early design choices stuck:
+squares are indexed from <code>h1</code>.
+Internally, <code>h1</code> is 0, <code>g1</code> is 1, ..., and <code>a8</code> is 63.
+
+This differs from the A1-indexed layout used by many chess libraries and
+tablebase APIs, so Enyo converts square and bitboard layouts at external
+boundaries such as Syzygy/Pyrrhic probing, NNUE export/import, FEN, PGN, and
+UCI handling.
+
 <pre>
 H1 indexed: white king =  3, black king = 59
         A  B  C  D  E  F  G  H
@@ -33,9 +39,6 @@ H1 indexed: white king =  3, black king = 59
 <h3>Move generation</h3>
 <a href="https://www.chessprogramming.org/Bitboards" rel="nofollow">Bitboards</a><br>
 <a href="https://www.chessprogramming.org/Magic_Bitboards" rel="nofollow">Magic Bitboards</a><br>
-Legal move generation for standard chess<br>
-Incremental make/unmake with hash, NNUE, castling, en-passant, halfmove and fullmove state<br>
-<br>
 </pre>
 
 <h3>Search</h3>
@@ -60,10 +63,9 @@ Incremental make/unmake with hash, NNUE, castling, en-passant, halfmove and full
 Continuation history / countermove history<br>
 Root soft-time instability extension on best-move flips and score volatility<br>
 Repetition and 50-move draw handling<br>
-Root tablebase move selection when Syzygy DTZ is available<br>
+Root tablebase move selection when Syzygy is available<br>
 
 <h3>Evaluation</h3>
-<a href="https://www.chessprogramming.org/NNUE" rel="nofollow">NNUE</a><br>
 Enyo uses a native NNUE trained for Enyo's own feature layout, accumulator
 implementation, and search/evaluation pipeline. The network is trained with
 Bullet from Enyo-generated positions, self-play data, and replayed game logs.
@@ -76,11 +78,12 @@ training pipeline target concrete search failures, tactical tails, and endgame
 conversion mistakes instead of only fitting scalar position evaluations.
 
 Candidate networks are exported to Enyo's runtime <code>.nn</code> format and
-validated engine-side before use. Training and exporter tooling live in the
-sibling <code>nnue</code> repository.
+validated engine-side before use.
+Training and exporter tooling live in the sibling <code>nnue</code> repository.
 
 <h3>Tools</H3>
 <a href="https://github.com/ilAYAli/replay" rel="nofollow">Replay</a>
+Evaluation validator<br>
 <a href="https://github.com/Disservin/fastchess" rel="nofollow">Fastchess</a>
 CLI tool for running SPRT validation<br>
 <a href="https://github.com/jw1912/bullet" rel="nofollow">Bullet</a>
