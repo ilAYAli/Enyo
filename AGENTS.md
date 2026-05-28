@@ -101,6 +101,10 @@ git config user.email "petter@wahlman.no"
 ## Shared Long-Run Rules
 
 - Run long NNUE jobs in the appropriate tmux session.
+- Every long-running task must notify `AI_stdin` on `done` and `fail` by using
+  `~/scripts/notifai.sh` through `tools/events/nnue_event_ntfy.sh`.
+  Do not post directly to `AI_stdin` unless `notifai.sh` is unavailable and the
+  hook falls back to authenticated ntfy publishing.
 - Notifications should report task, ETA, and project state. Avoid phase spam.
 - Remove temporary tmux windows when the job is done.
 - Do not leave nested shells in tmux panes.
