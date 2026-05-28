@@ -64,29 +64,40 @@ Root tablebase move selection when Syzygy DTZ is available<br>
 
 <h3>Evaluation</h3>
 <a href="https://www.chessprogramming.org/NNUE" rel="nofollow">NNUE</a><br>
-The native Enyo NNUE is an Enyo-owned network trained from scratch with Bullet. It uses Enyo’s
-feature layout, accumulator code, and evaluation pipeline, with architecture choices such as input
-king buckets and hidden width selected at build time.
-Network training and exporter tooling lives in the sibling <code>nnue</code> repo<br>
+Enyo uses a native NNUE trained for Enyo's own feature layout, accumulator
+implementation, and search/evaluation pipeline. The network is trained with
+Bullet from Enyo-generated positions, self-play data, and replayed game logs.
 
+<a href="https://github.com/ilAYAli/replay" rel="nofollow">Replay</a>
+is used to turn real Enyo games into supervised training targets: the
+engine replays logged positions, scores legal candidate moves with an oracle,
+and builds child-move ranking data from the resulting positions. This lets the
+training pipeline target concrete search failures, tactical tails, and endgame
+conversion mistakes instead of only fitting scalar position evaluations.
+
+Candidate networks are exported to Enyo's runtime <code>.nn</code> format and
+validated engine-side before use. Training and exporter tooling live in the
+sibling <code>nnue</code> repository.
 
 <h3>Tools</H3>
+<a href="https://github.com/ilAYAli/replay" rel="nofollow">Replay</a>
 <a href="https://github.com/Disservin/fastchess" rel="nofollow">Fastchess</a>
 CLI tool for running SPRT validation<br>
-
-
-<h3>Acknowledgments</h3>
 <a href="https://github.com/jw1912/bullet" rel="nofollow">Bullet</a>
 ML library for NNUE training<br>
 <a href="https://github.com/Disservin/binpack-rust" rel="nofollow">Binpack</a>
 Rust port of the Stockfish binpack reader<br>
 <a href="https://github.com/AndyGrant/Pyrrhic" rel="nofollow">Pyrrhic</a>
 Syzygy WDL/DTZ probing<br>
+
+
+<h3>Acknowledgments</h3>
 Bluefever Software: Chess Engine In C <a href="https://github.com/bluefeversoft/vice" rel="nofollow">Vice</a><br>
 Chess Programming <a href="https://www.youtube.com/playlist?list=PLmN0neTso3Jxh8ZIylk74JpwfiWNI76Cs" rel="nofollow">BBC</a></br>
 
 <h3>Inspirations</h3>
 * Stockfish<br>
+* Berserk<br>
 * Rice<br>
 * Smallbrain<br>
 * Various open source engines.<br>
