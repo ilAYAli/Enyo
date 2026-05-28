@@ -5,7 +5,7 @@ have the full history; this file is the summary.
 
 ## Goal
 
-A network stronger than `nnue/default.net`. Current `distill_P` beats
+A network stronger than `net/default.net`. Current `distill_P` beats
 our previous champion `A` by +48 Elo pairwise but still trails
 `default.net` by an estimated ~280 Elo.
 

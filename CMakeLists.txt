@@ -98,7 +98,7 @@ endif()
 set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} CACHE INTERNAL "cxx flags")
 
 #---[ NNUE network ]-----------------------------------------------------------
-add_compile_definitions(EVAL_FILE="${CMAKE_CURRENT_SOURCE_DIR}/nnue/default.net")
+add_compile_definitions(EVAL_FILE="${CMAKE_CURRENT_SOURCE_DIR}/net/default.net")
 
 #---[ dependencies ]-----------------------------------------------------------
 find_package(fmt REQUIRED)

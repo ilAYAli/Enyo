@@ -1097,7 +1097,7 @@ static bool LoadFromDisk(const std::string & path)
 void Init(const std::string & file_name)
 {
     // Empty path or missing file → use the embedded default network
-    // (produced by INCBIN at build time from nnue/default.net). This
+    // (produced by INCBIN at build time from net/default.net). This
     // is the behavior the engine has always had; runtime override via
     // setoption/config is new.
     if (!file_name.empty() && LoadFromDisk(file_name)) {
