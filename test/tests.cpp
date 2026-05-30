@@ -946,6 +946,14 @@ void ensure_network_mock_weights() {
     Network::SetWeights(weights.data(), biases.data());
 }
 
+fs::path write_zero_network_blob(size_t size, std::string_view name) {
+    const auto path = fs::temp_directory_path() / std::string(name);
+    std::vector<char> bytes(size, 0);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return path;
+}
+
 bool network_accumulators_match(const Network::Accumulator & a,
                               const Network::Accumulator & b) {
     for (int view = 0; view < 2; ++view) {
@@ -953,6 +961,26 @@ bool network_accumulators_match(const Network::Accumulator & a,
             if (a.values[view][i] != b.values[view][i]) return false;
     }
     return true;
+}
+
+TEST(network_model, detects_supported_bucket_counts) {
+    EXPECT_EQ(Network::DetectInputBuckets(Network::NetworkSize(16)), 16);
+    EXPECT_EQ(Network::DetectInputBuckets(Network::NetworkSize(32)), 32);
+    EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(16)));
+    EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(32)));
+    EXPECT_EQ(Network::DetectInputBuckets(Network::NetworkSize(16) + 1), 0);
+    EXPECT_LT(Network::NetworkSize(16), Network::NetworkSize(32));
+}
+
+TEST(network_model, loads_32_bucket_network_blob) {
+    const auto path = write_zero_network_blob(
+        Network::NetworkSize(32),
+        "enyo_zero_32_bucket.nn");
+    ASSERT_TRUE(Network::LoadNetwork(path.c_str()));
+    EXPECT_EQ(Network::INPUT_BUCKETS, 32);
+    EXPECT_NE(Network::INPUT_WEIGHTS, nullptr);
+    fs::remove(path);
+    ensure_network_mock_weights();
 }
 
 void materialize_network(Board & b, NNUE::Net & net) {

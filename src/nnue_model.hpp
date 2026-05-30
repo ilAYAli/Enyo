@@ -23,10 +23,12 @@ namespace Network {
 // ---------------------------------------------------------------------
 // Architecture constants.
 // ---------------------------------------------------------------------
-inline constexpr int N_KING_BUCKETS = 16;
+inline constexpr int DEFAULT_INPUT_BUCKETS = 16;
+inline constexpr int MAX_INPUT_BUCKETS = 32;
+inline constexpr int N_KING_BUCKETS = MAX_INPUT_BUCKETS;
 inline constexpr int N_PIECE_TYPES  = 12;               // 6 types × 2 colors
 inline constexpr int N_SQUARES      = 64;
-inline constexpr int N_FEATURES     = N_KING_BUCKETS * N_PIECE_TYPES * N_SQUARES; // 12288
+inline constexpr int N_FEATURES     = N_KING_BUCKETS * N_PIECE_TYPES * N_SQUARES;
 inline constexpr int N_HIDDEN       = 1024;
 inline constexpr int N_L1           = 2 * N_HIDDEN;     // 2048
 inline constexpr int N_L2           = 16;
@@ -37,7 +39,7 @@ inline constexpr int N_OUTPUT       = 1;
 // Network king buckets. Do not reshuffle this; feature indexing and
 // bucket-crossing refresh logic are calibrated against this exact layout.
 // ---------------------------------------------------------------------
-inline constexpr std::array<uint16_t, 64> KING_BUCKETS = {
+inline constexpr std::array<uint16_t, 64> KING_BUCKETS_16 = {
     15, 15, 14, 14, 14, 14, 15, 15,
     15, 15, 14, 14, 14, 14, 15, 15,
     13, 13, 12, 12, 12, 12, 13, 13,
@@ -47,6 +49,23 @@ inline constexpr std::array<uint16_t, 64> KING_BUCKETS = {
      7,  6,  5,  4,  4,  5,  6,  7,
      3,  2,  1,  0,  0,  1,  2,  3,
 };
+
+inline constexpr std::array<uint16_t, 64> KING_BUCKETS_32 = {
+    31, 30, 29, 28, 28, 29, 30, 31,
+    27, 26, 25, 24, 24, 25, 26, 27,
+    23, 22, 21, 20, 20, 21, 22, 23,
+    19, 18, 17, 16, 16, 17, 18, 19,
+    15, 14, 13, 12, 12, 13, 14, 15,
+    11, 10,  9,  8,  8,  9, 10, 11,
+     7,  6,  5,  4,  4,  5,  6,  7,
+     3,  2,  1,  0,  0,  1,  2,  3,
+};
+
+extern int INPUT_BUCKETS;
+
+inline constexpr int FeatureCount(int input_buckets) {
+    return input_buckets * N_PIECE_TYPES * N_SQUARES;
+}
 
 // ---------------------------------------------------------------------
 // h1-indexed Enyo square -> a8-indexed network square.
@@ -74,6 +93,14 @@ inline constexpr int to_net_piece(enyo::PieceType pt, enyo::Color c) {
     return (bpt << 1) | static_cast<int>(c);
 }
 
+inline constexpr const std::array<uint16_t, 64> & KingBucketsFor(int input_buckets) {
+    return input_buckets == 32 ? KING_BUCKETS_32 : KING_BUCKETS_16;
+}
+
+inline uint16_t KingBucket(int oriented_net_sq) {
+    return KingBucketsFor(INPUT_BUCKETS)[static_cast<size_t>(oriented_net_sq)];
+}
+
 // ---------------------------------------------------------------------
 // Enyo-side wrapper: takes (piece_type, piece_color, sq, king_sq, view)
 // in Enyo's native representation and converts to the network layout.
@@ -90,7 +117,8 @@ inline constexpr int FeatureIdxFormula(int pt,
                                        int piece_color,
                                        int enyo_sq,
                                        int enyo_kingsq,
-                                       int view)
+                                       int view,
+                                       int input_buckets = DEFAULT_INPUT_BUCKETS)
 {
     if (pt == 0)
         return 0;
@@ -103,7 +131,8 @@ inline constexpr int FeatureIdxFormula(int pt,
     const int oK  = (7 * !(kingsq & 4)) ^ (56 * view) ^ kingsq;
     const int oSq = (7 * !(kingsq & 4)) ^ (56 * view) ^ sq;
 
-    return KING_BUCKETS[static_cast<size_t>(oK)] * 12 * 64 + oP * 64 + oSq;
+    return KingBucketsFor(input_buckets)[static_cast<size_t>(oK)] * 12 * 64
+        + oP * 64 + oSq;
 }
 
 inline constexpr size_t FEATURE_IDX_TABLE_SIZE =
@@ -121,7 +150,7 @@ inline constexpr size_t FeatureIdxTableOffset(int pt,
         * 2 + static_cast<size_t>(view);
 }
 
-inline std::array<int, FEATURE_IDX_TABLE_SIZE> MakeFeatureIdxTable()
+inline std::array<int, FEATURE_IDX_TABLE_SIZE> MakeFeatureIdxTable(int input_buckets)
 {
     std::array<int, FEATURE_IDX_TABLE_SIZE> table{};
     for (int pt = 0; pt <= 6; ++pt)
@@ -130,11 +159,13 @@ inline std::array<int, FEATURE_IDX_TABLE_SIZE> MakeFeatureIdxTable()
                 for (int ksq = 0; ksq < N_SQUARES; ++ksq)
                     for (int view = 0; view < 2; ++view)
                         table[FeatureIdxTableOffset(pt, color, sq, ksq, view)] =
-                            FeatureIdxFormula(pt, color, sq, ksq, view);
+                            FeatureIdxFormula(
+                                pt, color, sq, ksq, view, input_buckets);
     return table;
 }
 
-inline const auto FEATURE_IDX_TABLE = MakeFeatureIdxTable();
+inline const auto FEATURE_IDX_TABLE_16 = MakeFeatureIdxTable(16);
+inline const auto FEATURE_IDX_TABLE_32 = MakeFeatureIdxTable(32);
 
 inline int FeatureIdx(enyo::PieceType pt,
                       enyo::Color piece_color,
@@ -142,13 +173,15 @@ inline int FeatureIdx(enyo::PieceType pt,
                       enyo::square_t enyo_kingsq,
                       enyo::Color view)
 {
-    return FEATURE_IDX_TABLE[
-        FeatureIdxTableOffset(
-            static_cast<int>(pt),
-            static_cast<int>(piece_color),
-            static_cast<int>(enyo_sq),
-            static_cast<int>(enyo_kingsq),
-            static_cast<int>(view))];
+    const auto & table = INPUT_BUCKETS == 32
+        ? FEATURE_IDX_TABLE_32
+        : FEATURE_IDX_TABLE_16;
+    return table[FeatureIdxTableOffset(
+        static_cast<int>(pt),
+        static_cast<int>(piece_color),
+        static_cast<int>(enyo_sq),
+        static_cast<int>(enyo_kingsq),
+        static_cast<int>(view))];
 }
 
 // ---------------------------------------------------------------------
@@ -159,10 +192,10 @@ inline int FeatureIdx(enyo::PieceType pt,
 // Takes Enyo h1-indexed squares and transforms them into the requested
 // network perspective.
 // ---------------------------------------------------------------------
-inline constexpr bool MoveRequiresRefresh(enyo::PieceType pt,
-                                          enyo::square_t enyo_from,
-                                          enyo::square_t enyo_to,
-                                          enyo::Color view)
+inline bool MoveRequiresRefresh(enyo::PieceType pt,
+                                enyo::square_t enyo_from,
+                                enyo::square_t enyo_to,
+                                enyo::Color view)
 {
     if (pt != enyo::king)
         return false;
@@ -174,8 +207,7 @@ inline constexpr bool MoveRequiresRefresh(enyo::PieceType pt,
     if ((from & 4) != (to & 4))
         return true;
 
-    return KING_BUCKETS[static_cast<size_t>(from)] !=
-           KING_BUCKETS[static_cast<size_t>(to)];
+    return KingBucket(from) != KingBucket(to);
 }
 
 // ---------------------------------------------------------------------
@@ -250,10 +282,10 @@ void SetWeights(const acc_t* weights, const acc_t* biases);
 // pointers are updated to reference internal storage owned by nnue_model.cpp.
 bool LoadNetwork(const char* path);
 
-// Total byte size of a v13-format .nn file, computed from the constants
-// above. Files exactly this size can be consumed by LoadNetwork().
-inline constexpr size_t NETWORK_SIZE =
-      sizeof(int16_t) * N_FEATURES * N_HIDDEN  // input weights
+inline constexpr size_t NetworkSize(int input_buckets) {
+    return sizeof(int16_t)
+        * static_cast<size_t>(FeatureCount(input_buckets))
+        * static_cast<size_t>(N_HIDDEN)
     + sizeof(int16_t) * N_HIDDEN               // input biases
     + sizeof(int8_t)  * N_L1 * N_L2            // L1 weights
     + sizeof(int32_t) * N_L2                   // L1 biases
@@ -261,6 +293,22 @@ inline constexpr size_t NETWORK_SIZE =
     + sizeof(float)   * N_L3                   // L2 biases
     + sizeof(float)   * N_L3 * N_OUTPUT        // output weights
     + sizeof(float);                           // output bias
+}
+
+inline constexpr size_t NETWORK_SIZE = NetworkSize(DEFAULT_INPUT_BUCKETS);
+inline constexpr size_t MAX_NETWORK_SIZE = NetworkSize(MAX_INPUT_BUCKETS);
+
+inline constexpr int DetectInputBuckets(size_t size) {
+    if (size == NetworkSize(16))
+        return 16;
+    if (size == NetworkSize(32))
+        return 32;
+    return 0;
+}
+
+inline constexpr bool IsSupportedNetworkSize(size_t size) {
+    return DetectInputBuckets(size) != 0;
+}
 
 // ---------------------------------------------------------------------
 // Delta: up to 32 features to add and 32 to remove between two

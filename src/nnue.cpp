@@ -60,8 +60,7 @@ size_t network_refresh_table_index(enyo::square_t king_square, enyo::Color side)
     const int ksq = Network::to_net_sq(king_square)
         ^ (56 * static_cast<int>(side));
     const int file_half = (ksq & 4) ? 1 : 0;
-    const auto bucket = static_cast<size_t>(
-        Network::KING_BUCKETS[static_cast<size_t>(ksq)]);
+    const auto bucket = static_cast<size_t>(Network::KingBucket(ksq));
     return static_cast<size_t>(side) * 2 * Network::N_KING_BUCKETS
         + static_cast<size_t>(file_half) * Network::N_KING_BUCKETS
         + bucket;

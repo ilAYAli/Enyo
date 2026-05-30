@@ -48,6 +48,7 @@ const float*  OUTPUT_WEIGHTS = nullptr;
 float         OUTPUT_BIAS    = 0.0f;
 bool          INPUT_LAYOUT_SCRAMBLED = false;
 uint64_t      NETWORK_GENERATION = 0;
+int           INPUT_BUCKETS = DEFAULT_INPUT_BUCKETS;
 
 // Phase-6 runtime switch. Engine `evaluate()` checks this + INPUT_WEIGHTS
 // and re-routes to EvaluateFromScratch when both are set.
@@ -65,10 +66,14 @@ void InitLookupIndices() {
     }
 }
 
-void ShuffleInputLayout() {
+void ShuffleInputLayout(int input_buckets) {
+#if !defined(__AVX512BW__) && !defined(__AVX2__)
+    (void)input_buckets;
+#endif
 #if defined(__AVX512BW__)
     constexpr size_t width = sizeof(__m512i) / sizeof(int16_t);
-    constexpr size_t weight_chunks = (N_FEATURES * N_HIDDEN) / width;
+    const size_t weight_chunks =
+        (static_cast<size_t>(FeatureCount(input_buckets)) * N_HIDDEN) / width;
     constexpr size_t bias_chunks = N_HIDDEN / width;
 
     auto* weights = reinterpret_cast<__m512i*>(s_input_weights);
@@ -116,7 +121,8 @@ void ShuffleInputLayout() {
     INPUT_LAYOUT_SCRAMBLED = true;
 #elif defined(__AVX2__)
     constexpr size_t width = sizeof(__m256i) / sizeof(int16_t);
-    constexpr size_t weight_chunks = (N_FEATURES * N_HIDDEN) / width;
+    const size_t weight_chunks =
+        (static_cast<size_t>(FeatureCount(input_buckets)) * N_HIDDEN) / width;
     constexpr size_t bias_chunks = N_HIDDEN / width;
 
     auto* weights = reinterpret_cast<__m256i*>(s_input_weights);
@@ -150,6 +156,7 @@ void ShuffleInputLayout() {
 }
 
 void SetWeights(const acc_t* weights, const acc_t* biases) {
+    INPUT_BUCKETS = DEFAULT_INPUT_BUCKETS;
     INPUT_WEIGHTS = weights;
     INPUT_BIASES  = biases;
     L1_WEIGHTS_T  = nullptr;
@@ -192,10 +199,11 @@ bool LoadNetwork(const char* path) {
     }
     const long sz = std::ftell(fh);
     if (sz < 0) { std::fclose(fh); return false; }
-    if (static_cast<size_t>(sz) != NETWORK_SIZE) {
+    const int input_buckets = DetectInputBuckets(static_cast<size_t>(sz));
+    if (input_buckets == 0) {
         std::fprintf(stderr,
-            "network: '%s' is %ld bytes, expected %zu\n",
-            path, sz, NETWORK_SIZE);
+            "network: '%s' is %ld bytes, expected %zu or %zu\n",
+            path, sz, NetworkSize(16), NetworkSize(32));
         std::fclose(fh);
         return false;
     }
@@ -209,7 +217,10 @@ bool LoadNetwork(const char* path) {
         return true;
     };
 
-    if (!read(s_input_weights,  sizeof(s_input_weights),  "INPUT_WEIGHTS")) { std::fclose(fh); return false; }
+    std::memset(s_input_weights, 0, sizeof(s_input_weights));
+    const size_t input_weight_bytes =
+        sizeof(acc_t) * static_cast<size_t>(FeatureCount(input_buckets)) * N_HIDDEN;
+    if (!read(s_input_weights,  input_weight_bytes,       "INPUT_WEIGHTS")) { std::fclose(fh); return false; }
     if (!read(s_input_biases,   sizeof(s_input_biases),   "INPUT_BIASES"))  { std::fclose(fh); return false; }
     if (!read(s_l1_weights,     sizeof(s_l1_weights),     "L1_WEIGHTS"))    { std::fclose(fh); return false; }
     if (!read(s_l1_biases,      sizeof(s_l1_biases),      "L1_BIASES"))     { std::fclose(fh); return false; }
@@ -233,7 +244,8 @@ bool LoadNetwork(const char* path) {
             s_l1_weights_t[i * N_L2 + j] = s_l1_weights[j * N_L1 + i];
     for (size_t i = 0; i < N_L1 * N_L2; ++i)
         s_l1_weights_sparse[WeightIdxScrambled(i)] = s_l1_weights[i];
-    ShuffleInputLayout();
+    INPUT_BUCKETS = input_buckets;
+    ShuffleInputLayout(input_buckets);
 
     INPUT_WEIGHTS  = s_input_weights;
     INPUT_BIASES   = s_input_biases;
