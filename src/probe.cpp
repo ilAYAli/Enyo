@@ -108,17 +108,6 @@ bool has_any_tablebase_file(const std::filesystem::path & path)
     return false;
 }
 
-bool has_incomplete_tablebase_files(const std::filesystem::path & path)
-{
-    std::error_code ec;
-    if (!std::filesystem::is_directory(path, ec))
-        return false;
-    for (std::filesystem::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec)) {
-        if (is_tablebase_file(it->path()) && !is_complete_tablebase_file(it->path()))
-            return true;
-    }
-    return false;
-}
 
 bool is_hidden_directory(const std::filesystem::path & path)
 {
@@ -157,10 +146,14 @@ bool index_tablebase_files(const std::string & resolved_path)
         const std::filesystem::path path(segment);
         if (!std::filesystem::is_directory(path, ec))
             continue;
-        if (has_incomplete_tablebase_files(path)) {
-            available_wdl.clear();
-            available_dtz.clear();
-            return false;
+        for (std::filesystem::directory_iterator it2(path, ec), end2; !ec && it2 != end2; it2.increment(ec)) {
+            if (is_tablebase_file(it2->path()) && !is_complete_tablebase_file(it2->path())) {
+                fmt::print(stderr, "Fatal: corrupt or incomplete tablebase file: {}\n",
+                    it2->path().string());
+                available_wdl.clear();
+                available_dtz.clear();
+                return false;
+            }
         }
         for (std::filesystem::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec)) {
             if (!is_complete_tablebase_file(it->path()))

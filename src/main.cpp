@@ -196,9 +196,11 @@ int main(int argc, char **argv)
     if (cfgmgr.use_syzygy && !cfgmgr.syzygy_path.empty()) {
         const auto path = syzygy::resolve_path(cfgmgr.syzygy_path);
         if (!syzygy::init(path)) {
-            eventlog::log<eventlog::Log::warning>(
-                "failed to initialize tablebases at '{}'\n",
+            fmt::print(stderr,
+                "Fatal: failed to initialize tablebases at '{}'\n"
+                "Fix or remove the SyzygyPath setting before starting.\n",
                 path);
+            std::exit(1);
         }
     }
 #endif
