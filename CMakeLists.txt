@@ -65,6 +65,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG" CACHE STRING "Release flags" FORCE)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -mtune=native -flto=auto -ffast-math -fno-pie")
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -no-pie")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -march=native -mtune=native -flto=auto -ffast-math")
     else()
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -march=native -mtune=native -flto -ffast-math")
     endif()
@@ -101,8 +103,46 @@ set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} CACHE INTERNAL "cxx flags")
 add_compile_definitions(EVAL_FILE="${CMAKE_CURRENT_SOURCE_DIR}/net/default.net")
 
 #---[ dependencies ]-----------------------------------------------------------
-find_package(fmt REQUIRED)
-find_package(nlohmann_json REQUIRED)
+include(FetchContent)
+
+if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_AR)
+        set(CMAKE_AR "${CMAKE_CXX_COMPILER_AR}" CACHE FILEPATH "Archiver" FORCE)
+    endif()
+    if(CMAKE_CXX_COMPILER_RANLIB)
+        set(CMAKE_RANLIB "${CMAKE_CXX_COMPILER_RANLIB}" CACHE FILEPATH "Ranlib" FORCE)
+    endif()
+endif()
+
+find_package(fmt CONFIG QUIET)
+if(NOT fmt_FOUND)
+    message(STATUS "fmt package not found; fetching fmt")
+    FetchContent_Declare(
+        fmt
+        GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+        GIT_TAG 10.2.1
+        GIT_SHALLOW TRUE
+    )
+    set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(fmt)
+endif()
+
+if(NOT TARGET fmt::fmt-header-only AND TARGET fmt::fmt)
+    add_library(fmt::fmt-header-only ALIAS fmt::fmt)
+endif()
+
+find_package(nlohmann_json CONFIG QUIET)
+if(NOT nlohmann_json_FOUND)
+    message(STATUS "nlohmann_json package not found; fetching nlohmann_json")
+    FetchContent_Declare(
+        nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG v3.11.3
+        GIT_SHALLOW TRUE
+    )
+    set(JSON_BuildTests OFF CACHE INTERNAL "")
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
 
 set(ENYO_CHESS_SOURCES
     src/fen.cpp
@@ -195,7 +235,21 @@ target_include_directories(enyo PRIVATE
 
 option(BUILD_TESTS "Build the gtest target" ON)
 if(BUILD_TESTS)
-    find_package(GTest REQUIRED)
+    find_package(GTest CONFIG QUIET)
+    if(NOT GTest_FOUND)
+        message(STATUS "GTest package not found; fetching googletest")
+        FetchContent_Declare(
+            googletest
+            GIT_REPOSITORY https://github.com/google/googletest.git
+            GIT_TAG v1.14.0
+            GIT_SHALLOW TRUE
+        )
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(googletest)
+        if(NOT TARGET GTest::gtest AND TARGET gtest)
+            add_library(GTest::gtest ALIAS gtest)
+        endif()
+    endif()
 
     set(ENYO_TEST_SOURCES
         test/tests.cpp

@@ -1073,7 +1073,8 @@ TEST(network_model, loads_32_bucket_network_blob) {
     const auto path = write_zero_network_blob(
         Network::NetworkSize(32),
         "enyo_zero_32_bucket.nn");
-    ASSERT_TRUE(Network::LoadNetwork(path.c_str()));
+    const auto path_string = path.string();
+    ASSERT_TRUE(Network::LoadNetwork(path_string.c_str()));
     EXPECT_EQ(Network::INPUT_BUCKETS, 32);
     EXPECT_NE(Network::INPUT_WEIGHTS, nullptr);
     fs::remove(path);
