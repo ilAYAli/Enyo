@@ -114,6 +114,7 @@ public:
     bool use_tt_lower_cutoff = false;
     bool use_tt_upper_cutoff = false;
     bool use_syzygy         = true;
+    bool use_nnue           = true;
     bool use_lmr            = false;
     std::string nnue_file     = "";  // empty = embedded default
     std::string logfile     = "/tmp/enyo.log";
@@ -147,6 +148,7 @@ public:
             concat("use_tt_lower_cutoff", "check", use_tt_lower_cutoff) +
             concat("use_tt_upper_cutoff", "check", use_tt_upper_cutoff) +
             concat("use_syzygy",    "check", use_syzygy) +
+            concat("use_nnue",      "check", use_nnue) +
             //concat("UCI_Chess960",  "check", use_chess_960) +
             concat("nnue_file",     "string", nnue_file) +
             concat("logfile",       "string", logfile) +
@@ -178,6 +180,8 @@ public:
             use_tt_upper_cutoff = (value == "true");
         else if (lc == "use_syzygy")
             use_syzygy = (value == "true");
+        else if (lc == "use_nnue")
+            use_nnue = (value == "true");
         else if (lc == "nnue_file")
             nnue_file = value;
         else if (lc == "logfile" || lc == "debug log file")
@@ -220,6 +224,7 @@ private:
             use_tt_lower_cutoff = t.value("use_tt_lower_cutoff", use_tt_lower_cutoff);
             use_tt_upper_cutoff = t.value("use_tt_upper_cutoff", use_tt_upper_cutoff);
             use_syzygy          = t.value("use_syzygy",          use_syzygy);
+            use_nnue            = t.value("use_nnue",            use_nnue);
             use_lmr             = t.value("use_lmr",             use_lmr);
 
             uci_options.clear();

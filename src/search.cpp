@@ -145,8 +145,8 @@ Value evaluate(Board & b, NNUE::Net * nnue)
     } else {
         const auto mv = b.history[b.histply -1].move;
         if (mv.flags() == Move::Flags::promote)
-            return enyo::HCE_evaluation<Us>(b);
-        const auto score = enyo::HCE_evaluation<Us>(b);
+            return static_cast<Value>(enyo::HCE_evaluation<Us>(b));
+        const auto score = static_cast<Value>(enyo::HCE_evaluation<Us>(b));
         if constexpr (Constexpr::debug_eval)
             fmt::print("<{}> move: {}, score: {}, repeat: {}, key: {:016X}, fen: {}\n",
                 Us, b.history[b.histply -1].move, score, is_repetition(b), b.hash, b.fen());
@@ -155,10 +155,18 @@ Value evaluate(Board & b, NNUE::Net * nnue)
 }
 
 template <Color Us>
+Value evaluate_runtime(Board & b, NNUE::Net * nnue)
+{
+    return cfgmgr.use_nnue
+        ? evaluate<Us, true>(b, nnue)
+        : evaluate<Us, false>(b, nnue);
+}
+
+template <Color Us>
 Value static_root_score_after(Board & b, NNUE::Net * nnue, Move move)
 {
     apply_move<Us, true, true>(b, move, nnue);
-    const auto score = static_cast<Value>(-evaluate<~Us, true>(b, nnue));
+    const auto score = static_cast<Value>(-evaluate_runtime<~Us>(b, nnue));
     revert_move<Us, true, true>(b, nnue);
     return score;
 }
@@ -274,7 +282,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     if (ss->ply >= MAX_PLY) {
         return ss->in_check
             ? Value::draw
-            : evaluate<Us, true>(b, &si.nnue);
+            : evaluate_runtime<Us>(b, &si.nnue);
     }
 
     if (is_repetition(b)) {
@@ -315,7 +323,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         if (lm.empty())
             return mated_in(ss->ply);
     } else {
-        best_value = ss->eval = evaluate<Us, true>(b, &si.nnue);
+        best_value = ss->eval = evaluate_runtime<Us>(b, &si.nnue);
         if (best_value >= beta) {
             if (!ss->tthit) {
                 tt::ttable.store(
@@ -425,7 +433,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     if (ss->ply >= MAX_PLY) {
         ss->in_check = is_check<Us>(b);
         return !ss->in_check
-            ? evaluate<Us, true>(b, &si.nnue)
+            ? evaluate_runtime<Us>(b, &si.nnue)
             : Value::draw;
     }
 
@@ -573,7 +581,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     //   - UpperBound with tt_value < raw: tighter upper bound.
     //   - LowerBound with tt_value > raw: tighter lower bound.
     // Other combinations would widen, not tighten, so raw wins.
-    ss->eval = evaluate<Us, true>(b, &si.nnue);
+    ss->eval = evaluate_runtime<Us>(b, &si.nnue);
     if (ss->tthit && tt_value != Value::none) {
         if (tte->flag == tt::type::ExactBound
         || (tte->flag == tt::type::UpperBound && tt_value < ss->eval)

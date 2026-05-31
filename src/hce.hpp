@@ -5,6 +5,8 @@
 #include "util.hpp"
 #include "movegen.hpp"
 
+#include <algorithm>
+
 ////namespace {
 
 namespace enyo {
@@ -13,6 +15,31 @@ namespace enyo {
 static constexpr int taper_value(int mg, int eg, int phase)
 {
     return ((mg * (256 - phase)) + (eg * phase)) / 256;
+}
+
+static inline int get_value(int phase, Color us, PieceType pt, square_t sq)
+{
+    const int file = static_cast<int>(sq % 8);
+    const int rank = static_cast<int>(sq / 8);
+    const int side_rank = us == white ? rank : 7 - rank;
+    const int center = std::min(file, 7 - file) + std::min(rank, 7 - rank);
+
+    switch (pt) {
+        case pawn:
+            return side_rank * (phase == 2 ? 8 : 4) + center;
+        case knight:
+            return center * 4;
+        case bishop:
+            return center * 3;
+        case rook:
+            return (phase == 2 ? side_rank : 0) + center;
+        case queen:
+            return center * 2;
+        case king:
+            return phase == 2 ? center * 6 : -center * 2;
+        default:
+            return 0;
+    }
 }
 
 template <Color Us>

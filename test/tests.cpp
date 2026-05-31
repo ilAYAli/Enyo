@@ -198,6 +198,22 @@ TEST(hash, recompute_matches_initial_position) {
     EXPECT_EQ(b.hash, zobrist::generate_hash(b));
 }
 
+TEST(config, use_nnue_option_round_trips) {
+    const bool original = cfgmgr.use_nnue;
+
+    cfgmgr.use_nnue = true;
+    ASSERT_TRUE(cfgmgr.setopt("use_nnue", "false"));
+    EXPECT_FALSE(cfgmgr.use_nnue);
+    EXPECT_NE(
+        cfgmgr.allopts().find("option name use_nnue type check default false"),
+        std::string::npos);
+
+    ASSERT_TRUE(cfgmgr.setopt("use_nnue", "true"));
+    EXPECT_TRUE(cfgmgr.use_nnue);
+
+    cfgmgr.use_nnue = original;
+}
+
 TEST(hash, apply_revert_restores_hash) {
     Board b{"startpos"};
     const auto initial_hash = b.hash;
