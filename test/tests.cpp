@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <optional>
 #include <ranges>
 #include <vector>
 #include <nlohmann/json.hpp>
@@ -70,6 +71,86 @@ bool init_test_syzygy(int min_pieces)
             return true;
     }
     return false;
+}
+
+fs::path expand_test_path(std::string path)
+{
+    if (path.starts_with("~/")) {
+        if (const char * home = std::getenv("HOME"); home && *home)
+            return fs::path(home) / path.substr(2);
+    }
+    return path;
+}
+
+fs::path find_test_tablebase_file(std::string_view filename)
+{
+    std::vector<std::string> candidates;
+    if (const char * env_path = std::getenv("ENYO_TEST_SYZYGY_PATH"); env_path && *env_path)
+        candidates.emplace_back(env_path);
+    if (!cfgmgr.syzygy_path.empty())
+        candidates.push_back(cfgmgr.syzygy_path);
+    candidates.emplace_back("~/code/cpp/chess/assets/tablebases");
+    candidates.emplace_back("../assets/tablebases");
+
+    for (const auto & path : candidates) {
+        const auto root = expand_test_path(path);
+        std::error_code ec;
+        if (!fs::exists(root, ec) || ec)
+            continue;
+        for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end;
+             !ec && it != end;
+             it.increment(ec)) {
+            if (it->path().filename().string() == filename)
+                return it->path();
+        }
+    }
+    return {};
+}
+
+bool link_wdl_table_files(const fs::path & source_dir, const fs::path & target_dir)
+{
+    std::error_code ec;
+    for (fs::directory_iterator it(source_dir, fs::directory_options::skip_permission_denied, ec), end;
+         !ec && it != end;
+         it.increment(ec)) {
+        if (it->path().extension() != ".rtbw")
+            continue;
+
+        const auto target = target_dir / it->path().filename();
+        if (fs::exists(target, ec)) {
+            ec.clear();
+            continue;
+        }
+        fs::create_symlink(it->path(), target, ec);
+        if (ec)
+            return false;
+    }
+    return !ec;
+}
+
+std::optional<uint64_t> uci_nodes_at_depth(std::string_view output, int depth)
+{
+    const auto needle = fmt::format("info depth {} score ", depth);
+    const auto line_begin = output.find(needle);
+    if (line_begin == std::string_view::npos)
+        return std::nullopt;
+
+    const auto line_end = output.find('\n', line_begin);
+    const auto line_limit = line_end == std::string_view::npos ? output.size() : line_end;
+    const auto nodes_pos = output.find(" nodes ", line_begin);
+    if (nodes_pos == std::string_view::npos
+        || nodes_pos >= line_limit)
+        return std::nullopt;
+
+    const auto nodes_begin = nodes_pos + std::string_view(" nodes ").size();
+    auto nodes_end = output.find(' ', nodes_begin);
+    if (nodes_end == std::string_view::npos || nodes_end > line_limit)
+        nodes_end = line_limit;
+    if (nodes_begin >= nodes_end)
+        return std::nullopt;
+
+    return static_cast<uint64_t>(std::stoull(
+        std::string(output.substr(nodes_begin, nodes_end - nodes_begin))));
 }
 
 #if 1
@@ -2103,6 +2184,77 @@ TEST(uci_root, lost_tablebase_root_does_not_search_after_tbhit) {
 
     cfgmgr.num_threads = old_threads;
     cfgmgr.use_syzygy = old_use_syzygy;
+}
+
+TEST(uci_root, wdl_only_lost_tablebase_root_keeps_cutoffs_fast) {
+    const auto wdl_file = find_test_tablebase_file("KQRRvKQ.rtbw");
+    if (wdl_file.empty())
+        GTEST_SKIP() << "KQRRvKQ WDL tablebase not available";
+    const auto child_wdl_file = find_test_tablebase_file("KQvK.rtbw");
+    if (child_wdl_file.empty())
+        GTEST_SKIP() << "3-5 piece WDL tablebases not available";
+
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = fs::temp_directory_path() / fmt::format("enyo_wdl_only_tb_{}", stamp);
+    std::error_code ec;
+    fs::create_directories(root, ec);
+    if (ec)
+        GTEST_SKIP() << "could not create temporary Syzygy directory: " << ec.message();
+    if (!link_wdl_table_files(wdl_file.parent_path(), root)
+        || !link_wdl_table_files(child_wdl_file.parent_path(), root)) {
+        fs::remove_all(root);
+        GTEST_SKIP() << "could not prepare WDL-only Syzygy directory";
+    }
+
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    const auto old_syzygy_path = cfgmgr.syzygy_path;
+
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = true;
+    cfgmgr.syzygy_path = root.string();
+    if (!syzygy::init(root.string())) {
+        cfgmgr.num_threads = old_threads;
+        cfgmgr.use_syzygy = old_use_syzygy;
+        cfgmgr.syzygy_path = old_syzygy_path;
+        fs::remove_all(root);
+        GTEST_SKIP() << "could not initialize WDL-only Syzygy directory";
+    }
+
+    const auto run_search = [](bool use_syzygy) {
+        cfgmgr.use_syzygy = use_syzygy;
+        Board b;
+        Uci uci{b};
+        uci("position fen 8/2RQ4/1K6/4R3/8/5q2/k7/8 b - - 0 1");
+
+        thread::pool.stop = false;
+        tt::ttable.clear();
+        testing::internal::CaptureStdout();
+        uci("go depth 6");
+        return testing::internal::GetCapturedStdout();
+    };
+
+    const auto tb_out = run_search(true);
+    const auto plain_out = run_search(false);
+
+    EXPECT_NE(tb_out.find("string tbhit loss"), std::string::npos) << tb_out;
+    EXPECT_EQ(plain_out.find("string tbhit"), std::string::npos) << plain_out;
+
+    const auto tb_nodes = uci_nodes_at_depth(tb_out, 6);
+    const auto plain_nodes = uci_nodes_at_depth(plain_out, 6);
+    EXPECT_TRUE(tb_nodes.has_value()) << tb_out;
+    EXPECT_TRUE(plain_nodes.has_value()) << plain_out;
+    if (tb_nodes && plain_nodes) {
+        EXPECT_LT(*tb_nodes, 2000u) << tb_out;
+        EXPECT_LT(*tb_nodes * 2, *plain_nodes) << "tb:\n" << tb_out << "\nplain:\n" << plain_out;
+    }
+
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+    cfgmgr.syzygy_path = old_syzygy_path;
+    if (old_use_syzygy && !old_syzygy_path.empty())
+        syzygy::init(old_syzygy_path);
+    fs::remove_all(root);
 }
 
 TEST(uci_root, wdl_only_root_does_not_repeat_first_filtered_move) {

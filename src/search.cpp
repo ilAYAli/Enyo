@@ -35,6 +35,17 @@ void update_history_score(int16_t & entry, int bonus)
     entry += static_cast<int16_t>(bonus - (entry * std::abs(bonus)) / max_history);
 }
 
+// Returns a ply-aware draw score incorporating contempt. At even ply (engine's
+// move) draws are penalised; at odd ply the penalty is mirrored so the parent
+// node (engine) also sees draws as slightly negative after negation.
+Value contempt_draw_score(const Stack * ss)
+{
+    const int c = cfgmgr.root_repetition_contempt;
+    if (c <= 0)
+        return Value::draw;
+    return static_cast<Value>((ss->ply & 1) ? c : -c);
+}
+
 template <Color Us>
 bool low_material_check_net(Board const & b)
 {
@@ -267,7 +278,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     }
 
     if (is_repetition(b)) {
-        return Value::draw;
+        return contempt_draw_score(ss);
     }
 
     Move tt_move {};
@@ -429,7 +440,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
 
     if (NT != NodeType::Root) {
         if (is_repetition(b)) {
-            return Value::draw;
+            return contempt_draw_score(ss);
         }
 
         alpha = std::max(alpha, mated_in(ss->ply));
@@ -1136,11 +1147,38 @@ void search_position(Worker & worker)
                     bool filter_complete = false;
                     const auto filtered = syzygy::root_WDL_filter(board, root_candidates, &filter_complete);
                     if (!filtered.empty() && filtered.size() < root_candidate_count) {
-                        use_root_filter(filtered, "WDL-filtered");
+                        let_search_choose = use_root_filter(filtered, "WDL-filtered");
                     }
                     if (filter_complete && !filtered.empty()) {
                         ucilog("info string tbhit {} WDL root filter complete {}/{}\n",
                             verdict, filtered.size(), root_candidate_count);
+                    }
+
+                    // Fallback for Loss: WDL filter can't distinguish losing moves
+                    // (all have the same rank). Probe each child individually for DTZ
+                    // to find the move that maximises resistance.
+                    if (tb_status == syzygy::Status::Loss && !let_search_choose) {
+                        int best_child_dtz = -1;
+                        Move best_resistance {};
+                        for (const auto root_move : root_candidates) {
+                            Board child {board};
+                            if (board.side == white) apply_move<white>(child, root_move);
+                            else                     apply_move<black>(child, root_move);
+                            syzygy::Status child_status;
+                            int child_dtz = -1;
+                            syzygy::DTZ_probe(child, child_status, &child_dtz);
+                            if (child_status == syzygy::Status::Win && child_dtz > best_child_dtz) {
+                                best_child_dtz = child_dtz;
+                                best_resistance = root_move;
+                            }
+                        }
+                        if (best_resistance && is_active_root_move(best_resistance)) {
+                            thread::pool.stop = true;
+                            ucilog("info string tbhit loss best-resistance {} dtz {}\n",
+                                best_resistance, best_child_dtz);
+                            ucilog("bestmove {}\n", best_resistance);
+                            return;
+                        }
                     }
                 }
             }
