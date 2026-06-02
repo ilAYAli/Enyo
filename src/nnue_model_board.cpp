@@ -50,6 +50,15 @@ int ScaleEval(const enyo::Board& b, int score) {
     return std::clamp(score, -2045, 2045);
 }
 
+int MaterialCountBucket(const enyo::Board& b) {
+    int piece_count = 0;
+    for (int color = 0; color < 2; ++color) {
+        for (int pt = static_cast<int>(enyo::pawn); pt <= static_cast<int>(enyo::king); ++pt)
+            piece_count += enyo::count_bits(b.pt_bb[color][pt]);
+    }
+    return OutputBucketForPieceCount(piece_count, OUTPUT_BUCKETS);
+}
+
 // Phase-4-v1 correctness path: fresh accumulator on every call. A
 // future phase will plug into the engine's Net accumulator stack for
 // search-time incremental updates.
@@ -68,7 +77,7 @@ int EvaluateFromScratch(const enyo::Board& b) {
     ResetAccumulator(&acc, enyo::white, wk_sq, pieces, n);
     ResetAccumulator(&acc, enyo::black, bk_sq, pieces, n);
 
-    return Propagate(&acc, static_cast<int>(b.side));
+    return Propagate(&acc, static_cast<int>(b.side), MaterialCountBucket(b));
 }
 
 } // namespace Network

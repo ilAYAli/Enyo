@@ -30,7 +30,8 @@ alignas(64) int8_t  s_l1_weights_sparse[N_L1 * N_L2];
 alignas(64) int32_t s_l1_biases     [N_L2];
 alignas(64) float   s_l2_weights    [N_L2 * N_L3];
 alignas(64) float   s_l2_biases     [N_L3];
-alignas(64) float   s_output_weights[N_L3 * N_OUTPUT];
+alignas(64) float   s_output_weights[MAX_OUTPUT_BUCKETS * N_L3 * N_OUTPUT];
+alignas(64) float   s_output_biases [MAX_OUTPUT_BUCKETS * N_OUTPUT];
 }
 
 // Weight-pointer definitions referenced from network.hpp. Start as nullptr;
@@ -45,10 +46,12 @@ const int32_t* L1_BIASES     = nullptr;
 const float*  L2_WEIGHTS     = nullptr;
 const float*  L2_BIASES      = nullptr;
 const float*  OUTPUT_WEIGHTS = nullptr;
+const float*  OUTPUT_BIASES  = nullptr;
 float         OUTPUT_BIAS    = 0.0f;
 bool          INPUT_LAYOUT_SCRAMBLED = false;
 uint64_t      NETWORK_GENERATION = 0;
 int           INPUT_BUCKETS = DEFAULT_INPUT_BUCKETS;
+int           OUTPUT_BUCKETS = DEFAULT_OUTPUT_BUCKETS;
 
 // Phase-6 runtime switch. Engine `evaluate()` checks this + INPUT_WEIGHTS
 // and re-routes to EvaluateFromScratch when both are set.
@@ -157,10 +160,13 @@ void ShuffleInputLayout(int input_buckets) {
 
 void SetWeights(const acc_t* weights, const acc_t* biases) {
     INPUT_BUCKETS = DEFAULT_INPUT_BUCKETS;
+    OUTPUT_BUCKETS = DEFAULT_OUTPUT_BUCKETS;
     INPUT_WEIGHTS = weights;
     INPUT_BIASES  = biases;
     L1_WEIGHTS_T  = nullptr;
     L1_WEIGHTS_SPARSE = nullptr;
+    OUTPUT_BIASES = nullptr;
+    OUTPUT_BIAS = 0.0f;
     INPUT_LAYOUT_SCRAMBLED = false;
     ++NETWORK_GENERATION;
 }
@@ -176,8 +182,8 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
 //   [N_L2]                  int32  L1_BIASES
 //   [N_L2 * N_L3]           float  L2_WEIGHTS     (row-major, output-major)
 //   [N_L3]                  float  L2_BIASES
-//   [N_L3 * N_OUTPUT]       float  OUTPUT_WEIGHTS
-//   [1]                     float  OUTPUT_BIAS
+//   [OUTPUT_BUCKETS * N_L3] float  OUTPUT_WEIGHTS
+//   [OUTPUT_BUCKETS]        float  OUTPUT_BIASES
 //
 // Any size mismatch is a hard failure (we refuse to silently load a
 // differently-sized net — that would produce garbage evaluations).
@@ -199,14 +205,20 @@ bool LoadNetwork(const char* path) {
     }
     const long sz = std::ftell(fh);
     if (sz < 0) { std::fclose(fh); return false; }
-    const int input_buckets = DetectInputBuckets(static_cast<size_t>(sz));
-    if (input_buckets == 0) {
+    const NetworkLayout layout = DetectNetworkLayout(static_cast<size_t>(sz));
+    if (layout.input_buckets == 0) {
         std::fprintf(stderr,
-            "network: '%s' is %ld bytes, expected %zu or %zu\n",
-            path, sz, NetworkSize(16), NetworkSize(32));
+            "network: '%s' is %ld bytes, expected %zu, %zu, %zu, %zu, %zu, %zu, %zu, or %zu\n",
+            path, sz,
+            NetworkSize(16, 1), NetworkSize(16, 2),
+            NetworkSize(16, 4), NetworkSize(16, 8),
+            NetworkSize(32, 1), NetworkSize(32, 2),
+            NetworkSize(32, 4), NetworkSize(32, 8));
         std::fclose(fh);
         return false;
     }
+    const int input_buckets = layout.input_buckets;
+    const int output_buckets = layout.output_buckets;
     std::rewind(fh);
 
     auto read = [&](void* dst, size_t n, const char* label) -> bool {
@@ -218,16 +230,22 @@ bool LoadNetwork(const char* path) {
     };
 
     std::memset(s_input_weights, 0, sizeof(s_input_weights));
+    std::memset(s_output_weights, 0, sizeof(s_output_weights));
+    std::memset(s_output_biases, 0, sizeof(s_output_biases));
     const size_t input_weight_bytes =
         sizeof(acc_t) * static_cast<size_t>(FeatureCount(input_buckets)) * N_HIDDEN;
+    const size_t output_weight_bytes =
+        sizeof(float) * static_cast<size_t>(output_buckets) * N_L3 * N_OUTPUT;
+    const size_t output_bias_bytes =
+        sizeof(float) * static_cast<size_t>(output_buckets) * N_OUTPUT;
     if (!read(s_input_weights,  input_weight_bytes,       "INPUT_WEIGHTS")) { std::fclose(fh); return false; }
     if (!read(s_input_biases,   sizeof(s_input_biases),   "INPUT_BIASES"))  { std::fclose(fh); return false; }
     if (!read(s_l1_weights,     sizeof(s_l1_weights),     "L1_WEIGHTS"))    { std::fclose(fh); return false; }
     if (!read(s_l1_biases,      sizeof(s_l1_biases),      "L1_BIASES"))     { std::fclose(fh); return false; }
     if (!read(s_l2_weights,     sizeof(s_l2_weights),     "L2_WEIGHTS"))    { std::fclose(fh); return false; }
     if (!read(s_l2_biases,      sizeof(s_l2_biases),      "L2_BIASES"))     { std::fclose(fh); return false; }
-    if (!read(s_output_weights, sizeof(s_output_weights), "OUTPUT_WEIGHTS")){ std::fclose(fh); return false; }
-    if (!read(&OUTPUT_BIAS,     sizeof(OUTPUT_BIAS),      "OUTPUT_BIAS"))   { std::fclose(fh); return false; }
+    if (!read(s_output_weights, output_weight_bytes,      "OUTPUT_WEIGHTS")){ std::fclose(fh); return false; }
+    if (!read(s_output_biases,  output_bias_bytes,        "OUTPUT_BIASES")) { std::fclose(fh); return false; }
 
     // Sanity: trailing-byte check (should be exactly EOF now).
     unsigned char probe;
@@ -245,6 +263,7 @@ bool LoadNetwork(const char* path) {
     for (size_t i = 0; i < N_L1 * N_L2; ++i)
         s_l1_weights_sparse[WeightIdxScrambled(i)] = s_l1_weights[i];
     INPUT_BUCKETS = input_buckets;
+    OUTPUT_BUCKETS = output_buckets;
     ShuffleInputLayout(input_buckets);
 
     INPUT_WEIGHTS  = s_input_weights;
@@ -256,7 +275,8 @@ bool LoadNetwork(const char* path) {
     L2_WEIGHTS     = s_l2_weights;
     L2_BIASES      = s_l2_biases;
     OUTPUT_WEIGHTS = s_output_weights;
-    // OUTPUT_BIAS already assigned via &OUTPUT_BIAS read.
+    OUTPUT_BIASES  = s_output_biases;
+    OUTPUT_BIAS    = s_output_biases[0];
     ++NETWORK_GENERATION;
 
     return true;
