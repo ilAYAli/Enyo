@@ -16,6 +16,7 @@
 #include "thread.hpp"
 #include "tt.hpp"
 #include "pgn.hpp"
+#include "move_policy.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -45,6 +46,38 @@ bool load_config() {
         return true;
     }
     return false;
+}
+
+json make_zero_move_policy_model(double output_bias)
+{
+    constexpr int input_dim = 1708;
+    json layer0;
+    layer0["activation"] = "relu";
+    layer0["weight"] = std::vector<std::vector<double>>(2, std::vector<double>(input_dim, 0.0));
+    layer0["bias"] = std::vector<double>{0.0, 0.0};
+
+    json layer1;
+    layer1["activation"] = "relu";
+    layer1["weight"] = std::vector<std::vector<double>>(2, std::vector<double>(2, 0.0));
+    layer1["bias"] = std::vector<double>{0.0, 0.0};
+
+    json layer2;
+    layer2["activation"] = "linear";
+    layer2["weight"] = std::vector<std::vector<double>>(1, std::vector<double>(2, 0.0));
+    layer2["bias"] = std::vector<double>{output_bias};
+
+    return json{
+        {"schema", "enyo.move_policy.v1"},
+        {"feature_version", "move_policy_v1"},
+        {"feature_set", "board"},
+        {"input_dim", input_dim},
+        {"hidden", 2},
+        {"threshold", 18.0},
+        {"mean", std::vector<double>(input_dim, 0.0)},
+        {"std", std::vector<double>(input_dim, 1.0)},
+        {"layers", json::array({layer0, layer1, layer2})},
+        {"config", json::object()},
+    };
 }
 
 constexpr Color get_side_to_move(std::string_view fen) {
@@ -212,6 +245,68 @@ TEST(config, use_nnue_option_round_trips) {
     EXPECT_TRUE(cfgmgr.use_nnue);
 
     cfgmgr.use_nnue = original;
+}
+
+TEST(move_policy, startpos_e2e4_features_match_python_layout) {
+    Board b("startpos");
+    const auto move = uci_to_move(b, "e2e4");
+    ASSERT_TRUE(move.has_value());
+
+    const auto features = move_policy::features(b, *move, move_policy::FeatureSet::board);
+    ASSERT_EQ(features.size(), 1708U);
+
+    EXPECT_DOUBLE_EQ(features[0], 1.0);
+    EXPECT_DOUBLE_EQ(features[1], 20.0 / 80.0);
+    EXPECT_DOUBLE_EQ(features[2], 1.0 / 120.0);
+    EXPECT_DOUBLE_EQ(features[3], 0.0);
+    EXPECT_DOUBLE_EQ(features[4], 0.0);
+    EXPECT_DOUBLE_EQ(features[5], 0.0);
+    EXPECT_DOUBLE_EQ(features[6], 0.0);
+    EXPECT_DOUBLE_EQ(features[7], 0.0);
+    EXPECT_DOUBLE_EQ(features[8], 0.0);
+    EXPECT_DOUBLE_EQ(features[9], 0.0);
+    EXPECT_DOUBLE_EQ(features[10], 0.0);
+    EXPECT_DOUBLE_EQ(features[11], 2.0 / 7.0);
+    EXPECT_DOUBLE_EQ(features[12], 20.0 / 80.0);
+    EXPECT_DOUBLE_EQ(features[13], 0.0);
+
+    constexpr int from_offset = 14;
+    constexpr int to_offset = from_offset + 64;
+    constexpr int moving_offset = to_offset + 64;
+    constexpr int material_offset = moving_offset + 6 + 6 + 6;
+    constexpr int parent_board_offset = material_offset + 12;
+    constexpr int child_board_offset = parent_board_offset + 12 * 64;
+
+    EXPECT_DOUBLE_EQ(features[from_offset + 12], 1.0); // e2 in python-chess square numbering
+    EXPECT_DOUBLE_EQ(features[to_offset + 28], 1.0);   // e4 in python-chess square numbering
+    EXPECT_DOUBLE_EQ(features[moving_offset + 0], 1.0); // pawn
+    EXPECT_DOUBLE_EQ(features[material_offset + 0], 1.0); // 8 white pawns / 8
+    EXPECT_DOUBLE_EQ(features[material_offset + 6], 1.0); // 8 black pawns / 8
+    EXPECT_DOUBLE_EQ(features[parent_board_offset + 12], 1.0); // white pawn on e2
+    EXPECT_DOUBLE_EQ(features[parent_board_offset + 11 * 64 + 60], 1.0); // black king on e8
+    EXPECT_DOUBLE_EQ(features[child_board_offset + 12], 0.0);
+    EXPECT_DOUBLE_EQ(features[child_board_offset + 28], 1.0); // white pawn moved to e4
+}
+
+TEST(move_policy, loads_json_and_scores_move) {
+    const auto path = fs::temp_directory_path() / "enyo_move_policy_zero_model.json";
+    std::ofstream out(path);
+    out << make_zero_move_policy_model(3.5).dump();
+    out.close();
+
+    move_policy::Model model;
+    std::string error;
+    ASSERT_TRUE(model.load(path.string(), &error)) << error;
+    EXPECT_TRUE(model.loaded());
+    EXPECT_EQ(model.input_dim(), 1708);
+    EXPECT_DOUBLE_EQ(model.threshold(), 18.0);
+
+    Board b("startpos");
+    const auto move = uci_to_move(b, "e2e4");
+    ASSERT_TRUE(move.has_value());
+    EXPECT_DOUBLE_EQ(model.score(b, *move), 3.5);
+
+    fs::remove(path);
 }
 
 TEST(hash, apply_revert_restores_hash) {

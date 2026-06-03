@@ -7,6 +7,7 @@
 #include <limits>
 #include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <fmt/format.h>
 
 #include "config.hpp"
@@ -23,6 +24,8 @@
 #include "probe.hpp"
 #include "nnue.hpp"
 #include "nnue_model.hpp"
+#include "move_policy.hpp"
+#include "pgn.hpp"
 
 using namespace enyo;
 using namespace eventlog;
@@ -30,6 +33,8 @@ using namespace eventlog;
 namespace {
 
 namespace fs = std::filesystem;
+
+move_policy::Model sidecar_policy;
 
 std::string expand_home_path(std::string path)
 {
@@ -305,6 +310,11 @@ PieceType get_promo_piece(std::string const & token)
     return PieceType::no_piece_type;
 }
 
+std::optional<Move> parse_current_legal_move(Board const & board, std::string_view uci)
+{
+    return uci_to_move(board, uci);
+}
+
 } // anon ns
 
 
@@ -461,6 +471,79 @@ int Uci::operator()(const std::string& command)
             const int cp = Network::EvaluateFromScratch(b);
             fmt::print("evalnet {} cp (stm={})\n", cp,
                        b.side == white ? "white" : "black");
+        } else if (token == "movepolicy") {
+            std::string sub;
+            iss >> sub;
+            if (sub == "load") {
+                std::string path;
+                std::getline(iss >> std::ws, path);
+                path = expand_home_path(path);
+                std::string error;
+                const bool ok = sidecar_policy.load(path, &error);
+                if (ok) {
+                    fmt::print(
+                        "movepolicy load ok {} feature_set={} input_dim={} threshold={}\n",
+                        path,
+                        move_policy::feature_set_name(sidecar_policy.feature_set()),
+                        sidecar_policy.input_dim(),
+                        sidecar_policy.threshold());
+                } else {
+                    fmt::print("movepolicy load fail {}: {}\n", path, error);
+                }
+                return 0;
+            }
+            if (sub == "status") {
+                fmt::print(
+                    "movepolicy {} feature_set={} input_dim={} threshold={}\n",
+                    sidecar_policy.loaded() ? "loaded" : "empty",
+                    move_policy::feature_set_name(sidecar_policy.feature_set()),
+                    sidecar_policy.input_dim(),
+                    sidecar_policy.threshold());
+                return 0;
+            }
+            if (!sidecar_policy.loaded()) {
+                fmt::print("movepolicy error: no model loaded\n");
+                return 0;
+            }
+            if (sub == "score") {
+                std::string move_token;
+                iss >> move_token;
+                const auto move = parse_current_legal_move(b, move_token);
+                if (!move) {
+                    fmt::print("movepolicy score illegal {}\n", move_token);
+                    return 0;
+                }
+                try {
+                    fmt::print("movepolicy score {} {:.6f}\n",
+                               move_token, sidecar_policy.score(b, *move));
+                } catch (std::exception const & ex) {
+                    fmt::print("movepolicy score error: {}\n", ex.what());
+                }
+                return 0;
+            }
+            if (sub == "margin") {
+                std::string best_token;
+                std::string played_token;
+                iss >> best_token >> played_token;
+                const auto best = parse_current_legal_move(b, best_token);
+                const auto played = parse_current_legal_move(b, played_token);
+                if (!best || !played) {
+                    fmt::print("movepolicy margin illegal {} {}\n", best_token, played_token);
+                    return 0;
+                }
+                try {
+                    const double margin = sidecar_policy.margin(b, *best, *played);
+                    fmt::print("movepolicy margin {} {} {:.6f} selected={}\n",
+                               best_token,
+                               played_token,
+                               margin,
+                               margin >= sidecar_policy.threshold() ? "true" : "false");
+                } catch (std::exception const & ex) {
+                    fmt::print("movepolicy margin error: {}\n", ex.what());
+                }
+                return 0;
+            }
+            fmt::print("movepolicy error: expected load/status/score/margin\n");
         } else if (token == "pgn") {
             pgn();
         } else if (token == "move") { // non-UCI command
