@@ -23,6 +23,7 @@ struct Layer {
 class Model {
 public:
     bool load(std::string_view path, std::string * error = nullptr);
+    void clear();
     [[nodiscard]] bool loaded() const { return loaded_; }
     [[nodiscard]] double threshold() const { return threshold_; }
     [[nodiscard]] int input_dim() const { return input_dim_; }
@@ -43,5 +44,8 @@ private:
 
 std::vector<double> features(Board const & board, Move move, FeatureSet feature_set);
 const char * feature_set_name(FeatureSet feature_set);
+Model & runtime_model();
+bool load_runtime_model(std::string_view path, std::string * error = nullptr);
+void clear_runtime_model();
 
 } // namespace enyo::move_policy

@@ -327,4 +327,31 @@ double Model::margin(Board const & board, Move best, Move played) const
     return score(board, best) - score(board, played);
 }
 
+void Model::clear()
+{
+    loaded_ = false;
+    feature_set_ = FeatureSet::compact;
+    input_dim_ = 0;
+    threshold_ = 0.0;
+    mean_.clear();
+    std_.clear();
+    layers_.clear();
+}
+
+Model & runtime_model()
+{
+    static Model model;
+    return model;
+}
+
+bool load_runtime_model(std::string_view path, std::string * error)
+{
+    return runtime_model().load(path, error);
+}
+
+void clear_runtime_model()
+{
+    runtime_model().clear();
+}
+
 } // namespace enyo::move_policy

@@ -80,6 +80,31 @@ json make_zero_move_policy_model(double output_bias)
     };
 }
 
+json make_weighted_move_policy_model(int feature_index, double weight)
+{
+    constexpr int input_dim = 1708;
+    std::vector<double> weights(input_dim, 0.0);
+    weights[static_cast<size_t>(feature_index)] = weight;
+
+    json layer;
+    layer["activation"] = "linear";
+    layer["weight"] = std::vector<std::vector<double>>{weights};
+    layer["bias"] = std::vector<double>{0.0};
+
+    return json{
+        {"schema", "enyo.move_policy.v1"},
+        {"feature_version", "move_policy_v1"},
+        {"feature_set", "board"},
+        {"input_dim", input_dim},
+        {"hidden", 0},
+        {"threshold", 18.0},
+        {"mean", std::vector<double>(input_dim, 0.0)},
+        {"std", std::vector<double>(input_dim, 1.0)},
+        {"layers", json::array({layer})},
+        {"config", json::object()},
+    };
+}
+
 constexpr Color get_side_to_move(std::string_view fen) {
     size_t pos = fen.find(' ');
     if (pos != std::string_view::npos) {
@@ -993,6 +1018,56 @@ TEST(search, repeated_check_root_keeps_legal_previous_bestmove) {
 
     cfgmgr.num_threads = old_threads;
     cfgmgr.use_syzygy = old_use_syzygy;
+}
+
+TEST(search, move_policy_root_guard_can_override_final_bestmove) {
+    constexpr int to_offset = 14 + 64;
+    constexpr int h3_python_square = 23;
+    const auto path = fs::temp_directory_path() / "enyo_move_policy_h2h3_model.json";
+    std::ofstream out(path);
+    out << make_weighted_move_policy_model(to_offset + h3_python_square, 100.0).dump();
+    out.close();
+
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    const auto old_policy_file = cfgmgr.move_policy_file;
+    const int old_max_drop = cfgmgr.move_policy_max_eval_drop;
+
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = false;
+    cfgmgr.move_policy_max_eval_drop = 1000;
+    move_policy::clear_runtime_model();
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    {
+        Board baseline_board;
+        Uci baseline{baseline_board};
+        baseline("position startpos");
+        baseline("go depth 1 searchmoves e2e4 h2h3");
+    }
+    const auto baseline_out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(baseline_out.find("bestmove e2e4"), std::string::npos) << baseline_out;
+
+    Board b;
+    Uci uci{b};
+    uci(fmt::format("setoption name move_policy_file value {}", path.string()));
+    uci("position startpos");
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    uci("go depth 1 searchmoves e2e4 h2h3");
+    const auto search_out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(search_out.find("bestmove h2h3"), std::string::npos) << search_out;
+
+    move_policy::clear_runtime_model();
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+    cfgmgr.move_policy_file = old_policy_file;
+    cfgmgr.move_policy_max_eval_drop = old_max_drop;
+    fs::remove(path);
 }
 
 // Qsearch-in-check regression. Pre-fix, qsearch unconditionally

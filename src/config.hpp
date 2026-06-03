@@ -117,6 +117,8 @@ public:
     bool use_nnue           = true;
     bool use_lmr            = false;
     std::string nnue_file     = "";  // empty = embedded default
+    std::string move_policy_file = "";
+    int move_policy_max_eval_drop = 80;
     std::string logfile     = "/tmp/enyo.log";
     std::string syzygy_path = "";
     std::vector<std::pair<std::string, std::string>> uci_options;
@@ -151,6 +153,8 @@ public:
             concat("use_nnue",      "check", use_nnue) +
             //concat("UCI_Chess960",  "check", use_chess_960) +
             concat("nnue_file",     "string", nnue_file) +
+            concat("move_policy_file", "string", move_policy_file) +
+            concat("move_policy_max_eval_drop", "spin", move_policy_max_eval_drop, int(0), int(1000)) +
             concat("logfile",       "string", logfile) +
             concat("SyzygyPath",    "string", syzygy_path) +
             concat("use_lmr",       "check", use_lmr);
@@ -184,6 +188,10 @@ public:
             use_nnue = (value == "true");
         else if (lc == "nnue_file")
             nnue_file = value;
+        else if (lc == "move_policy_file")
+            move_policy_file = value;
+        else if (lc == "move_policy_max_eval_drop")
+            move_policy_max_eval_drop = std::max(0, std::stoi(value));
         else if (lc == "logfile" || lc == "debug log file")
             logfile = value;
         else if (lc == "syzygypath")
@@ -216,6 +224,10 @@ private:
                 0,
                 c.value("root_repetition_contempt", root_repetition_contempt));
             nnue_file   = c.value("nnue_file", nnue_file);
+            move_policy_file = c.value("move_policy_file", move_policy_file);
+            move_policy_max_eval_drop = std::max(
+                0,
+                c.value("move_policy_max_eval_drop", move_policy_max_eval_drop));
             logfile     = c.value("logfile",   logfile);
             syzygy_path = c.value("syzygy_path", c.value("SyzygyPath", syzygy_path));
 

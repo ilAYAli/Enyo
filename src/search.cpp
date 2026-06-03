@@ -20,6 +20,7 @@
 #include "tt.hpp"
 #include "hce.hpp"
 #include "see.hpp"
+#include "move_policy.hpp"
 
 using namespace enyo;
 using namespace eventlog;
@@ -1012,6 +1013,80 @@ Move find_immediate_mate(
     return Move {};
 }
 
+Move apply_move_policy_root_guard(
+    Board & board,
+    Worker & worker,
+    Movelist const & legal_fallback,
+    Move current)
+{
+    const auto & model = move_policy::runtime_model();
+    if (!model.loaded() || !current)
+        return current;
+
+    const auto is_legal_root_move = [&](Move move) {
+        return std::ranges::find(legal_fallback, move) != legal_fallback.end();
+    };
+    if (!is_legal_root_move(current))
+        return current;
+
+    Movelist active;
+    if (worker.si.has_searchmoves) {
+        for (const auto move : worker.si.searchmoves) {
+            if (is_legal_root_move(move))
+                active.emplace(move);
+        }
+    } else {
+        active = legal_fallback;
+    }
+    if (active.size() < 2)
+        return current;
+
+    try {
+        const double current_policy = model.score(board, current);
+        double best_policy = current_policy;
+        Move candidate = current;
+        for (const auto move : active) {
+            if (move == current)
+                continue;
+            const double score = model.score(board, move);
+            if (score > best_policy) {
+                best_policy = score;
+                candidate = move;
+            }
+        }
+
+        const double margin = best_policy - current_policy;
+        if (candidate == current || margin < model.threshold())
+            return current;
+
+        const auto current_eval = static_root_score_after(board, &worker.si.nnue, current);
+        const auto candidate_eval = static_root_score_after(board, &worker.si.nnue, candidate);
+        const int eval_drop = static_cast<int>(current_eval) - static_cast<int>(candidate_eval);
+        if (eval_drop > cfgmgr.move_policy_max_eval_drop) {
+            ucilog(
+                "info string movepolicy reject {} over {} margin {:.2f} eval_drop {} max_drop {}\n",
+                candidate,
+                current,
+                margin,
+                eval_drop,
+                cfgmgr.move_policy_max_eval_drop);
+            return current;
+        }
+
+        ucilog(
+            "info string movepolicy override {} over {} margin {:.2f} eval_drop {} max_drop {}\n",
+            candidate,
+            current,
+            margin,
+            eval_drop,
+            cfgmgr.move_policy_max_eval_drop);
+        return candidate;
+    } catch (std::exception const & ex) {
+        ucilog("info string movepolicy error: {}\n", ex.what());
+        return current;
+    }
+}
+
 }
 
 void search_position(Worker & worker)
@@ -1436,6 +1511,10 @@ void search_position(Worker & worker)
                 board.fen());
             out = fallback;
         }
+
+        const bool mate_score = std::abs(value) >= Value::mate_in_max_ply;
+        if (!mate_score)
+            out = apply_move_policy_root_guard(board, worker, legal_fallback, out);
 
         ucilog("bestmove {}\n", out);
     }

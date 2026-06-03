@@ -34,8 +34,6 @@ namespace {
 
 namespace fs = std::filesystem;
 
-move_policy::Model sidecar_policy;
-
 std::string expand_home_path(std::string path)
 {
     if (path == "~" || path.starts_with("~/")) {
@@ -98,6 +96,37 @@ bool load_eval_file(const std::string & value)
     NNUE::Init("");
     ucilog("info string WARNING: nnue_file '{}' has invalid size {} bytes; using embedded evaluator\n", path, size);
     return false;
+}
+
+bool load_move_policy_file(const std::string & value)
+{
+    if (value.empty()) {
+        move_policy::clear_runtime_model();
+        ucilog("info string move_policy_file empty; sidecar disabled\n");
+        return true;
+    }
+
+    const auto path = expand_home_path(value);
+    std::error_code ec;
+    if (!fs::exists(path, ec) || ec) {
+        move_policy::clear_runtime_model();
+        ucilog("info string WARNING: move_policy_file '{}' not found/readable; sidecar disabled\n", path);
+        return false;
+    }
+
+    std::string error;
+    if (!move_policy::load_runtime_model(path, &error)) {
+        ucilog("info string WARNING: move_policy_file '{}' failed to load: {}; sidecar disabled\n", path, error);
+        return false;
+    }
+
+    const auto & model = move_policy::runtime_model();
+    ucilog("info string move policy loaded from '{}' (feature_set={}, input_dim={}, threshold={})\n",
+           path,
+           move_policy::feature_set_name(model.feature_set()),
+           model.input_dim(),
+           model.threshold());
+    return true;
 }
 
 [[maybe_unused]] std::vector<std::string> history_to_vec(const Board & b, int max_size = 0)
@@ -479,29 +508,32 @@ int Uci::operator()(const std::string& command)
                 std::getline(iss >> std::ws, path);
                 path = expand_home_path(path);
                 std::string error;
-                const bool ok = sidecar_policy.load(path, &error);
+                const bool ok = move_policy::load_runtime_model(path, &error);
+                const auto & policy = move_policy::runtime_model();
                 if (ok) {
                     fmt::print(
                         "movepolicy load ok {} feature_set={} input_dim={} threshold={}\n",
                         path,
-                        move_policy::feature_set_name(sidecar_policy.feature_set()),
-                        sidecar_policy.input_dim(),
-                        sidecar_policy.threshold());
+                        move_policy::feature_set_name(policy.feature_set()),
+                        policy.input_dim(),
+                        policy.threshold());
                 } else {
                     fmt::print("movepolicy load fail {}: {}\n", path, error);
                 }
                 return 0;
             }
             if (sub == "status") {
+                const auto & policy = move_policy::runtime_model();
                 fmt::print(
                     "movepolicy {} feature_set={} input_dim={} threshold={}\n",
-                    sidecar_policy.loaded() ? "loaded" : "empty",
-                    move_policy::feature_set_name(sidecar_policy.feature_set()),
-                    sidecar_policy.input_dim(),
-                    sidecar_policy.threshold());
+                    policy.loaded() ? "loaded" : "empty",
+                    move_policy::feature_set_name(policy.feature_set()),
+                    policy.input_dim(),
+                    policy.threshold());
                 return 0;
             }
-            if (!sidecar_policy.loaded()) {
+            auto const & policy = move_policy::runtime_model();
+            if (!policy.loaded()) {
                 fmt::print("movepolicy error: no model loaded\n");
                 return 0;
             }
@@ -515,7 +547,7 @@ int Uci::operator()(const std::string& command)
                 }
                 try {
                     fmt::print("movepolicy score {} {:.6f}\n",
-                               move_token, sidecar_policy.score(b, *move));
+                               move_token, policy.score(b, *move));
                 } catch (std::exception const & ex) {
                     fmt::print("movepolicy score error: {}\n", ex.what());
                 }
@@ -532,12 +564,12 @@ int Uci::operator()(const std::string& command)
                     return 0;
                 }
                 try {
-                    const double margin = sidecar_policy.margin(b, *best, *played);
+                    const double margin = policy.margin(b, *best, *played);
                     fmt::print("movepolicy margin {} {} {:.6f} selected={}\n",
                                best_token,
                                played_token,
                                margin,
-                               margin >= sidecar_policy.threshold() ? "true" : "false");
+                               margin >= policy.threshold() ? "true" : "false");
                 } catch (std::exception const & ex) {
                     fmt::print("movepolicy margin error: {}\n", ex.what());
                 }
@@ -628,6 +660,8 @@ void Uci::setoption(std::istringstream& iss)
         eventlog::reopen_logfile(cfgmgr.logfile, true);
     if (lower_name == "nnue_file")
         load_eval_file(cfgmgr.nnue_file);
+    if (lower_name == "move_policy_file")
+        load_move_policy_file(cfgmgr.move_policy_file);
     if (lower_name == "hash") {
         // setoption previously just updated cfgmgr.hash_size; the TT
         // was allocated once at Transposition singleton construction
