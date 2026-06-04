@@ -30,7 +30,7 @@ size_t enumerate_pieces(const enyo::Board& b, PieceEntry* out) {
     return n;
 }
 
-int ScaleEval(const enyo::Board& b, int score) {
+MaterialSummary SummarizeMaterial(const enyo::Board& b) {
     const auto minors =
         b.pt_bb[enyo::white][enyo::knight]
       | b.pt_bb[enyo::black][enyo::knight]
@@ -42,21 +42,32 @@ int ScaleEval(const enyo::Board& b, int score) {
     const auto queens =
         b.pt_bb[enyo::white][enyo::queen]
       | b.pt_bb[enyo::black][enyo::queen];
-    const int phase = 3 * enyo::count_bits(minors)
+    MaterialSummary summary;
+    summary.phase = 3 * enyo::count_bits(minors)
         + 5 * enyo::count_bits(rooks)
         + 10 * enyo::count_bits(queens);
 
-    score = (128 + phase) * score / 128;
+    for (int color = 0; color < 2; ++color) {
+        for (int pt = static_cast<int>(enyo::pawn); pt <= static_cast<int>(enyo::king); ++pt)
+            summary.piece_count += enyo::count_bits(b.pt_bb[color][pt]);
+    }
+    return summary;
+}
+
+HeadFeatures MaterialHeadFeatures(const MaterialSummary& summary) {
+    return {
+        (static_cast<float>(summary.phase) / 128.0f),
+        (static_cast<float>(summary.piece_count) - 16.0f) / 16.0f,
+    };
+}
+
+int ScaleEval(const MaterialSummary& summary, int score) {
+    score = (128 + summary.phase) * score / 128;
     return std::clamp(score, -2045, 2045);
 }
 
-int MaterialCountBucket(const enyo::Board& b) {
-    int piece_count = 0;
-    for (int color = 0; color < 2; ++color) {
-        for (int pt = static_cast<int>(enyo::pawn); pt <= static_cast<int>(enyo::king); ++pt)
-            piece_count += enyo::count_bits(b.pt_bb[color][pt]);
-    }
-    return OutputBucketForPieceCount(piece_count, OUTPUT_BUCKETS);
+int MaterialCountBucket(const MaterialSummary& summary) {
+    return OutputBucketForPieceCount(summary.piece_count, OUTPUT_BUCKETS);
 }
 
 // Phase-4-v1 correctness path: fresh accumulator on every call. A
@@ -77,7 +88,14 @@ int EvaluateFromScratch(const enyo::Board& b) {
     ResetAccumulator(&acc, enyo::white, wk_sq, pieces, n);
     ResetAccumulator(&acc, enyo::black, bk_sq, pieces, n);
 
-    return Propagate(&acc, static_cast<int>(b.side), MaterialCountBucket(b));
+    const MaterialSummary summary = SummarizeMaterial(b);
+    const HeadFeatures head_features = MaterialHeadFeatures(summary);
+    const int raw = Propagate(
+        &acc,
+        static_cast<int>(b.side),
+        MaterialCountBucket(summary),
+        &head_features);
+    return ScaleEval(summary, raw);
 }
 
 } // namespace Network

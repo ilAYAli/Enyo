@@ -907,12 +907,15 @@ int32_t Net::Evaluate2(enyo::Board &board, enyo::Color side) {
 
     ensure_network(board);
 
+    const Network::MaterialSummary summary = Network::SummarizeMaterial(board);
+    const Network::HeadFeatures head_features = Network::MaterialHeadFeatures(summary);
     const int32_t eval = Network::ScaleEval(
-        board,
+        summary,
         Network::Propagate(
             &accumulator,
             static_cast<int>(side),
-            Network::MaterialCountBucket(board)));
+            Network::MaterialCountBucket(summary),
+            &head_features));
     accumulator.eval[side] = eval;
     accumulator.eval_correct[side] = 1;
     if (entry.hash != board.hash) {

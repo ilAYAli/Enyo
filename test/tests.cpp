@@ -1237,9 +1237,16 @@ TEST(network_model, detects_supported_bucket_counts) {
     EXPECT_EQ(Network::DetectOutputBuckets(Network::NetworkSize(32)), 1);
     EXPECT_EQ(Network::DetectInputBuckets(Network::NetworkSize(16, 4)), 16);
     EXPECT_EQ(Network::DetectOutputBuckets(Network::NetworkSize(16, 4)), 4);
+    EXPECT_EQ(Network::DetectOutputHeadFeatures(Network::NetworkSize(16, 4)), 0);
+    EXPECT_EQ(Network::DetectInputBuckets(Network::NetworkSize(16, 4, Network::N_HEAD_FEATURES)), 16);
+    EXPECT_EQ(Network::DetectOutputBuckets(Network::NetworkSize(16, 4, Network::N_HEAD_FEATURES)), 4);
+    EXPECT_EQ(
+        Network::DetectOutputHeadFeatures(Network::NetworkSize(16, 4, Network::N_HEAD_FEATURES)),
+        Network::N_HEAD_FEATURES);
     EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(16)));
     EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(32)));
     EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(16, 4)));
+    EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(16, 4, Network::N_HEAD_FEATURES)));
     EXPECT_EQ(Network::DetectInputBuckets(Network::NetworkSize(16) + 1), 0);
     EXPECT_EQ(Network::DetectOutputBuckets(Network::NetworkSize(16) + 1), 0);
     EXPECT_LT(Network::NetworkSize(16), Network::NetworkSize(32));
@@ -1265,6 +1272,24 @@ TEST(network_model, loads_output_bucket_network_blob) {
     ASSERT_TRUE(Network::LoadNetwork(path_string.c_str()));
     EXPECT_EQ(Network::INPUT_BUCKETS, 16);
     EXPECT_EQ(Network::OUTPUT_BUCKETS, 4);
+    EXPECT_EQ(Network::OUTPUT_HEAD_FEATURES, 0);
+    EXPECT_EQ(Network::OUTPUT_WIDTH, Network::N_L3);
+    EXPECT_NE(Network::OUTPUT_WEIGHTS, nullptr);
+    EXPECT_NE(Network::OUTPUT_BIASES, nullptr);
+    fs::remove(path);
+    ensure_network_mock_weights();
+}
+
+TEST(network_model, loads_material_phase_head_network_blob) {
+    const auto path = write_zero_network_blob(
+        Network::NetworkSize(16, 4, Network::N_HEAD_FEATURES),
+        "enyo_zero_16_input_4_output_bucket_head.nn");
+    const auto path_string = path.string();
+    ASSERT_TRUE(Network::LoadNetwork(path_string.c_str()));
+    EXPECT_EQ(Network::INPUT_BUCKETS, 16);
+    EXPECT_EQ(Network::OUTPUT_BUCKETS, 4);
+    EXPECT_EQ(Network::OUTPUT_HEAD_FEATURES, Network::N_HEAD_FEATURES);
+    EXPECT_EQ(Network::OUTPUT_WIDTH, Network::N_L3 + Network::N_HEAD_FEATURES);
     EXPECT_NE(Network::OUTPUT_WEIGHTS, nullptr);
     EXPECT_NE(Network::OUTPUT_BIASES, nullptr);
     fs::remove(path);
@@ -1280,6 +1305,13 @@ TEST(network_model, material_count_bucket_matches_bullet_formula) {
     EXPECT_EQ(Network::OutputBucketForPieceCount(8, 4), 0);
     EXPECT_EQ(Network::OutputBucketForPieceCount(2, 4), 0);
     EXPECT_EQ(Network::OutputBucketForPieceCount(32, 1), 0);
+}
+
+TEST(network_model, material_head_features_are_normalized) {
+    const Network::MaterialSummary summary{20, 32};
+    const auto features = Network::MaterialHeadFeatures(summary);
+    EXPECT_FLOAT_EQ(features.phase_delta, 20.0f / 128.0f);
+    EXPECT_FLOAT_EQ(features.piece_count, 1.0f);
 }
 
 void materialize_network(Board & b, NNUE::Net & net) {

@@ -36,6 +36,10 @@ inline constexpr int N_L3           = 32;
 inline constexpr int N_OUTPUT       = 1;
 inline constexpr int DEFAULT_OUTPUT_BUCKETS = 1;
 inline constexpr int MAX_OUTPUT_BUCKETS = 8;
+inline constexpr int N_HEAD_FEATURES = 2;
+inline constexpr int DEFAULT_OUTPUT_HEAD_FEATURES = 0;
+inline constexpr int MAX_OUTPUT_HEAD_FEATURES = N_HEAD_FEATURES;
+inline constexpr int MAX_OUTPUT_WIDTH = N_L3 + MAX_OUTPUT_HEAD_FEATURES;
 
 // ---------------------------------------------------------------------
 // Network king buckets. Do not reshuffle this; feature indexing and
@@ -275,6 +279,8 @@ extern float          OUTPUT_BIAS;
 extern bool           INPUT_LAYOUT_SCRAMBLED;
 extern uint64_t       NETWORK_GENERATION;
 extern int            OUTPUT_BUCKETS;
+extern int            OUTPUT_WIDTH;
+extern int            OUTPUT_HEAD_FEATURES;
 
 // Phase-2 test helper: point the weight externs at externally-allocated
 // arrays.  Caller is responsible for the storage outliving subsequent
@@ -288,7 +294,8 @@ bool LoadNetwork(const char* path);
 
 inline constexpr size_t NetworkSize(
     int input_buckets,
-    int output_buckets = DEFAULT_OUTPUT_BUCKETS)
+    int output_buckets = DEFAULT_OUTPUT_BUCKETS,
+    int output_head_features = DEFAULT_OUTPUT_HEAD_FEATURES)
 {
     return sizeof(int16_t)
         * static_cast<size_t>(FeatureCount(input_buckets))
@@ -298,7 +305,8 @@ inline constexpr size_t NetworkSize(
     + sizeof(int32_t) * N_L2                   // L1 biases
     + sizeof(float)   * N_L2 * N_L3            // L2 weights
     + sizeof(float)   * N_L3                   // L2 biases
-    + sizeof(float)   * static_cast<size_t>(output_buckets) * N_L3 * N_OUTPUT
+    + sizeof(float)   * static_cast<size_t>(output_buckets)
+        * static_cast<size_t>(N_L3 + output_head_features) * N_OUTPUT
     + sizeof(float)   * static_cast<size_t>(output_buckets) * N_OUTPUT;
 }
 
@@ -309,13 +317,16 @@ inline constexpr size_t MAX_NETWORK_SIZE =
 struct NetworkLayout {
     int input_buckets = 0;
     int output_buckets = 0;
+    int output_head_features = 0;
 };
 
 inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
     for (int input_buckets : {16, 32}) {
         for (int output_buckets : {1, 2, 4, 8}) {
-            if (size == NetworkSize(input_buckets, output_buckets))
-                return {input_buckets, output_buckets};
+            for (int output_head_features : {0, N_HEAD_FEATURES}) {
+                if (size == NetworkSize(input_buckets, output_buckets, output_head_features))
+                    return {input_buckets, output_buckets, output_head_features};
+            }
         }
     }
     return {};
@@ -329,6 +340,10 @@ inline constexpr int DetectOutputBuckets(size_t size) {
     return DetectNetworkLayout(size).output_buckets;
 }
 
+inline constexpr int DetectOutputHeadFeatures(size_t size) {
+    return DetectNetworkLayout(size).output_head_features;
+}
+
 inline constexpr int OutputBucketForPieceCount(int piece_count, int output_buckets) {
     if (output_buckets <= 1)
         return 0;
@@ -340,6 +355,11 @@ inline constexpr int OutputBucketForPieceCount(int piece_count, int output_bucke
         bucket = output_buckets - 1;
     return bucket;
 }
+
+struct HeadFeatures {
+    float phase_delta = 0.0f;
+    float piece_count = 0.0f;
+};
 
 inline constexpr bool IsSupportedNetworkSize(size_t size) {
     return DetectNetworkLayout(size).input_buckets != 0;
@@ -589,8 +609,14 @@ inline void ResetAccumulator(Accumulator* dest, enyo::Color view,
 // Writes up to 32 entries to `out`, returns the number written.
 // ---------------------------------------------------------------------
 size_t enumerate_pieces(const enyo::Board& b, PieceEntry* out);
-int ScaleEval(const enyo::Board& b, int score);
-int MaterialCountBucket(const enyo::Board& b);
+struct MaterialSummary {
+    int phase = 0;
+    int piece_count = 0;
+};
+MaterialSummary SummarizeMaterial(const enyo::Board& b);
+HeadFeatures MaterialHeadFeatures(const MaterialSummary& summary);
+int ScaleEval(const MaterialSummary& summary, int score);
+int MaterialCountBucket(const MaterialSummary& summary);
 
 // Convenience — full board evaluate in centipawns (stm-relative). Builds
 // both accumulators from scratch, runs Propagate. No incremental update,
@@ -1201,17 +1227,26 @@ inline void L2AffineReLU(float* dest, const float* src) {
 }
 
 // L3Transform returns post-shift units; Propagate divides by 32.
-inline float L3Transform(const float* src, int output_bucket) {
+inline float L3Transform(
+    const float* src,
+    int output_bucket,
+    const HeadFeatures* head_features = nullptr)
+{
     const float* output_weights = &OUTPUT_WEIGHTS[
-        static_cast<size_t>(output_bucket) * N_L3];
+        static_cast<size_t>(output_bucket) * static_cast<size_t>(OUTPUT_WIDTH)];
     const float output_bias = OUTPUT_BIASES != nullptr
         ? OUTPUT_BIASES[output_bucket]
         : OUTPUT_BIAS;
+    float extra = 0.0f;
+    if (OUTPUT_HEAD_FEATURES == N_HEAD_FEATURES && head_features != nullptr) {
+        extra += head_features->phase_delta * output_weights[N_L3];
+        extra += head_features->piece_count * output_weights[N_L3 + 1];
+    }
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
     float32x4_t acc = vdupq_n_f32(0.0f);
     for (size_t i = 0; i < N_L3; i += 4)
         acc = vfmaq_f32(acc, vld1q_f32(&src[i]), vld1q_f32(&output_weights[i]));
-    return vaddvq_f32(acc) + output_bias;
+    return vaddvq_f32(acc) + output_bias + extra;
 #elif defined(__AVX512F__)
     __m512 acc0 = _mm512_setzero_ps();
     __m512 acc1 = _mm512_setzero_ps();
@@ -1232,7 +1267,7 @@ inline float L3Transform(const float* src, int output_bucket) {
         _mm256_extractf128_ps(sum8, 1));
     const __m128 sum2 = _mm_add_ps(sum4, _mm_movehl_ps(sum4, sum4));
     const __m128 sum1 = _mm_add_ss(sum2, _mm_shuffle_ps(sum2, sum2, 0x1));
-    return _mm_cvtss_f32(sum1) + output_bias;
+    return _mm_cvtss_f32(sum1) + output_bias + extra;
 #elif defined(__AVX2__)
     __m256 acc = _mm256_setzero_ps();
     for (size_t i = 0; i < N_L3; i += 8) {
@@ -1246,12 +1281,12 @@ inline float L3Transform(const float* src, int output_bucket) {
         _mm256_extractf128_ps(acc, 1));
     const __m128 sum2 = _mm_add_ps(sum4, _mm_movehl_ps(sum4, sum4));
     const __m128 sum1 = _mm_add_ss(sum2, _mm_shuffle_ps(sum2, sum2, 0x1));
-    return _mm_cvtss_f32(sum1) + output_bias;
+    return _mm_cvtss_f32(sum1) + output_bias + extra;
 #else
     float s = output_bias;
     for (int i = 0; i < N_L3; ++i)
         s += src[i] * output_weights[i];
-    return s;
+    return s + extra;
 #endif
 }
 
@@ -1259,14 +1294,15 @@ inline float L3Transform(const float* src, int output_bucket) {
 inline int Propagate(
     const Accumulator* acc,
     int stm,
-    int output_bucket = 0)
+    int output_bucket = 0,
+    const HeadFeatures* head_features = nullptr)
 {
 #if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__ARM_FEATURE_DOTPROD)
     alignas(64) float x1[N_L2];
     alignas(64) float x2[N_L3];
     L1AffineReLUFromAccumulator(x1, acc, stm);
     L2AffineReLU(x2, x1);
-    return static_cast<int>(L3Transform(x2, output_bucket) / 32.0f);
+    return static_cast<int>(L3Transform(x2, output_bucket, head_features) / 32.0f);
 #else
     alignas(64) int8_t x0[N_L1];
     alignas(64) float  x1[N_L2];
@@ -1274,7 +1310,7 @@ inline int Propagate(
     InputReLU(x0, acc, stm);
     L1AffineReLU(x1, x0);
     L2AffineReLU(x2, x1);
-    return static_cast<int>(L3Transform(x2, output_bucket) / 32.0f);
+    return static_cast<int>(L3Transform(x2, output_bucket, head_features) / 32.0f);
 #endif
 }
 

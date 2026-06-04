@@ -30,7 +30,7 @@ alignas(64) int8_t  s_l1_weights_sparse[N_L1 * N_L2];
 alignas(64) int32_t s_l1_biases     [N_L2];
 alignas(64) float   s_l2_weights    [N_L2 * N_L3];
 alignas(64) float   s_l2_biases     [N_L3];
-alignas(64) float   s_output_weights[MAX_OUTPUT_BUCKETS * N_L3 * N_OUTPUT];
+alignas(64) float   s_output_weights[MAX_OUTPUT_BUCKETS * MAX_OUTPUT_WIDTH * N_OUTPUT];
 alignas(64) float   s_output_biases [MAX_OUTPUT_BUCKETS * N_OUTPUT];
 }
 
@@ -52,6 +52,8 @@ bool          INPUT_LAYOUT_SCRAMBLED = false;
 uint64_t      NETWORK_GENERATION = 0;
 int           INPUT_BUCKETS = DEFAULT_INPUT_BUCKETS;
 int           OUTPUT_BUCKETS = DEFAULT_OUTPUT_BUCKETS;
+int           OUTPUT_WIDTH = N_L3;
+int           OUTPUT_HEAD_FEATURES = DEFAULT_OUTPUT_HEAD_FEATURES;
 
 // Phase-6 runtime switch. Engine `evaluate()` checks this + INPUT_WEIGHTS
 // and re-routes to EvaluateFromScratch when both are set.
@@ -161,6 +163,8 @@ void ShuffleInputLayout(int input_buckets) {
 void SetWeights(const acc_t* weights, const acc_t* biases) {
     INPUT_BUCKETS = DEFAULT_INPUT_BUCKETS;
     OUTPUT_BUCKETS = DEFAULT_OUTPUT_BUCKETS;
+    OUTPUT_WIDTH = N_L3;
+    OUTPUT_HEAD_FEATURES = DEFAULT_OUTPUT_HEAD_FEATURES;
     INPUT_WEIGHTS = weights;
     INPUT_BIASES  = biases;
     L1_WEIGHTS_T  = nullptr;
@@ -182,7 +186,7 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
 //   [N_L2]                  int32  L1_BIASES
 //   [N_L2 * N_L3]           float  L2_WEIGHTS     (row-major, output-major)
 //   [N_L3]                  float  L2_BIASES
-//   [OUTPUT_BUCKETS * N_L3] float  OUTPUT_WEIGHTS
+//   [OUTPUT_BUCKETS * (N_L3 + HEAD_FEATURES)] float  OUTPUT_WEIGHTS
 //   [OUTPUT_BUCKETS]        float  OUTPUT_BIASES
 //
 // Any size mismatch is a hard failure (we refuse to silently load a
@@ -208,17 +212,29 @@ bool LoadNetwork(const char* path) {
     const NetworkLayout layout = DetectNetworkLayout(static_cast<size_t>(sz));
     if (layout.input_buckets == 0) {
         std::fprintf(stderr,
-            "network: '%s' is %ld bytes, expected %zu, %zu, %zu, %zu, %zu, %zu, %zu, or %zu\n",
+            "network: '%s' is %ld bytes, expected a supported Enyo NNUE size\n"
+            "  legacy: %zu, %zu, %zu, %zu, %zu, %zu, %zu, or %zu\n"
+            "  material/phase head: %zu, %zu, %zu, %zu, %zu, %zu, %zu, or %zu\n",
             path, sz,
             NetworkSize(16, 1), NetworkSize(16, 2),
             NetworkSize(16, 4), NetworkSize(16, 8),
             NetworkSize(32, 1), NetworkSize(32, 2),
-            NetworkSize(32, 4), NetworkSize(32, 8));
+            NetworkSize(32, 4), NetworkSize(32, 8),
+            NetworkSize(16, 1, N_HEAD_FEATURES),
+            NetworkSize(16, 2, N_HEAD_FEATURES),
+            NetworkSize(16, 4, N_HEAD_FEATURES),
+            NetworkSize(16, 8, N_HEAD_FEATURES),
+            NetworkSize(32, 1, N_HEAD_FEATURES),
+            NetworkSize(32, 2, N_HEAD_FEATURES),
+            NetworkSize(32, 4, N_HEAD_FEATURES),
+            NetworkSize(32, 8, N_HEAD_FEATURES));
         std::fclose(fh);
         return false;
     }
     const int input_buckets = layout.input_buckets;
     const int output_buckets = layout.output_buckets;
+    const int output_head_features = layout.output_head_features;
+    const int output_width = N_L3 + output_head_features;
     std::rewind(fh);
 
     auto read = [&](void* dst, size_t n, const char* label) -> bool {
@@ -235,7 +251,8 @@ bool LoadNetwork(const char* path) {
     const size_t input_weight_bytes =
         sizeof(acc_t) * static_cast<size_t>(FeatureCount(input_buckets)) * N_HIDDEN;
     const size_t output_weight_bytes =
-        sizeof(float) * static_cast<size_t>(output_buckets) * N_L3 * N_OUTPUT;
+        sizeof(float) * static_cast<size_t>(output_buckets)
+            * static_cast<size_t>(output_width) * N_OUTPUT;
     const size_t output_bias_bytes =
         sizeof(float) * static_cast<size_t>(output_buckets) * N_OUTPUT;
     if (!read(s_input_weights,  input_weight_bytes,       "INPUT_WEIGHTS")) { std::fclose(fh); return false; }
@@ -264,6 +281,8 @@ bool LoadNetwork(const char* path) {
         s_l1_weights_sparse[WeightIdxScrambled(i)] = s_l1_weights[i];
     INPUT_BUCKETS = input_buckets;
     OUTPUT_BUCKETS = output_buckets;
+    OUTPUT_WIDTH = output_width;
+    OUTPUT_HEAD_FEATURES = output_head_features;
     ShuffleInputLayout(input_buckets);
 
     INPUT_WEIGHTS  = s_input_weights;
