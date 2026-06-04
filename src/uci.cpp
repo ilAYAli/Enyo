@@ -474,9 +474,14 @@ int Uci::operator()(const std::string& command)
                 const bool ok = Network::LoadNetwork(resolved.c_str());
                 if (ok)
                     Network::enabled = true;
-                fmt::print("evalnet load {} {}{}\n",
-                           ok ? "ok" : "fail", resolved,
-                           ok ? " (search routed through network)" : "");
+                if (ok) {
+                    fmt::print(
+                        "evalnet load ok {} ({} input buckets, {} feature channels, {} output buckets, {} head features; search routed through network)\n",
+                        resolved, Network::INPUT_BUCKETS, Network::FEATURE_CHANNELS,
+                        Network::OUTPUT_BUCKETS, Network::OUTPUT_HEAD_FEATURES);
+                } else {
+                    fmt::print("evalnet load fail {}\n", resolved);
+                }
                 return 0;
             }
             if (sub == "enable") {
