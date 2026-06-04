@@ -75,9 +75,9 @@ bool load_eval_file(const std::string & value)
     if (Network::IsSupportedNetworkSize(size)) {
         if (Network::LoadNetwork(path.c_str())) {
             Network::enabled = true;
-            ucilog("info string network loaded from '{}' ({} input buckets, {} output buckets, {} head features)\n",
-                   path, Network::INPUT_BUCKETS, Network::OUTPUT_BUCKETS,
-                   Network::OUTPUT_HEAD_FEATURES);
+            ucilog("info string network loaded from '{}' ({} input buckets, {} feature channels, {} output buckets, {} head features)\n",
+                   path, Network::INPUT_BUCKETS, Network::FEATURE_CHANNELS,
+                   Network::OUTPUT_BUCKETS, Network::OUTPUT_HEAD_FEATURES);
             return true;
         }
         Network::enabled = false;

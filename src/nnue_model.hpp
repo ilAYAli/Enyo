@@ -27,8 +27,12 @@ inline constexpr int DEFAULT_INPUT_BUCKETS = 16;
 inline constexpr int MAX_INPUT_BUCKETS = 32;
 inline constexpr int N_KING_BUCKETS = MAX_INPUT_BUCKETS;
 inline constexpr int N_PIECE_TYPES  = 12;               // 6 types × 2 colors
+inline constexpr int LEGACY_FEATURE_CHANNELS = 12;
+inline constexpr int HALFKA_V2_FEATURE_CHANNELS = 11;
+inline constexpr int DEFAULT_FEATURE_CHANNELS = LEGACY_FEATURE_CHANNELS;
+inline constexpr int MAX_FEATURE_CHANNELS = LEGACY_FEATURE_CHANNELS;
 inline constexpr int N_SQUARES      = 64;
-inline constexpr int N_FEATURES     = N_KING_BUCKETS * N_PIECE_TYPES * N_SQUARES;
+inline constexpr int N_FEATURES     = N_KING_BUCKETS * MAX_FEATURE_CHANNELS * N_SQUARES;
 inline constexpr int N_HIDDEN       = 1024;
 inline constexpr int N_L1           = 2 * N_HIDDEN;     // 2048
 inline constexpr int N_L2           = 16;
@@ -68,9 +72,13 @@ inline constexpr std::array<uint16_t, 64> KING_BUCKETS_32 = {
 };
 
 extern int INPUT_BUCKETS;
+extern int FEATURE_CHANNELS;
 
-inline constexpr int FeatureCount(int input_buckets) {
-    return input_buckets * N_PIECE_TYPES * N_SQUARES;
+inline constexpr int FeatureCount(
+    int input_buckets,
+    int feature_channels = DEFAULT_FEATURE_CHANNELS)
+{
+    return input_buckets * feature_channels * N_SQUARES;
 }
 
 // ---------------------------------------------------------------------
@@ -107,6 +115,26 @@ inline uint16_t KingBucket(int oriented_net_sq) {
     return KingBucketsFor(INPUT_BUCKETS)[static_cast<size_t>(oriented_net_sq)];
 }
 
+inline constexpr bool IsSupportedFeatureLayout(int input_buckets, int feature_channels) {
+    return feature_channels == LEGACY_FEATURE_CHANNELS
+        || (input_buckets == 32 && feature_channels == HALFKA_V2_FEATURE_CHANNELS);
+}
+
+inline constexpr int FeatureChannel(int pt,
+                                    int piece_color,
+                                    int view,
+                                    int feature_channels = DEFAULT_FEATURE_CHANNELS)
+{
+    const int piece = ((pt - 1) << 1) | piece_color;
+    if (feature_channels == HALFKA_V2_FEATURE_CHANNELS) {
+        const int piece_type = pt - 1;
+        if (piece_type == 5)
+            return 10;
+        return 5 * ((piece ^ view) & 0x1) + piece_type;
+    }
+    return 6 * ((piece ^ view) & 0x1) + (piece >> 1);
+}
+
 // ---------------------------------------------------------------------
 // Enyo-side wrapper: takes (piece_type, piece_color, sq, king_sq, view)
 // in Enyo's native representation and converts to the network layout.
@@ -124,20 +152,21 @@ inline constexpr int FeatureIdxFormula(int pt,
                                        int enyo_sq,
                                        int enyo_kingsq,
                                        int view,
-                                       int input_buckets = DEFAULT_INPUT_BUCKETS)
+                                       int input_buckets = DEFAULT_INPUT_BUCKETS,
+                                       int feature_channels = DEFAULT_FEATURE_CHANNELS)
 {
     if (pt == 0)
         return 0;
 
-    const int piece    = ((pt - 1) << 1) | piece_color;
     const int sq       = to_net_sq(enyo_sq);
     const int kingsq   = to_net_sq(enyo_kingsq);
 
-    const int oP  = 6 * ((piece ^ view) & 0x1) + (piece >> 1);
+    const int oP  = FeatureChannel(pt, piece_color, view, feature_channels);
     const int oK  = (7 * !(kingsq & 4)) ^ (56 * view) ^ kingsq;
     const int oSq = (7 * !(kingsq & 4)) ^ (56 * view) ^ sq;
 
-    return KingBucketsFor(input_buckets)[static_cast<size_t>(oK)] * 12 * 64
+    return KingBucketsFor(input_buckets)[static_cast<size_t>(oK)]
+        * feature_channels * 64
         + oP * 64 + oSq;
 }
 
@@ -156,7 +185,9 @@ inline constexpr size_t FeatureIdxTableOffset(int pt,
         * 2 + static_cast<size_t>(view);
 }
 
-inline std::array<int, FEATURE_IDX_TABLE_SIZE> MakeFeatureIdxTable(int input_buckets)
+inline std::array<int, FEATURE_IDX_TABLE_SIZE> MakeFeatureIdxTable(
+    int input_buckets,
+    int feature_channels)
 {
     std::array<int, FEATURE_IDX_TABLE_SIZE> table{};
     for (int pt = 0; pt <= 6; ++pt)
@@ -166,12 +197,14 @@ inline std::array<int, FEATURE_IDX_TABLE_SIZE> MakeFeatureIdxTable(int input_buc
                     for (int view = 0; view < 2; ++view)
                         table[FeatureIdxTableOffset(pt, color, sq, ksq, view)] =
                             FeatureIdxFormula(
-                                pt, color, sq, ksq, view, input_buckets);
+                                pt, color, sq, ksq, view, input_buckets,
+                                feature_channels);
     return table;
 }
 
-inline const auto FEATURE_IDX_TABLE_16 = MakeFeatureIdxTable(16);
-inline const auto FEATURE_IDX_TABLE_32 = MakeFeatureIdxTable(32);
+inline const auto FEATURE_IDX_TABLE_16_12 = MakeFeatureIdxTable(16, 12);
+inline const auto FEATURE_IDX_TABLE_32_12 = MakeFeatureIdxTable(32, 12);
+inline const auto FEATURE_IDX_TABLE_32_11 = MakeFeatureIdxTable(32, 11);
 
 inline int FeatureIdx(enyo::PieceType pt,
                       enyo::Color piece_color,
@@ -179,9 +212,9 @@ inline int FeatureIdx(enyo::PieceType pt,
                       enyo::square_t enyo_kingsq,
                       enyo::Color view)
 {
-    const auto & table = INPUT_BUCKETS == 32
-        ? FEATURE_IDX_TABLE_32
-        : FEATURE_IDX_TABLE_16;
+    const auto & table = FEATURE_CHANNELS == HALFKA_V2_FEATURE_CHANNELS
+        ? FEATURE_IDX_TABLE_32_11
+        : (INPUT_BUCKETS == 32 ? FEATURE_IDX_TABLE_32_12 : FEATURE_IDX_TABLE_16_12);
     return table[FeatureIdxTableOffset(
         static_cast<int>(pt),
         static_cast<int>(piece_color),
@@ -295,10 +328,11 @@ bool LoadNetwork(const char* path);
 inline constexpr size_t NetworkSize(
     int input_buckets,
     int output_buckets = DEFAULT_OUTPUT_BUCKETS,
-    int output_head_features = DEFAULT_OUTPUT_HEAD_FEATURES)
+    int output_head_features = DEFAULT_OUTPUT_HEAD_FEATURES,
+    int feature_channels = DEFAULT_FEATURE_CHANNELS)
 {
     return sizeof(int16_t)
-        * static_cast<size_t>(FeatureCount(input_buckets))
+        * static_cast<size_t>(FeatureCount(input_buckets, feature_channels))
         * static_cast<size_t>(N_HIDDEN)
     + sizeof(int16_t) * N_HIDDEN               // input biases
     + sizeof(int8_t)  * N_L1 * N_L2            // L1 weights
@@ -316,16 +350,32 @@ inline constexpr size_t MAX_NETWORK_SIZE =
 
 struct NetworkLayout {
     int input_buckets = 0;
+    int feature_channels = 0;
     int output_buckets = 0;
     int output_head_features = 0;
 };
 
 inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
-    for (int input_buckets : {16, 32}) {
+    constexpr std::array<std::array<int, 2>, 3> layouts = {{
+        {16, 12},
+        {32, 12},
+        {32, 11},
+    }};
+    for (const auto & layout : layouts) {
+        const int input_buckets = layout[0];
+        const int feature_channels = layout[1];
         for (int output_buckets : {1, 2, 4, 8}) {
             for (int output_head_features : {0, N_HEAD_FEATURES}) {
-                if (size == NetworkSize(input_buckets, output_buckets, output_head_features))
-                    return {input_buckets, output_buckets, output_head_features};
+                if (size == NetworkSize(
+                        input_buckets,
+                        output_buckets,
+                        output_head_features,
+                        feature_channels))
+                    return {
+                        input_buckets,
+                        feature_channels,
+                        output_buckets,
+                        output_head_features};
             }
         }
     }
@@ -338,6 +388,10 @@ inline constexpr int DetectInputBuckets(size_t size) {
 
 inline constexpr int DetectOutputBuckets(size_t size) {
     return DetectNetworkLayout(size).output_buckets;
+}
+
+inline constexpr int DetectFeatureChannels(size_t size) {
+    return DetectNetworkLayout(size).feature_channels;
 }
 
 inline constexpr int DetectOutputHeadFeatures(size_t size) {

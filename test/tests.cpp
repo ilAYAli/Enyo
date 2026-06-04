@@ -1230,9 +1230,59 @@ bool network_accumulators_match(const Network::Accumulator & a,
     return true;
 }
 
+constexpr int mirror_file(int sq) {
+    return sq ^ 7;
+}
+
+TEST(network_model, halfka_v2_feature_channels_merge_kings_only) {
+    EXPECT_EQ(Network::FeatureCount(32, Network::HALFKA_V2_FEATURE_CHANNELS), 22528);
+    EXPECT_EQ(Network::FeatureChannel(king, white, white, 11), 10);
+    EXPECT_EQ(Network::FeatureChannel(king, black, white, 11), 10);
+    EXPECT_EQ(Network::FeatureChannel(king, white, black, 11), 10);
+    EXPECT_EQ(Network::FeatureChannel(king, black, black, 11), 10);
+    EXPECT_EQ(Network::FeatureChannel(pawn, white, white, 11), 0);
+    EXPECT_EQ(Network::FeatureChannel(queen, white, white, 11), 4);
+    EXPECT_EQ(Network::FeatureChannel(pawn, black, white, 11), 5);
+    EXPECT_EQ(Network::FeatureChannel(queen, black, white, 11), 9);
+    EXPECT_EQ(Network::FeatureChannel(pawn, black, black, 11), 0);
+    EXPECT_EQ(Network::FeatureChannel(queen, white, black, 11), 9);
+
+    EXPECT_NE(
+        Network::FeatureIdxFormula(king, white, 0, 4, white, 32, 12),
+        Network::FeatureIdxFormula(king, black, 0, 4, white, 32, 12));
+    EXPECT_EQ(
+        Network::FeatureIdxFormula(king, white, 0, 4, white, 32, 11),
+        Network::FeatureIdxFormula(king, black, 0, 4, white, 32, 11));
+}
+
+TEST(network_model, feature_index_uses_horizontal_mirroring) {
+    for (const int feature_channels : {12, 11}) {
+        const int input_buckets = feature_channels == 11 ? 32 : 16;
+        for (int pt = static_cast<int>(pawn); pt <= static_cast<int>(king); ++pt) {
+            for (int color = 0; color < 2; ++color) {
+                for (int view = 0; view < 2; ++view) {
+                    const int sq = 9;
+                    const int king_sq = 3;
+                    EXPECT_EQ(
+                        Network::FeatureIdxFormula(pt, color, sq, king_sq, view,
+                            input_buckets, feature_channels),
+                        Network::FeatureIdxFormula(pt, color, mirror_file(sq),
+                            mirror_file(king_sq), view, input_buckets,
+                            feature_channels));
+                }
+            }
+        }
+    }
+}
+
 TEST(network_model, detects_supported_bucket_counts) {
     EXPECT_EQ(Network::DetectInputBuckets(Network::NetworkSize(16)), 16);
     EXPECT_EQ(Network::DetectInputBuckets(Network::NetworkSize(32)), 32);
+    EXPECT_EQ(Network::DetectFeatureChannels(Network::NetworkSize(16)), 12);
+    EXPECT_EQ(Network::DetectFeatureChannels(Network::NetworkSize(32)), 12);
+    EXPECT_EQ(
+        Network::DetectFeatureChannels(Network::NetworkSize(32, 1, 0, 11)),
+        11);
     EXPECT_EQ(Network::DetectOutputBuckets(Network::NetworkSize(16)), 1);
     EXPECT_EQ(Network::DetectOutputBuckets(Network::NetworkSize(32)), 1);
     EXPECT_EQ(Network::DetectInputBuckets(Network::NetworkSize(16, 4)), 16);
@@ -1245,6 +1295,7 @@ TEST(network_model, detects_supported_bucket_counts) {
         Network::N_HEAD_FEATURES);
     EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(16)));
     EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(32)));
+    EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(32, 1, 0, 11)));
     EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(16, 4)));
     EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(16, 4, Network::N_HEAD_FEATURES)));
     EXPECT_EQ(Network::DetectInputBuckets(Network::NetworkSize(16) + 1), 0);
@@ -1259,6 +1310,19 @@ TEST(network_model, loads_32_bucket_network_blob) {
     const auto path_string = path.string();
     ASSERT_TRUE(Network::LoadNetwork(path_string.c_str()));
     EXPECT_EQ(Network::INPUT_BUCKETS, 32);
+    EXPECT_NE(Network::INPUT_WEIGHTS, nullptr);
+    fs::remove(path);
+    ensure_network_mock_weights();
+}
+
+TEST(network_model, loads_halfka_v2_channel_network_blob) {
+    const auto path = write_zero_network_blob(
+        Network::NetworkSize(32, 1, 0, Network::HALFKA_V2_FEATURE_CHANNELS),
+        "enyo_zero_32_bucket_11_channel.nn");
+    const auto path_string = path.string();
+    ASSERT_TRUE(Network::LoadNetwork(path_string.c_str()));
+    EXPECT_EQ(Network::INPUT_BUCKETS, 32);
+    EXPECT_EQ(Network::FEATURE_CHANNELS, 11);
     EXPECT_NE(Network::INPUT_WEIGHTS, nullptr);
     fs::remove(path);
     ensure_network_mock_weights();

@@ -51,6 +51,7 @@ float         OUTPUT_BIAS    = 0.0f;
 bool          INPUT_LAYOUT_SCRAMBLED = false;
 uint64_t      NETWORK_GENERATION = 0;
 int           INPUT_BUCKETS = DEFAULT_INPUT_BUCKETS;
+int           FEATURE_CHANNELS = DEFAULT_FEATURE_CHANNELS;
 int           OUTPUT_BUCKETS = DEFAULT_OUTPUT_BUCKETS;
 int           OUTPUT_WIDTH = N_L3;
 int           OUTPUT_HEAD_FEATURES = DEFAULT_OUTPUT_HEAD_FEATURES;
@@ -71,14 +72,15 @@ void InitLookupIndices() {
     }
 }
 
-void ShuffleInputLayout(int input_buckets) {
+void ShuffleInputLayout(int input_buckets, int feature_channels) {
 #if !defined(__AVX512BW__) && !defined(__AVX2__)
     (void)input_buckets;
+    (void)feature_channels;
 #endif
 #if defined(__AVX512BW__)
     constexpr size_t width = sizeof(__m512i) / sizeof(int16_t);
     const size_t weight_chunks =
-        (static_cast<size_t>(FeatureCount(input_buckets)) * N_HIDDEN) / width;
+        (static_cast<size_t>(FeatureCount(input_buckets, feature_channels)) * N_HIDDEN) / width;
     constexpr size_t bias_chunks = N_HIDDEN / width;
 
     auto* weights = reinterpret_cast<__m512i*>(s_input_weights);
@@ -127,7 +129,7 @@ void ShuffleInputLayout(int input_buckets) {
 #elif defined(__AVX2__)
     constexpr size_t width = sizeof(__m256i) / sizeof(int16_t);
     const size_t weight_chunks =
-        (static_cast<size_t>(FeatureCount(input_buckets)) * N_HIDDEN) / width;
+        (static_cast<size_t>(FeatureCount(input_buckets, feature_channels)) * N_HIDDEN) / width;
     constexpr size_t bias_chunks = N_HIDDEN / width;
 
     auto* weights = reinterpret_cast<__m256i*>(s_input_weights);
@@ -162,6 +164,7 @@ void ShuffleInputLayout(int input_buckets) {
 
 void SetWeights(const acc_t* weights, const acc_t* biases) {
     INPUT_BUCKETS = DEFAULT_INPUT_BUCKETS;
+    FEATURE_CHANNELS = DEFAULT_FEATURE_CHANNELS;
     OUTPUT_BUCKETS = DEFAULT_OUTPUT_BUCKETS;
     OUTPUT_WIDTH = N_L3;
     OUTPUT_HEAD_FEATURES = DEFAULT_OUTPUT_HEAD_FEATURES;
@@ -213,8 +216,10 @@ bool LoadNetwork(const char* path) {
     if (layout.input_buckets == 0) {
         std::fprintf(stderr,
             "network: '%s' is %ld bytes, expected a supported Enyo NNUE size\n"
-            "  legacy: %zu, %zu, %zu, %zu, %zu, %zu, %zu, or %zu\n"
-            "  material/phase head: %zu, %zu, %zu, %zu, %zu, %zu, %zu, or %zu\n",
+            "  12-channel legacy: %zu, %zu, %zu, %zu, %zu, %zu, %zu, or %zu\n"
+            "  12-channel material/phase head: %zu, %zu, %zu, %zu, %zu, %zu, %zu, or %zu\n"
+            "  11-channel HalfKAv2-like: %zu, %zu, %zu, or %zu\n"
+            "  11-channel HalfKAv2-like material/phase head: %zu, %zu, %zu, or %zu\n",
             path, sz,
             NetworkSize(16, 1), NetworkSize(16, 2),
             NetworkSize(16, 4), NetworkSize(16, 8),
@@ -227,11 +232,20 @@ bool LoadNetwork(const char* path) {
             NetworkSize(32, 1, N_HEAD_FEATURES),
             NetworkSize(32, 2, N_HEAD_FEATURES),
             NetworkSize(32, 4, N_HEAD_FEATURES),
-            NetworkSize(32, 8, N_HEAD_FEATURES));
+            NetworkSize(32, 8, N_HEAD_FEATURES),
+            NetworkSize(32, 1, DEFAULT_OUTPUT_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
+            NetworkSize(32, 2, DEFAULT_OUTPUT_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
+            NetworkSize(32, 4, DEFAULT_OUTPUT_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
+            NetworkSize(32, 8, DEFAULT_OUTPUT_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
+            NetworkSize(32, 1, N_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
+            NetworkSize(32, 2, N_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
+            NetworkSize(32, 4, N_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
+            NetworkSize(32, 8, N_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS));
         std::fclose(fh);
         return false;
     }
     const int input_buckets = layout.input_buckets;
+    const int feature_channels = layout.feature_channels;
     const int output_buckets = layout.output_buckets;
     const int output_head_features = layout.output_head_features;
     const int output_width = N_L3 + output_head_features;
@@ -249,7 +263,7 @@ bool LoadNetwork(const char* path) {
     std::memset(s_output_weights, 0, sizeof(s_output_weights));
     std::memset(s_output_biases, 0, sizeof(s_output_biases));
     const size_t input_weight_bytes =
-        sizeof(acc_t) * static_cast<size_t>(FeatureCount(input_buckets)) * N_HIDDEN;
+        sizeof(acc_t) * static_cast<size_t>(FeatureCount(input_buckets, feature_channels)) * N_HIDDEN;
     const size_t output_weight_bytes =
         sizeof(float) * static_cast<size_t>(output_buckets)
             * static_cast<size_t>(output_width) * N_OUTPUT;
@@ -280,10 +294,11 @@ bool LoadNetwork(const char* path) {
     for (size_t i = 0; i < N_L1 * N_L2; ++i)
         s_l1_weights_sparse[WeightIdxScrambled(i)] = s_l1_weights[i];
     INPUT_BUCKETS = input_buckets;
+    FEATURE_CHANNELS = feature_channels;
     OUTPUT_BUCKETS = output_buckets;
     OUTPUT_WIDTH = output_width;
     OUTPUT_HEAD_FEATURES = output_head_features;
-    ShuffleInputLayout(input_buckets);
+    ShuffleInputLayout(input_buckets, feature_channels);
 
     INPUT_WEIGHTS  = s_input_weights;
     INPUT_BIASES   = s_input_biases;
