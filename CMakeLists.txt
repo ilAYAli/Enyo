@@ -260,10 +260,12 @@ if(ENYO_ENABLE_STOCKFISH_STATIC_DATAGEN)
         ${STOCKFISH_SRC_DIR}/syzygy/tbprobe.cpp
     )
 
+    set(STOCKFISH_SIMD_FLAGS)
     set(STOCKFISH_SIMD_DEFINES)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64|AARCH64")
         list(APPEND STOCKFISH_SIMD_DEFINES USE_NEON=1)
     elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+        list(APPEND STOCKFISH_SIMD_FLAGS -mavx2 -mssse3 -msse2)
         list(APPEND STOCKFISH_SIMD_DEFINES USE_AVX2=1 USE_SSSE3=1 USE_SSE2=1)
     endif()
 
@@ -284,6 +286,7 @@ if(ENYO_ENABLE_STOCKFISH_STATIC_DATAGEN)
         target_compile_options(stockfish_static_eval PRIVATE
             -Wno-conversion
             -Wno-sign-conversion
+            ${STOCKFISH_SIMD_FLAGS}
             -Wno-unused-parameter
         )
     endif()
@@ -300,6 +303,7 @@ if(ENYO_ENABLE_STOCKFISH_STATIC_DATAGEN)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(enyo_sf_static_datagen PRIVATE
             -Wno-conversion
+            ${STOCKFISH_SIMD_FLAGS}
             -Wno-sign-conversion
         )
     endif()

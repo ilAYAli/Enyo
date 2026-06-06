@@ -17,6 +17,7 @@
 
 #include "fmt/core.h"
 #include "nlohmann/json.hpp"
+#include "attacks.h"
 
 #include "bitboard.h"
 #include "evaluate.h"
@@ -381,6 +382,7 @@ int main(int argc, char** argv) {
     const auto opts = parse_args(std::span<char*>(argv, static_cast<std::size_t>(argc)));
 
     Stockfish::Bitboards::init();
+    Stockfish::Attacks::init();
     Stockfish::Position::init();
 
     const Stockfish::Eval::NNUE::EvalFile evalFile{EvalFileDefaultName, "None", ""};
