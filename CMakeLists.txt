@@ -260,9 +260,11 @@ if(ENYO_ENABLE_STOCKFISH_STATIC_DATAGEN)
         ${STOCKFISH_SRC_DIR}/syzygy/tbprobe.cpp
     )
 
-    set(STOCKFISH_USE_NEON 0)
+    set(STOCKFISH_SIMD_DEFINES)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64|AARCH64")
-        set(STOCKFISH_USE_NEON 1)
+        list(APPEND STOCKFISH_SIMD_DEFINES USE_NEON=1)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+        list(APPEND STOCKFISH_SIMD_DEFINES USE_AVX2=1 USE_SSSE3=1 USE_SSE2=1)
     endif()
 
     add_library(stockfish_static_eval STATIC
@@ -273,7 +275,7 @@ if(ENYO_ENABLE_STOCKFISH_STATIC_DATAGEN)
         IS_64BIT
         NNUE_EMBEDDING_OFF
         NOMINMAX
-        USE_NEON=${STOCKFISH_USE_NEON}
+        ${STOCKFISH_SIMD_DEFINES}
     )
     target_include_directories(stockfish_static_eval PUBLIC
         ${STOCKFISH_SRC_DIR}
@@ -292,8 +294,8 @@ if(ENYO_ENABLE_STOCKFISH_STATIC_DATAGEN)
         src/nnue_model_board.cpp
     )
     target_compile_features(enyo_sf_static_datagen PRIVATE cxx_std_23)
-    set_source_files_properties(tools/sf_static_datagen.cpp PROPERTIES COMPILE_DEFINITIONS
-        USE_NEON=${STOCKFISH_USE_NEON}
+    set_source_files_properties(tools/sf_static_datagen.cpp PROPERTIES
+        COMPILE_DEFINITIONS "${STOCKFISH_SIMD_DEFINES}"
     )
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(enyo_sf_static_datagen PRIVATE
