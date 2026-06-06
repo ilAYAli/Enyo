@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ENYO_USE_SYZYGY "Enable Syzygy tablebase probing via Pyrrhic" ON)
+option(ENYO_ENABLE_STOCKFISH_STATIC_DATAGEN "Build optional Stockfish static NNUE datagen tool" OFF)
+set(ENYO_STOCKFISH_SOURCE_DIR "" CACHE PATH "Stockfish source tree for optional static NNUE datagen")
 
 #---[ git versioning/output ]--------------------------------------------------
 string(ASCII 27 Esc)
@@ -233,6 +235,79 @@ endif()
 target_include_directories(enyo PRIVATE
     ${CMAKE_BINARY_DIR}
     3rdparty/Pyrrhic)
+
+if(ENYO_ENABLE_STOCKFISH_STATIC_DATAGEN)
+    if(NOT ENYO_STOCKFISH_SOURCE_DIR)
+        message(FATAL_ERROR "ENYO_STOCKFISH_SOURCE_DIR is required when ENYO_ENABLE_STOCKFISH_STATIC_DATAGEN=ON")
+    endif()
+
+    set(STOCKFISH_SRC_DIR "${ENYO_STOCKFISH_SOURCE_DIR}/src")
+    if(NOT EXISTS "${STOCKFISH_SRC_DIR}/nnue/network.h")
+        message(FATAL_ERROR "ENYO_STOCKFISH_SOURCE_DIR must point to a Stockfish source tree")
+    endif()
+
+    set(STOCKFISH_STATIC_EVAL_SOURCES
+        ${STOCKFISH_SRC_DIR}/attacks.cpp
+        ${STOCKFISH_SRC_DIR}/bitboard.cpp
+        ${STOCKFISH_SRC_DIR}/memory.cpp
+        ${STOCKFISH_SRC_DIR}/misc.cpp
+        ${STOCKFISH_SRC_DIR}/movegen.cpp
+        ${STOCKFISH_SRC_DIR}/position.cpp
+        ${STOCKFISH_SRC_DIR}/nnue/network.cpp
+        ${STOCKFISH_SRC_DIR}/nnue/nnue_accumulator.cpp
+        ${STOCKFISH_SRC_DIR}/nnue/features/half_ka_v2_hm.cpp
+        ${STOCKFISH_SRC_DIR}/nnue/features/full_threats.cpp
+        ${STOCKFISH_SRC_DIR}/syzygy/tbprobe.cpp
+    )
+
+    set(STOCKFISH_USE_NEON 0)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64|AARCH64")
+        set(STOCKFISH_USE_NEON 1)
+    endif()
+
+    add_library(stockfish_static_eval STATIC
+        ${STOCKFISH_STATIC_EVAL_SOURCES}
+    )
+    target_compile_features(stockfish_static_eval PRIVATE cxx_std_23)
+    target_compile_definitions(stockfish_static_eval PRIVATE
+        IS_64BIT
+        NNUE_EMBEDDING_OFF
+        NOMINMAX
+        USE_NEON=${STOCKFISH_USE_NEON}
+    )
+    target_include_directories(stockfish_static_eval PUBLIC
+        ${STOCKFISH_SRC_DIR}
+    )
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(stockfish_static_eval PRIVATE
+            -Wno-conversion
+            -Wno-sign-conversion
+            -Wno-unused-parameter
+        )
+    endif()
+
+    add_executable(enyo_sf_static_datagen
+        tools/sf_static_datagen.cpp
+        src/nnue_model.cpp
+        src/nnue_model_board.cpp
+    )
+    target_compile_features(enyo_sf_static_datagen PRIVATE cxx_std_23)
+    set_source_files_properties(tools/sf_static_datagen.cpp PROPERTIES COMPILE_DEFINITIONS
+        USE_NEON=${STOCKFISH_USE_NEON}
+    )
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(enyo_sf_static_datagen PRIVATE
+            -Wno-conversion
+            -Wno-sign-conversion
+        )
+    endif()
+    target_link_libraries(enyo_sf_static_datagen PRIVATE
+        stockfish_static_eval
+        enyo_chess
+        fmt::fmt-header-only
+        nlohmann_json::nlohmann_json
+    )
+endif()
 
 option(BUILD_TESTS "Build the gtest target" ON)
 if(BUILD_TESTS)
