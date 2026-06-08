@@ -996,6 +996,66 @@ TEST(search, hypersion_check_net_root_evasions_find_safer_defenses) {
     cfgmgr.num_threads = old_threads;
 }
 
+static std::optional<std::string> last_non_bound_pv_head(std::string_view out)
+{
+    std::optional<std::string> head;
+    size_t line_start = 0;
+    while (line_start < out.size()) {
+        const size_t line_end = out.find('\n', line_start);
+        const auto line = out.substr(
+            line_start,
+            line_end == std::string_view::npos ? out.size() - line_start : line_end - line_start);
+        if (line.starts_with("info ")
+            && line.find(" pv ") != std::string_view::npos
+            && line.find(" lowerbound ") == std::string_view::npos
+            && line.find(" upperbound ") == std::string_view::npos) {
+            const size_t pv = line.find(" pv ") + 4;
+            const size_t move_end = line.find(' ', pv);
+            head = std::string(line.substr(pv, move_end == std::string_view::npos ? line.size() - pv : move_end - pv));
+        }
+        if (line_end == std::string_view::npos)
+            break;
+        line_start = line_end + 1;
+    }
+    return head;
+}
+
+static std::optional<std::string> final_bestmove(std::string_view out)
+{
+    const size_t pos = out.rfind("bestmove ");
+    if (pos == std::string_view::npos)
+        return std::nullopt;
+    const size_t move = pos + 9;
+    const size_t move_end = out.find_first_of(" \n\r\t", move);
+    return std::string(out.substr(move, move_end == std::string_view::npos ? out.size() - move : move_end - move));
+}
+
+TEST(search, timed_root_bestmove_matches_last_completed_pv) {
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = false;
+
+    Board b;
+    Uci uci{b};
+    uci("position fen r2qk1nr/ppp1b1p1/2n2p2/3pp1Pp/6bP/2PP1N2/PP2PP2/RNBQKB1R w KQkq - 2 8 moves e2e3");
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    uci("go movetime 20");
+    const auto out = testing::internal::GetCapturedStdout();
+
+    const auto pv_head = last_non_bound_pv_head(out);
+    const auto best = final_bestmove(out);
+    ASSERT_TRUE(pv_head.has_value()) << out;
+    ASSERT_TRUE(best.has_value()) << out;
+    EXPECT_EQ(*best, *pv_head) << out;
+
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+}
+
 TEST(search, repeated_check_root_keeps_legal_previous_bestmove) {
     const int old_threads = cfgmgr.num_threads;
     const bool old_use_syzygy = cfgmgr.use_syzygy;

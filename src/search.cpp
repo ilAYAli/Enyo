@@ -1290,9 +1290,21 @@ void search_position(Worker & worker)
     constexpr int score_swing_cp = 100;
     Move last_legal_bestmove {};
 
+    // Root search publishes worker.bestmove while the current iteration is
+    // still in progress. If time cuts an iteration short, report the last
+    // completed iteration's move so UCI bestmove matches the last completed PV.
+    const auto restore_completed_bestmove = [&] {
+        if (worker.id == 0)
+            worker.bestmove = is_active_root_move(last_legal_bestmove)
+                ? last_legal_bestmove
+                : Move{};
+    };
+
     for (auto depth = 1; depth <= max_depth; ++depth) {
-        if (worker.time_expired())
+        if (worker.time_expired()) {
+            restore_completed_bestmove();
             break;
+        }
 
         // Soft limit: stop starting new iterations once the optimum budget is
         // used. The current-best move is already committed, so this gives us
@@ -1374,8 +1386,10 @@ void search_position(Worker & worker)
         }
 #endif
 
-        if (worker.time_expired())
+        if (worker.time_expired()) {
+            restore_completed_bestmove();
             break;
+        }
 
         if (worker.id)
             continue;
