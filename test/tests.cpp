@@ -24,6 +24,7 @@
 #include <optional>
 #include <ranges>
 #include <vector>
+#include <sstream>
 #include <nlohmann/json.hpp>
 
 using namespace enyo;
@@ -1028,6 +1029,59 @@ static std::optional<std::string> final_bestmove(std::string_view out)
     const size_t move = pos + 9;
     const size_t move_end = out.find_first_of(" \n\r\t", move);
     return std::string(out.substr(move, move_end == std::string_view::npos ? out.size() - move : move_end - move));
+}
+
+static int pv_move_count(std::string_view line)
+{
+    const size_t pv = line.find(" pv ");
+    if (pv == std::string_view::npos)
+        return 0;
+
+    std::istringstream iss{std::string{line.substr(pv + 4)}};
+    int count = 0;
+    for (std::string token; iss >> token;)
+        ++count;
+    return count;
+}
+
+TEST(search, pv_stops_at_fifty_move_rule) {
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = false;
+
+    Board b;
+    Uci uci{b};
+    uci("position fen 7k/8/8/8/8/8/8/R3K3 w - - 99 1");
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    uci("go depth 4");
+    const auto out = testing::internal::GetCapturedStdout();
+
+    int pv_lines = 0;
+    size_t line_start = 0;
+    while (line_start < out.size()) {
+        const size_t line_end = out.find('\n', line_start);
+        const auto line = std::string_view{out}.substr(
+            line_start,
+            line_end == std::string::npos ? out.size() - line_start : line_end - line_start);
+        if (line.starts_with("info ")
+            && line.find(" pv ") != std::string_view::npos
+            && line.find(" lowerbound ") == std::string_view::npos
+            && line.find(" upperbound ") == std::string_view::npos) {
+            ++pv_lines;
+            EXPECT_LE(pv_move_count(line), 1) << line << "\n" << out;
+        }
+        if (line_end == std::string::npos)
+            break;
+        line_start = line_end + 1;
+    }
+
+    EXPECT_GT(pv_lines, 0) << out;
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
 }
 
 TEST(search, timed_root_bestmove_matches_last_completed_pv) {

@@ -129,6 +129,11 @@ bool is_repetition(const Board & b, int draw)
     ) > static_cast<size_t>(draw);
 }
 
+bool is_fifty_move_draw(const Board & b)
+{
+    return b.half_moves + static_cast<int>(b.gamestate.half_moves) >= 100;
+}
+
 template <Color Us, bool UseNNUE = true>
 Value evaluate(Board & b, NNUE::Net * nnue)
 {
@@ -270,6 +275,9 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     }
 
     if (worker.time_expired()) {
+        return Value::draw;
+    }
+    if (is_fifty_move_draw(b)) {
         return Value::draw;
     }
 
@@ -420,6 +428,9 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         worker.pvline.setlen(ss->ply);
 
     if (worker.time_expired()) {
+        return Value::draw;
+    }
+    if (is_fifty_move_draw(worker.si.board)) {
         return Value::draw;
     }
 
