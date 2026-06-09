@@ -1084,6 +1084,63 @@ TEST(search, pv_stops_at_fifty_move_rule) {
     cfgmgr.use_syzygy = old_use_syzygy;
 }
 
+TEST(uci_root, checkmated_root_reports_score_and_bestmove_0000) {
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = true;
+
+    Board b;
+    Uci uci{b};
+    uci("position fen 7k/5KQ1/8/8/8/8/8/8 b - - 0 1");
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    uci("go depth 4");
+    const auto out = testing::internal::GetCapturedStdout();
+
+    EXPECT_NE(out.find("info depth 0 score cp -30000"), std::string::npos) << out;
+    EXPECT_NE(out.find("bestmove 0000"), std::string::npos) << out;
+    EXPECT_EQ(out.find("bestmove h1h1"), std::string::npos) << out;
+
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+}
+
+TEST(uci_root, expired_root_still_reports_score_before_bestmove) {
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = false;
+
+    Board b{"rn1qkbnr/ppp1pppp/3p4/8/8/3P4/PPP1PPPP/RNBQKBNR w KQkq - 0 2"};
+    SearchInfo si{b, MAX_PLY};
+    si.board = b;
+    si.nnue.refresh(si.board);
+    const auto now = std::chrono::high_resolution_clock::now();
+    si.starttime = now - std::chrono::milliseconds(2);
+    si.stoptime = now - std::chrono::milliseconds(1);
+    si.soft_stoptime = si.stoptime;
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    thread::pool.init_threads(si, 1);
+    thread::pool.wait();
+    const auto out = testing::internal::GetCapturedStdout();
+
+    const auto score_pos = out.find("info depth 1 score cp 0");
+    const auto bestmove_pos = out.find("bestmove ");
+    ASSERT_NE(score_pos, std::string::npos) << out;
+    ASSERT_NE(bestmove_pos, std::string::npos) << out;
+    EXPECT_LT(score_pos, bestmove_pos) << out;
+    EXPECT_EQ(out.find("bestmove 0000"), std::string::npos) << out;
+
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+}
+
 TEST(search, timed_root_bestmove_matches_last_completed_pv) {
     const int old_threads = cfgmgr.num_threads;
     const bool old_use_syzygy = cfgmgr.use_syzygy;
@@ -2607,7 +2664,7 @@ TEST(uci_root, lost_tablebase_root_does_not_search_after_tbhit) {
     EXPECT_NE(out.find("string tbhit loss"), std::string::npos) << out;
     EXPECT_NE(out.find("bestmove "), std::string::npos) << out;
     EXPECT_EQ(out.find("info depth 2 score"), std::string::npos) << out;
-    EXPECT_EQ(out.find("score cp "), std::string::npos) << out;
+    EXPECT_NE(out.find("score cp -20000"), std::string::npos) << out;
     EXPECT_EQ(out.find("score mate "), std::string::npos) << out;
 
     cfgmgr.num_threads = old_threads;

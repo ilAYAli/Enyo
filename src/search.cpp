@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <thread>
 #include <iostream>
+#include <iterator>
 #include <unistd.h>
 #include "fmt/core.h"
 #include "fmt/format.h"
@@ -82,6 +83,36 @@ void log_tablebase_root_hit(syzygy::Status status, int dtz)
         ucilog("info depth 1 string tbhit {}\n", verdict);
 }
 
+const char* tablebase_score_uci(syzygy::Status status)
+{
+    switch (status) {
+        case syzygy::Status::Win:  return "cp 20000";
+        case syzygy::Status::Loss: return "cp -20000";
+        default:                   return "cp 0";
+    }
+}
+
+void log_tablebase_root_bestmove(syzygy::Status status, Move move)
+{
+    ucilog("info depth 1 score {} nodes 1 nps 0 time 0 hashfull {} pv {}\n",
+        tablebase_score_uci(status), tt::ttable.get_hashfull(), move);
+}
+
+bool side_to_move_in_check(Board const & board)
+{
+    return board.side == white ? is_check<white>(board) : is_check<black>(board);
+}
+
+void log_terminal_root_bestmove(Board const & board)
+{
+    const int score = side_to_move_in_check(board)
+        ? -static_cast<int>(Value::mate)
+        : static_cast<int>(Value::draw);
+    ucilog("info depth 0 score cp {} nodes 0 nps 0 time 0 hashfull {} pv 0000\n",
+        score, tt::ttable.get_hashfull());
+    ucilog("bestmove 0000\n");
+}
+
 bool is_tablebase_tt_value(Value value)
 {
     const auto v = static_cast<int>(value);
@@ -132,6 +163,28 @@ bool is_repetition(const Board & b, int draw)
 bool is_fifty_move_draw(const Board & b)
 {
     return b.half_moves + static_cast<int>(b.gamestate.half_moves) >= 100;
+}
+
+std::string root_pv_string_until_terminal(Board const & root, QuadraticPV const & pvline)
+{
+    Board board { root };
+    std::string out;
+    const int len = pvline.len[0];
+    for (int ply = 0; ply < len; ++ply) {
+        const Move move = pvline.table[0][ply];
+        if (!move)
+            break;
+
+        if (!out.empty())
+            out.push_back(' ');
+        fmt::format_to(std::back_inserter(out), "{}", move);
+
+        if (board.side == white) apply_move<white>(board, move);
+        else                     apply_move<black>(board, move);
+        if (is_fifty_move_draw(board))
+            break;
+    }
+    return out;
 }
 
 template <Color Us, bool UseNNUE = true>
@@ -275,9 +328,6 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     }
 
     if (worker.time_expired()) {
-        return Value::draw;
-    }
-    if (is_fifty_move_draw(b)) {
         return Value::draw;
     }
 
@@ -428,9 +478,6 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         worker.pvline.setlen(ss->ply);
 
     if (worker.time_expired()) {
-        return Value::draw;
-    }
-    if (is_fifty_move_draw(worker.si.board)) {
         return Value::draw;
     }
 
@@ -1118,6 +1165,11 @@ void search_position(Worker & worker)
         : generate_legal_moves<black>(board);
 
     worker.root_moves = legal_fallback;
+    if (legal_fallback.empty()) {
+        if (worker.id == 0)
+            log_terminal_root_bestmove(board);
+        return;
+    }
 
     const auto is_legal_root_move = [&](Move move) {
         return std::ranges::find(legal_fallback, move) != legal_fallback.end();
@@ -1224,6 +1276,7 @@ void search_position(Worker & worker)
                             const auto best = ordered.empty() ? Move{} : ordered.front().root.move;
                             if (best && is_active_root_move(best)) {
                                 thread::pool.stop = true;
+                                log_tablebase_root_bestmove(tb_status, best);
                                 ucilog("bestmove {}\n", best);
                                 return;
                             }
@@ -1234,6 +1287,7 @@ void search_position(Worker & worker)
                 if (worker.id == 0 && !let_search_choose) {
                     if (tb_move && is_active_root_move(tb_move)) {
                         thread::pool.stop = true;
+                        log_tablebase_root_bestmove(tb_status, tb_move);
                         ucilog("bestmove {}\n", tb_move);
                         return;
                     }
@@ -1270,6 +1324,7 @@ void search_position(Worker & worker)
                             thread::pool.stop = true;
                             ucilog("info string tbhit loss best-resistance {} dtz {}\n",
                                 best_resistance, best_child_dtz);
+                            log_tablebase_root_bestmove(tb_status, best_resistance);
                             ucilog("bestmove {}\n", best_resistance);
                             return;
                         }
@@ -1300,6 +1355,7 @@ void search_position(Worker & worker)
     bool score_swung_last_iter = false;
     constexpr int score_swing_cp = 100;
     Move last_legal_bestmove {};
+    bool score_info_emitted = false;
 
     // Root search publishes worker.bestmove while the current iteration is
     // still in progress. If time cuts an iteration short, report the last
@@ -1484,7 +1540,7 @@ void search_position(Worker & worker)
             : fmt::format("cp {}", value);
 
         const auto info_pv = is_active_root_move(pvbm)
-            ? worker.pvline.str()
+            ? root_pv_string_until_terminal(board, worker.pvline)
             : fmt::format("{}", is_active_root_move(worker.bestmove)
                 ? worker.bestmove
                 : active_root_fallback());
@@ -1501,6 +1557,7 @@ void search_position(Worker & worker)
             info_string += fmt::format(" pv {}", info_pv);
 
         ucilog("{}\n", info_string);
+        score_info_emitted = true;
 
         if (shortest_mate.moves == 1) {
             eventlog::log<eventlog::Log::info>("Breaking search loop: found mate in 1, shortest_mate.move={}, worker.bestmove={}\n", 
@@ -1541,6 +1598,14 @@ void search_position(Worker & worker)
         if (!mate_score)
             out = apply_move_policy_root_guard(board, worker, legal_fallback, out);
 
+        if (!score_info_emitted) {
+            ucilog("info depth 1 score cp 0 nodes {} nps {} time {} hashfull {} pv {}\n",
+                thread::pool.get_nodes(),
+                thread::pool.get_nps(),
+                std::chrono::duration_cast<std::chrono::milliseconds>(si.elapsed_time).count(),
+                tt::ttable.get_hashfull(),
+                out);
+        }
         ucilog("bestmove {}\n", out);
     }
 }

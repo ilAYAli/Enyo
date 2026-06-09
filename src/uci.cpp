@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <atomic>
 #include <iostream>
 #include <sstream>
 #include <memory>
@@ -884,6 +885,8 @@ void Uci::go(std::istringstream & iss)
                 "emergency move: no legal move clock={} threshold={}\n",
                 active_clock,
                 last_resort_move_ms);
+            ucilog("info depth 1 score cp 0 nodes 0 nps 0 time 0 hashfull {} pv 0000\n",
+                tt::ttable.get_hashfull());
             ucilog("bestmove 0000\n");
         } else {
             eventlog::log<eventlog::Log::warning>(
@@ -891,6 +894,8 @@ void Uci::go(std::istringstream & iss)
                 active_clock,
                 last_resort_move_ms,
                 moves[0]);
+            ucilog("info depth 1 score cp 0 nodes 0 nps 0 time 0 hashfull {} pv {}\n",
+                tt::ttable.get_hashfull(), moves[0]);
             ucilog("bestmove {}\n", moves[0]);
         }
         return;
@@ -920,10 +925,12 @@ void Uci::go(std::istringstream & iss)
 
     thread::pool.init_threads(std::move(si), cfgmgr.num_threads);
 
+    std::atomic_bool watchdog_stop{false};
     auto watchdog = alloc.hard.count() >= 0
-        ? std::optional<std::jthread>(std::in_place, [deadline = std::chrono::high_resolution_clock::now() + alloc.hard,
-                                                      hard_ms = alloc.hard.count()](std::stop_token st) {
-            while (!st.stop_requested()) {
+        ? std::optional<std::thread>(std::in_place, [deadline = std::chrono::high_resolution_clock::now() + alloc.hard,
+                                                     hard_ms = alloc.hard.count(),
+                                                     &watchdog_stop] {
+            while (!watchdog_stop.load(std::memory_order_relaxed)) {
                 if (std::chrono::high_resolution_clock::now() >= deadline) {
                     thread::pool.stop = true;
                     eventlog::log<eventlog::Log::error>(
@@ -942,6 +949,10 @@ void Uci::go(std::istringstream & iss)
     // leading to race conditions where the main thread could process new commands or exit
     // before the search thread finished outputting the bestmove.
     thread::pool.wait();
+    if (watchdog) {
+        watchdog_stop.store(true, std::memory_order_relaxed);
+        watchdog->join();
+    }
 }
 
 // bench 0 0 5 current perft
