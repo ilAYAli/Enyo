@@ -31,6 +31,9 @@ size_t enumerate_pieces(const enyo::Board& b, PieceEntry* out) {
 }
 
 MaterialSummary SummarizeMaterial(const enyo::Board& b) {
+    const auto pawns =
+        b.pt_bb[enyo::white][enyo::pawn]
+      | b.pt_bb[enyo::black][enyo::pawn];
     const auto minors =
         b.pt_bb[enyo::white][enyo::knight]
       | b.pt_bb[enyo::black][enyo::knight]
@@ -42,15 +45,22 @@ MaterialSummary SummarizeMaterial(const enyo::Board& b) {
     const auto queens =
         b.pt_bb[enyo::white][enyo::queen]
       | b.pt_bb[enyo::black][enyo::queen];
+    const auto kings =
+        b.pt_bb[enyo::white][enyo::king]
+      | b.pt_bb[enyo::black][enyo::king];
     MaterialSummary summary;
-    summary.phase = 3 * enyo::count_bits(minors)
-        + 5 * enyo::count_bits(rooks)
-        + 10 * enyo::count_bits(queens);
-
-    for (int color = 0; color < 2; ++color) {
-        for (int pt = static_cast<int>(enyo::pawn); pt <= static_cast<int>(enyo::king); ++pt)
-            summary.piece_count += enyo::count_bits(b.pt_bb[color][pt]);
-    }
+    summary.pawn_count = enyo::count_bits(pawns);
+    summary.minor_count = enyo::count_bits(minors);
+    summary.rook_count = enyo::count_bits(rooks);
+    summary.queen_count = enyo::count_bits(queens);
+    summary.phase = 3 * summary.minor_count
+        + 5 * summary.rook_count
+        + 10 * summary.queen_count;
+    summary.piece_count = summary.pawn_count
+        + summary.minor_count
+        + summary.rook_count
+        + summary.queen_count
+        + enyo::count_bits(kings);
     return summary;
 }
 
@@ -59,6 +69,19 @@ HeadFeatures MaterialHeadFeatures(const MaterialSummary& summary) {
     features.values[HEAD_PHASE_DELTA] = static_cast<float>(summary.phase) / 128.0f;
     features.values[HEAD_PIECE_COUNT] =
         (static_cast<float>(summary.piece_count) - 16.0f) / 16.0f;
+    features.values[HEAD_PAWN_COUNT] =
+        (static_cast<float>(summary.pawn_count) - 16.0f) / 8.0f;
+    features.values[HEAD_MINOR_COUNT] =
+        (static_cast<float>(summary.minor_count) - 8.0f) / 4.0f;
+    features.values[HEAD_ROOK_COUNT] =
+        (static_cast<float>(summary.rook_count) - 4.0f) / 2.0f;
+    features.values[HEAD_QUEEN_COUNT] =
+        (static_cast<float>(summary.queen_count) - 2.0f) / 2.0f;
+    features.values[HEAD_NON_PAWN_COUNT] =
+        (static_cast<float>(
+            summary.minor_count + summary.rook_count + summary.queen_count) - 14.0f) / 7.0f;
+    features.values[HEAD_PAWN_PHASE] =
+        features.values[HEAD_PHASE_DELTA] * features.values[HEAD_PAWN_COUNT];
     return features;
 }
 

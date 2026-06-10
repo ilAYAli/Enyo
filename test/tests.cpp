@@ -1665,14 +1665,22 @@ TEST(network_model, material_count_bucket_matches_bullet_formula) {
 }
 
 TEST(network_model, material_head_features_are_normalized) {
-    const Network::MaterialSummary summary{20, 32};
+    Network::MaterialSummary summary;
+    summary.phase = 20;
+    summary.piece_count = 32;
+    summary.pawn_count = 16;
+    summary.minor_count = 8;
+    summary.rook_count = 4;
+    summary.queen_count = 2;
     const auto features = Network::MaterialHeadFeatures(summary);
     EXPECT_FLOAT_EQ(features.values[Network::HEAD_PHASE_DELTA], 20.0f / 128.0f);
     EXPECT_FLOAT_EQ(features.values[Network::HEAD_PIECE_COUNT], 1.0f);
-    for (size_t i = Network::N_HEAD_FEATURES;
-         i < static_cast<size_t>(Network::MAX_OUTPUT_HEAD_FEATURES);
-         ++i)
-        EXPECT_FLOAT_EQ(features.values[i], 0.0f);
+    EXPECT_FLOAT_EQ(features.values[Network::HEAD_PAWN_COUNT], 0.0f);
+    EXPECT_FLOAT_EQ(features.values[Network::HEAD_MINOR_COUNT], 0.0f);
+    EXPECT_FLOAT_EQ(features.values[Network::HEAD_ROOK_COUNT], 0.0f);
+    EXPECT_FLOAT_EQ(features.values[Network::HEAD_QUEEN_COUNT], 0.0f);
+    EXPECT_FLOAT_EQ(features.values[Network::HEAD_NON_PAWN_COUNT], 0.0f);
+    EXPECT_FLOAT_EQ(features.values[Network::HEAD_PAWN_PHASE], 0.0f);
 }
 
 void materialize_network(Board & b, NNUE::Net & net) {
