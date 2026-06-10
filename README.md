@@ -85,6 +85,19 @@ Candidate networks are exported to Enyo's runtime <code>.nn</code> format and
 validated engine-side before use.
 Training and exporter tooling live in the sibling <code>nnue</code> repository.
 
+<h3>NNUE evaluator policy</h3>
+
+Enyo currently supports two evaluator paths:
+
+* <code>legacy-default</code>: the embedded <code>net/default.net</code>
+  evaluator. This path is frozen and kept only as a strength baseline/fallback.
+* <code>native-nnue</code>: the newer loadable <code>.nn</code> evaluator.
+  This is the only active NNUE development lane.
+
+Do not add new features to the legacy evaluator. Remove it only after a
+native <code>.nn</code> candidate beats <code>net/default.net</code> in both
+smoke and confirm game validation.
+
 <h3>Tools</H3>
 <a href="https://github.com/ilAYAli/replay" rel="nofollow">Replay</a>
 Evaluation validator<br>

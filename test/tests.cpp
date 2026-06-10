@@ -19,6 +19,7 @@
 #include "move_policy.hpp"
 
 #include <chrono>
+#include <array>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
@@ -1405,6 +1406,70 @@ constexpr int mirror_file(int sq) {
     return sq ^ 7;
 }
 
+constexpr std::array<int, 64> STOCKFISH_HALFKA_V2_HM_BUCKETS = {
+    28, 29, 30, 31, 31, 30, 29, 28,
+    24, 25, 26, 27, 27, 26, 25, 24,
+    20, 21, 22, 23, 23, 22, 21, 20,
+    16, 17, 18, 19, 19, 18, 17, 16,
+    12, 13, 14, 15, 15, 14, 13, 12,
+     8,  9, 10, 11, 11, 10,  9,  8,
+     4,  5,  6,  7,  7,  6,  5,  4,
+     0,  1,  2,  3,  3,  2,  1,  0,
+};
+
+constexpr int stockfish_square_from_enyo(int sq) {
+    return sq ^ 7;
+}
+
+constexpr int stockfish_halfka_v2_hm_orient(int stockfish_king_sq) {
+    return (stockfish_king_sq & 4) == 0 ? 7 : 0;
+}
+
+constexpr int stockfish_halfka_v2_hm_channel(int pt, int color, int view) {
+    if (pt == static_cast<int>(king))
+        return 10;
+
+    const int piece_type = pt - 1;
+    const int enemy = color == view ? 0 : 1;
+    return 2 * piece_type + enemy;
+}
+
+constexpr int enyo_channel_from_stockfish_halfka_v2_hm(int stockfish_channel) {
+    if (stockfish_channel == 10)
+        return 10;
+
+    const int piece_type = stockfish_channel / 2;
+    const int enemy = stockfish_channel & 1;
+    return 5 * enemy + piece_type;
+}
+
+constexpr int stockfish_halfka_v2_hm_index_from_enyo(
+    int pt,
+    int color,
+    int sq,
+    int king_sq,
+    int view)
+{
+    const int stockfish_sq = stockfish_square_from_enyo(sq);
+    const int stockfish_king_sq = stockfish_square_from_enyo(king_sq);
+    const int flip = 56 * view;
+    const int orient = stockfish_halfka_v2_hm_orient(stockfish_king_sq);
+
+    return STOCKFISH_HALFKA_V2_HM_BUCKETS[stockfish_king_sq ^ flip] * 11 * 64
+        + stockfish_halfka_v2_hm_channel(pt, color, view) * 64
+        + (stockfish_sq ^ orient ^ flip);
+}
+
+constexpr int enyo_order_from_stockfish_halfka_v2_hm_index(int stockfish_index) {
+    const int stockfish_bucket = stockfish_index / (11 * 64);
+    const int stockfish_channel = (stockfish_index / 64) % 11;
+    const int stockfish_sq = stockfish_index % 64;
+
+    return (31 - stockfish_bucket) * 11 * 64
+        + enyo_channel_from_stockfish_halfka_v2_hm(stockfish_channel) * 64
+        + (stockfish_sq ^ 56);
+}
+
 TEST(network_model, halfka_v2_feature_channels_merge_kings_only) {
     EXPECT_EQ(Network::FeatureCount(32, Network::HALFKA_V2_FEATURE_CHANNELS), 22528);
     EXPECT_EQ(Network::FeatureChannel(king, white, white, 11), 10);
@@ -1440,6 +1505,37 @@ TEST(network_model, feature_index_uses_horizontal_mirroring) {
                         Network::FeatureIdxFormula(pt, color, mirror_file(sq),
                             mirror_file(king_sq), view, input_buckets,
                             feature_channels));
+                }
+            }
+        }
+    }
+}
+
+TEST(network_model, halfka_v2_hm_matches_stockfish_under_enyo_row_order) {
+    for (int pt = static_cast<int>(pawn); pt <= static_cast<int>(king); ++pt) {
+        for (int color = 0; color < 2; ++color) {
+            for (int sq = 0; sq < 64; ++sq) {
+                for (int king_sq = 0; king_sq < 64; ++king_sq) {
+                    for (int view = 0; view < 2; ++view) {
+                        const int enyo_index = Network::FeatureIdxFormula(
+                            pt,
+                            color,
+                            sq,
+                            king_sq,
+                            view,
+                            32,
+                            Network::HALFKA_V2_FEATURE_CHANNELS);
+                        const int stockfish_index = stockfish_halfka_v2_hm_index_from_enyo(
+                            pt,
+                            color,
+                            sq,
+                            king_sq,
+                            view);
+
+                        EXPECT_EQ(
+                            enyo_index,
+                            enyo_order_from_stockfish_halfka_v2_hm_index(stockfish_index));
+                    }
                 }
             }
         }

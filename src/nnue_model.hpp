@@ -30,9 +30,9 @@ inline constexpr int N_PIECE_TYPES  = 12;               // 6 types × 2 colors
 inline constexpr int LEGACY_FEATURE_CHANNELS = 12;
 inline constexpr int HALFKA_V2_FEATURE_CHANNELS = 11;
 inline constexpr int DEFAULT_FEATURE_CHANNELS = LEGACY_FEATURE_CHANNELS;
-inline constexpr int MAX_FEATURE_CHANNELS = LEGACY_FEATURE_CHANNELS;
+inline constexpr int MAX_INPUT_CHANNELS = LEGACY_FEATURE_CHANNELS;
 inline constexpr int N_SQUARES      = 64;
-inline constexpr int N_FEATURES     = N_KING_BUCKETS * MAX_FEATURE_CHANNELS * N_SQUARES;
+inline constexpr int N_FEATURES     = N_KING_BUCKETS * MAX_INPUT_CHANNELS * N_SQUARES;
 inline constexpr int N_HIDDEN       = 1024;
 inline constexpr int N_L1           = 2 * N_HIDDEN;     // 2048
 inline constexpr int N_L2           = 16;
@@ -141,7 +141,7 @@ inline constexpr int FeatureChannel(int pt,
 //
 // - `view` is the perspective (white or black); feature indices are
 //   always computed from the mover's side of the board.
-// - `oP` groups by piece-color-relative-to-view then by piece type,
+// - `piece_channel` groups by piece-color-relative-to-view then by piece type,
 //   so US-PAWN=0..US-KING=5, THEM-PAWN=6..THEM-KING=11 for any view.
 // - The `7 * !(kingsq & 4)` term mirrors the board horizontally when
 //   the king is on the king-side (files e-h of its own color's side),
@@ -161,13 +161,13 @@ inline constexpr int FeatureIdxFormula(int pt,
     const int sq       = to_net_sq(enyo_sq);
     const int kingsq   = to_net_sq(enyo_kingsq);
 
-    const int oP  = FeatureChannel(pt, piece_color, view, feature_channels);
-    const int oK  = (7 * !(kingsq & 4)) ^ (56 * view) ^ kingsq;
-    const int oSq = (7 * !(kingsq & 4)) ^ (56 * view) ^ sq;
+    const int piece_channel = FeatureChannel(pt, piece_color, view, feature_channels);
+    const int oriented_king_sq = (7 * !(kingsq & 4)) ^ (56 * view) ^ kingsq;
+    const int oriented_sq = (7 * !(kingsq & 4)) ^ (56 * view) ^ sq;
 
-    return KingBucketsFor(input_buckets)[static_cast<size_t>(oK)]
+    return KingBucketsFor(input_buckets)[static_cast<size_t>(oriented_king_sq)]
         * feature_channels * 64
-        + oP * 64 + oSq;
+        + piece_channel * 64 + oriented_sq;
 }
 
 inline constexpr size_t FEATURE_IDX_TABLE_SIZE =
@@ -689,10 +689,10 @@ extern bool enabled;
 //
 // Full chain, given a live Accumulator and side-to-move:
 //
-//   x0 = InputReLU(acc, stm)              // int8,  length 2*N_HIDDEN = N_L1
-//   x1 = L1AffineReLU(x0)                 // float, length N_L2
-//   x2 = L2AffineReLU(x1)                 // float, length N_L3
-//   out = L3Transform(x2)                 // float
+//   l1_input = InputReLU(acc, stm)        // int8,  length 2*N_HIDDEN = N_L1
+//   l2_input = L1AffineReLU(l1_input)     // float, length N_L2
+//   l3_input = L2AffineReLU(l2_input)     // float, length N_L3
+//   out = L3Transform(l3_input)           // float
 //   return out / 32                       // centipawns
 //
 // Quantization constant: QUANT1_BITS = 5. clipped ReLU clamps to [0,127<<5]
@@ -714,9 +714,9 @@ inline void InputReLU(int8_t* outputs, const Accumulator* acc, int stm) {
     constexpr int maxv = 127 << QUANT1_BITS;
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
     const auto max_vec = vdupq_n_s16(maxv);
-    for (int v = 0; v < 2; ++v) {
-        const acc_t* in = acc->values[views[v]];
-        int8_t* out = &outputs[N_HIDDEN * v];
+    for (int perspective = 0; perspective < 2; ++perspective) {
+        const acc_t* in = acc->values[views[perspective]];
+        int8_t* out = &outputs[N_HIDDEN * perspective];
         for (size_t i = 0; i < N_HIDDEN; i += 16) {
             auto lo = vld1q_s16(&in[i]);
             auto hi = vld1q_s16(&in[i + 8]);
@@ -729,9 +729,9 @@ inline void InputReLU(int8_t* outputs, const Accumulator* acc, int stm) {
     }
 #elif defined(__AVX512BW__)
     if (INPUT_LAYOUT_SCRAMBLED) {
-        for (int v = 0; v < 2; ++v) {
-            const acc_t* in = acc->values[views[v]];
-            int8_t* out = &outputs[N_HIDDEN * v];
+        for (int perspective = 0; perspective < 2; ++perspective) {
+            const acc_t* in = acc->values[views[perspective]];
+            int8_t* out = &outputs[N_HIDDEN * perspective];
             for (size_t i = 0; i < N_HIDDEN / 64; i += 2) {
                 const auto s0 = _mm512_srai_epi16(
                     _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&in[64 * i + 0])), QUANT1_BITS);
@@ -754,9 +754,9 @@ inline void InputReLU(int8_t* outputs, const Accumulator* acc, int stm) {
     }
     const auto zero = _mm512_setzero_si512();
     const auto max_vec = _mm512_set1_epi16(maxv);
-    for (int v = 0; v < 2; ++v) {
-        const acc_t* in = acc->values[views[v]];
-        int8_t* out = &outputs[N_HIDDEN * v];
+    for (int perspective = 0; perspective < 2; ++perspective) {
+        const acc_t* in = acc->values[views[perspective]];
+        int8_t* out = &outputs[N_HIDDEN * perspective];
         for (size_t i = 0; i < N_HIDDEN; i += 32) {
             auto x = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(&in[i]));
             x = _mm512_min_epi16(_mm512_max_epi16(x, zero), max_vec);
@@ -767,9 +767,9 @@ inline void InputReLU(int8_t* outputs, const Accumulator* acc, int stm) {
     }
 #elif defined(__AVX2__)
     if (INPUT_LAYOUT_SCRAMBLED) {
-        for (int v = 0; v < 2; ++v) {
-            const acc_t* in = acc->values[views[v]];
-            int8_t* out = &outputs[N_HIDDEN * v];
+        for (int perspective = 0; perspective < 2; ++perspective) {
+            const acc_t* in = acc->values[views[perspective]];
+            int8_t* out = &outputs[N_HIDDEN * perspective];
             for (size_t i = 0; i < N_HIDDEN / 32; i += 2) {
                 const auto s0 = _mm256_srai_epi16(
                     _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&in[32 * i + 0])), QUANT1_BITS);
@@ -792,9 +792,9 @@ inline void InputReLU(int8_t* outputs, const Accumulator* acc, int stm) {
     }
     const auto zero = _mm256_setzero_si256();
     const auto max_vec = _mm256_set1_epi16(maxv);
-    for (int v = 0; v < 2; ++v) {
-        const acc_t* in = acc->values[views[v]];
-        int8_t* out = &outputs[N_HIDDEN * v];
+    for (int perspective = 0; perspective < 2; ++perspective) {
+        const acc_t* in = acc->values[views[perspective]];
+        int8_t* out = &outputs[N_HIDDEN * perspective];
         for (size_t i = 0; i < N_HIDDEN; i += 32) {
             auto lo = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&in[i]));
             auto hi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&in[i + 16]));
@@ -808,9 +808,9 @@ inline void InputReLU(int8_t* outputs, const Accumulator* acc, int stm) {
         }
     }
 #else
-    for (int v = 0; v < 2; ++v) {
-        const acc_t* in = acc->values[views[v]];
-        int8_t* out     = &outputs[N_HIDDEN * v];
+    for (int perspective = 0; perspective < 2; ++perspective) {
+        const acc_t* in = acc->values[views[perspective]];
+        int8_t* out = &outputs[N_HIDDEN * perspective];
         for (size_t i = 0; i < N_HIDDEN; ++i) {
             int x = in[i];
             if (x < 0) x = 0;
@@ -1149,9 +1149,9 @@ inline void L1AffineReLU(float* dest, const int8_t* src) {
 inline void L1AffineReLUFromAccumulator(float* dest, const Accumulator* acc, int stm)
 {
     if (L1_WEIGHTS_SPARSE == nullptr) {
-        alignas(64) int8_t x0[N_L1];
-        InputReLU(x0, acc, stm);
-        L1AffineReLU(dest, x0);
+        alignas(64) int8_t l1_input[N_L1];
+        InputReLU(l1_input, acc, stm);
+        L1AffineReLU(dest, l1_input);
         return;
     }
 
@@ -1352,19 +1352,19 @@ inline int Propagate(
     const HeadFeatures* head_features = nullptr)
 {
 #if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__ARM_FEATURE_DOTPROD)
-    alignas(64) float x1[N_L2];
-    alignas(64) float x2[N_L3];
-    L1AffineReLUFromAccumulator(x1, acc, stm);
-    L2AffineReLU(x2, x1);
-    return static_cast<int>(L3Transform(x2, output_bucket, head_features) / 32.0f);
+    alignas(64) float l2_input[N_L2];
+    alignas(64) float l3_input[N_L3];
+    L1AffineReLUFromAccumulator(l2_input, acc, stm);
+    L2AffineReLU(l3_input, l2_input);
+    return static_cast<int>(L3Transform(l3_input, output_bucket, head_features) / 32.0f);
 #else
-    alignas(64) int8_t x0[N_L1];
-    alignas(64) float  x1[N_L2];
-    alignas(64) float  x2[N_L3];
-    InputReLU(x0, acc, stm);
-    L1AffineReLU(x1, x0);
-    L2AffineReLU(x2, x1);
-    return static_cast<int>(L3Transform(x2, output_bucket, head_features) / 32.0f);
+    alignas(64) int8_t l1_input[N_L1];
+    alignas(64) float  l2_input[N_L2];
+    alignas(64) float  l3_input[N_L3];
+    InputReLU(l1_input, acc, stm);
+    L1AffineReLU(l2_input, l1_input);
+    L2AffineReLU(l3_input, l2_input);
+    return static_cast<int>(L3Transform(l3_input, output_bucket, head_features) / 32.0f);
 #endif
 }
 

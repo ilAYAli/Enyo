@@ -126,7 +126,9 @@ static void ucilog(fmt::format_string<T...> fmt = {}, T&&... args) {
     if constexpr (true) {
         const auto str = fmt::format(fmt, std::forward<T>(args)...);
         log<Log::info>(fmt, std::forward<T>(args)...);
-        if (!uci_debug_log && str.starts_with("info string"))
+        if (!uci_debug_log
+            && str.starts_with("info string")
+            && !str.starts_with("info string evaluator="))
             return;
         fmt::print("{}", str);
         fflush(stdout);

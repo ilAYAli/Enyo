@@ -47,12 +47,26 @@ std::string expand_home_path(std::string path)
     return path;
 }
 
+void log_legacy_evaluator(const char * source, const std::string & path = {})
+{
+    if (path.empty()) {
+        ucilog(
+            "info string evaluator=legacy-default source={} hidden={} input_buckets={} feature_channels=12\n",
+            source, HIDDEN_SIZE, BUCKETS);
+        return;
+    }
+
+    ucilog(
+        "info string evaluator=legacy-default source={} path='{}' hidden={} input_buckets={} feature_channels=12\n",
+        source, path, HIDDEN_SIZE, BUCKETS);
+}
+
 bool load_eval_file(const std::string & value)
 {
     if (value.empty()) {
         Network::enabled = false;
         NNUE::Init("");
-        ucilog("info string nnue_file empty; using embedded evaluator\n");
+        log_legacy_evaluator("embedded-default");
         return true;
     }
 
@@ -61,7 +75,8 @@ bool load_eval_file(const std::string & value)
     if (!fs::exists(path, ec) || ec) {
         Network::enabled = false;
         NNUE::Init("");
-        ucilog("info string WARNING: nnue_file '{}' not found/readable; using embedded evaluator\n", path);
+        ucilog("info string WARNING: nnue_file '{}' not found/readable\n", path);
+        log_legacy_evaluator("embedded-default");
         return false;
     }
 
@@ -69,34 +84,39 @@ bool load_eval_file(const std::string & value)
     if (ec) {
         Network::enabled = false;
         NNUE::Init("");
-        ucilog("info string WARNING: nnue_file '{}' size check failed; using embedded evaluator\n", path);
+        ucilog("info string WARNING: nnue_file '{}' size check failed\n", path);
+        log_legacy_evaluator("embedded-default");
         return false;
     }
 
     if (Network::IsSupportedNetworkSize(size)) {
         if (Network::LoadNetwork(path.c_str())) {
             Network::enabled = true;
-            ucilog("info string network loaded from '{}' ({} input buckets, {} feature channels, {} output buckets, {} head features)\n",
-                   path, Network::INPUT_BUCKETS, Network::FEATURE_CHANNELS,
-                   Network::OUTPUT_BUCKETS, Network::OUTPUT_HEAD_FEATURES);
+            ucilog(
+                "info string evaluator=native-nnue path='{}' hidden={} input_buckets={} feature_channels={} output_buckets={} head_features={}\n",
+                path, Network::N_HIDDEN, Network::INPUT_BUCKETS,
+                Network::FEATURE_CHANNELS, Network::OUTPUT_BUCKETS,
+                Network::OUTPUT_HEAD_FEATURES);
             return true;
         }
         Network::enabled = false;
         NNUE::Init("");
-        ucilog("info string WARNING: nnue_file '{}' matched network size but failed to load; using embedded evaluator\n", path);
+        ucilog("info string WARNING: nnue_file '{}' matched native network size but failed to load\n", path);
+        log_legacy_evaluator("embedded-default");
         return false;
     }
 
     if (size >= NNUE::LEGACY_NETWORK_SIZE) {
         Network::enabled = false;
         NNUE::Init(path);
-        ucilog("info string embedded evaluator loaded from '{}'\n", path);
+        log_legacy_evaluator("file", path);
         return true;
     }
 
     Network::enabled = false;
     NNUE::Init("");
-    ucilog("info string WARNING: nnue_file '{}' has invalid size {} bytes; using embedded evaluator\n", path, size);
+    ucilog("info string WARNING: nnue_file '{}' has invalid size {} bytes\n", path, size);
+    log_legacy_evaluator("embedded-default");
     return false;
 }
 
