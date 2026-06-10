@@ -55,10 +55,11 @@ MaterialSummary SummarizeMaterial(const enyo::Board& b) {
 }
 
 HeadFeatures MaterialHeadFeatures(const MaterialSummary& summary) {
-    return {
-        (static_cast<float>(summary.phase) / 128.0f),
-        (static_cast<float>(summary.piece_count) - 16.0f) / 16.0f,
-    };
+    HeadFeatures features;
+    features.values[HEAD_PHASE_DELTA] = static_cast<float>(summary.phase) / 128.0f;
+    features.values[HEAD_PIECE_COUNT] =
+        (static_cast<float>(summary.piece_count) - 16.0f) / 16.0f;
+    return features;
 }
 
 int ScaleEval(const MaterialSummary& summary, int score) {

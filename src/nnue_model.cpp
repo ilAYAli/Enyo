@@ -216,31 +216,11 @@ bool LoadNetwork(const char* path) {
     if (layout.input_buckets == 0) {
         std::fprintf(stderr,
             "network: '%s' is %ld bytes, expected a supported Enyo NNUE size\n"
-            "  12-channel legacy: %zu, %zu, %zu, %zu, %zu, %zu, %zu, or %zu\n"
-            "  12-channel material/phase head: %zu, %zu, %zu, %zu, %zu, %zu, %zu, or %zu\n"
-            "  11-channel HalfKAv2-like: %zu, %zu, %zu, or %zu\n"
-            "  11-channel HalfKAv2-like material/phase head: %zu, %zu, %zu, or %zu\n",
-            path, sz,
-            NetworkSize(16, 1), NetworkSize(16, 2),
-            NetworkSize(16, 4), NetworkSize(16, 8),
-            NetworkSize(32, 1), NetworkSize(32, 2),
-            NetworkSize(32, 4), NetworkSize(32, 8),
-            NetworkSize(16, 1, N_HEAD_FEATURES),
-            NetworkSize(16, 2, N_HEAD_FEATURES),
-            NetworkSize(16, 4, N_HEAD_FEATURES),
-            NetworkSize(16, 8, N_HEAD_FEATURES),
-            NetworkSize(32, 1, N_HEAD_FEATURES),
-            NetworkSize(32, 2, N_HEAD_FEATURES),
-            NetworkSize(32, 4, N_HEAD_FEATURES),
-            NetworkSize(32, 8, N_HEAD_FEATURES),
-            NetworkSize(32, 1, DEFAULT_OUTPUT_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
-            NetworkSize(32, 2, DEFAULT_OUTPUT_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
-            NetworkSize(32, 4, DEFAULT_OUTPUT_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
-            NetworkSize(32, 8, DEFAULT_OUTPUT_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
-            NetworkSize(32, 1, N_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
-            NetworkSize(32, 2, N_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
-            NetworkSize(32, 4, N_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS),
-            NetworkSize(32, 8, N_HEAD_FEATURES, HALFKA_V2_FEATURE_CHANNELS));
+            "  input buckets: 16 or 32\n"
+            "  feature channels: 12, or 11 with 32 input buckets\n"
+            "  output buckets: 1, 2, 4, or 8\n"
+            "  output head features: 0, %d, or %d\n",
+            path, sz, N_HEAD_FEATURES, N_EXTENDED_HEAD_FEATURES);
         std::fclose(fh);
         return false;
     }

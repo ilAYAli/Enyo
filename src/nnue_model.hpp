@@ -40,9 +40,13 @@ inline constexpr int N_L3           = 32;
 inline constexpr int N_OUTPUT       = 1;
 inline constexpr int DEFAULT_OUTPUT_BUCKETS = 1;
 inline constexpr int MAX_OUTPUT_BUCKETS = 8;
-inline constexpr int N_HEAD_FEATURES = 2;
+inline constexpr int HEAD_PHASE_DELTA = 0;
+inline constexpr int HEAD_PIECE_COUNT = 1;
+inline constexpr int N_MATERIAL_HEAD_FEATURES = 2;
+inline constexpr int N_EXTENDED_HEAD_FEATURES = 8;
+inline constexpr int N_HEAD_FEATURES = N_MATERIAL_HEAD_FEATURES;
 inline constexpr int DEFAULT_OUTPUT_HEAD_FEATURES = 0;
-inline constexpr int MAX_OUTPUT_HEAD_FEATURES = N_HEAD_FEATURES;
+inline constexpr int MAX_OUTPUT_HEAD_FEATURES = N_EXTENDED_HEAD_FEATURES;
 inline constexpr int MAX_OUTPUT_WIDTH = N_L3 + MAX_OUTPUT_HEAD_FEATURES;
 
 // ---------------------------------------------------------------------
@@ -346,7 +350,7 @@ inline constexpr size_t NetworkSize(
 
 inline constexpr size_t NETWORK_SIZE = NetworkSize(DEFAULT_INPUT_BUCKETS);
 inline constexpr size_t MAX_NETWORK_SIZE =
-    NetworkSize(MAX_INPUT_BUCKETS, MAX_OUTPUT_BUCKETS);
+    NetworkSize(MAX_INPUT_BUCKETS, MAX_OUTPUT_BUCKETS, MAX_OUTPUT_HEAD_FEATURES);
 
 struct NetworkLayout {
     int input_buckets = 0;
@@ -365,7 +369,7 @@ inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
         const int input_buckets = layout[0];
         const int feature_channels = layout[1];
         for (int output_buckets : {1, 2, 4, 8}) {
-            for (int output_head_features : {0, N_HEAD_FEATURES}) {
+            for (int output_head_features : {0, N_HEAD_FEATURES, N_EXTENDED_HEAD_FEATURES}) {
                 if (size == NetworkSize(
                         input_buckets,
                         output_buckets,
@@ -411,8 +415,7 @@ inline constexpr int OutputBucketForPieceCount(int piece_count, int output_bucke
 }
 
 struct HeadFeatures {
-    float phase_delta = 0.0f;
-    float piece_count = 0.0f;
+    std::array<float, MAX_OUTPUT_HEAD_FEATURES> values{};
 };
 
 inline constexpr bool IsSupportedNetworkSize(size_t size) {
@@ -1292,9 +1295,12 @@ inline float L3Transform(
         ? OUTPUT_BIASES[output_bucket]
         : OUTPUT_BIAS;
     float extra = 0.0f;
-    if (OUTPUT_HEAD_FEATURES == N_HEAD_FEATURES && head_features != nullptr) {
-        extra += head_features->phase_delta * output_weights[N_L3];
-        extra += head_features->piece_count * output_weights[N_L3 + 1];
+    if (head_features != nullptr && OUTPUT_HEAD_FEATURES == N_HEAD_FEATURES) {
+        extra += head_features->values[HEAD_PHASE_DELTA] * output_weights[N_L3];
+        extra += head_features->values[HEAD_PIECE_COUNT] * output_weights[N_L3 + 1];
+    } else if (head_features != nullptr && OUTPUT_HEAD_FEATURES == N_EXTENDED_HEAD_FEATURES) {
+        for (int i = 0; i < N_EXTENDED_HEAD_FEATURES; ++i)
+            extra += head_features->values[static_cast<size_t>(i)] * output_weights[N_L3 + i];
     }
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
     float32x4_t acc = vdupq_n_f32(0.0f);
