@@ -106,6 +106,14 @@ git config user.email "petter@wahlman.no"
 
 ## Shared Long-Run Rules
 
+- MANDATORY NOTIFICATION RULE: every long-running Crucible or NNUE job must be
+  launched with the repo notification hook already attached. For Crucible this
+  means `--notify-command` or `CRUCIBLE_NOTIFY_COMMAND` at launch/resume/retry
+  time. For NNUE this means `--event-command` or the configured build hook.
+  There are no exceptions.
+- Polling, watcher scripts, `sleep` loops, tmux tails, or manual status checks
+  are not substitutes for launch-time notifications. They may only be used for
+  diagnosis after the notification hook is already attached.
 - Run long NNUE jobs in the appropriate tmux session.
 - Every long-running task must notify `AI_stdin` on `done` and `fail` by using
   `~/scripts/notifai.sh` through `tools/events/nnue_event_ntfy.sh`.
