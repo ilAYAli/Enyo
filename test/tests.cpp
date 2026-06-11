@@ -290,6 +290,22 @@ TEST(config, use_lmr_option_round_trips) {
     cfgmgr.use_lmr = original;
 }
 
+TEST(config, use_tt_option_round_trips) {
+    const bool original = cfgmgr.use_tt;
+
+    cfgmgr.use_tt = true;
+    ASSERT_TRUE(cfgmgr.setopt("use_tt", "false"));
+    EXPECT_FALSE(cfgmgr.use_tt);
+    EXPECT_NE(
+        cfgmgr.allopts().find("option name use_tt type check default false"),
+        std::string::npos);
+
+    ASSERT_TRUE(cfgmgr.setopt("use_tt", "true"));
+    EXPECT_TRUE(cfgmgr.use_tt);
+
+    cfgmgr.use_tt = original;
+}
+
 TEST(move_policy, startpos_e2e4_features_match_python_layout) {
     Board b("startpos");
     const auto move = uci_to_move(b, "e2e4");

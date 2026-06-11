@@ -350,7 +350,9 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
 
     Move tt_move {};
     auto tt_value = Value::none;
-    auto tthit = tt::ttable.probe(b.hash);
+    std::optional<tt::HashEntry> tthit;
+    if (cfgmgr.use_tt)
+        tthit = tt::ttable.probe(b.hash);
     ss->tthit = tthit.has_value();
     if (ss->tthit) {
         tt_value = tt::value_from(tthit->value, ss->ply);
@@ -384,7 +386,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     } else {
         best_value = ss->eval = evaluate_runtime<Us>(b, &si.nnue);
         if (best_value >= beta) {
-            if (!ss->tthit) {
+            if (cfgmgr.use_tt && !ss->tthit) {
                 tt::ttable.store(
                     b.hash,
                     Move{},
@@ -458,6 +460,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     // via tt_move but removes the unsoundness.
     if (!thread::pool.stop.load(std::memory_order_relaxed)
         && best_move
+        && cfgmgr.use_tt
         && best_value >= beta) {
         tt::ttable.store(
             b.hash,
@@ -520,7 +523,9 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     // tt lookup:
     Move tt_move {};
     auto tt_value = -Value::none;
-    auto tte = tt::ttable.probe(b.hash);
+    std::optional<tt::HashEntry> tte;
+    if (cfgmgr.use_tt)
+        tte = tt::ttable.probe(b.hash);
     ss->tthit = tte.has_value();
     if (ss->tthit) {
         tt::ttable.hit++;
@@ -588,13 +593,15 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
                     if (tb_flag == tt::type::ExactBound
                     || (tb_flag == tt::type::LowerBound && tb_value >= beta)
                     || (tb_flag == tt::type::UpperBound && tb_value <= alpha)) {
-                        tt::ttable.store(
-                            b.hash,
-                            Move{},
-                            tt::value_to(tb_value, ss->ply),
-                            tb_flag,
-                            std::min(depth + tb_max, MAX_PLY)
-                        );
+                        if (cfgmgr.use_tt) {
+                            tt::ttable.store(
+                                b.hash,
+                                Move{},
+                                tt::value_to(tb_value, ss->ply),
+                                tb_flag,
+                                std::min(depth + tb_max, MAX_PLY)
+                            );
+                        }
                         return tb_value;
                     }
                 }
@@ -980,13 +987,15 @@ moves_loop:
                         }
                     }
 
-                    tt::ttable.store(
-                        b.hash,
-                        best_move,
-                        tt::value_to(best_value, ss->ply),
-                        tt::type::LowerBound,
-                        depth
-                    );
+                    if (cfgmgr.use_tt) {
+                        tt::ttable.store(
+                            b.hash,
+                            best_move,
+                            tt::value_to(best_value, ss->ply),
+                            tt::type::LowerBound,
+                            depth
+                        );
+                    }
                     return beta;
                 }
             }
@@ -994,7 +1003,9 @@ moves_loop:
     }
 
 
-    if (!thread::pool.stop.load(std::memory_order_relaxed) && best_move) {
+    if (!thread::pool.stop.load(std::memory_order_relaxed)
+        && best_move
+        && cfgmgr.use_tt) {
         tt::ttable.store(
             b.hash,
             best_move,
