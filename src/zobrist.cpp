@@ -34,4 +34,17 @@ uint64_t generate_hash(Board const & b)
     return zkey;
 }
 
+uint64_t generate_pawn_hash(Board const & b)
+{
+    uint64_t zkey = 0;
+    for (int c = white; c < color_nb; c++) {
+        auto bb = b.pt_bb[c][pawn];
+        while (bb) {
+            const auto sq = pop_lsb(bb);
+            zkey ^= b.zbrs.psq_[c][pawn][sq];
+        }
+    }
+    return zkey;
+}
+
 } // zobrist

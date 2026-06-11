@@ -17,6 +17,7 @@ void Board::swap_data(Board& other) {
     swap(side, other.side);
     swap(gamestate, other.gamestate);
     swap(hash, other.hash);
+    swap(pawn_hash, other.pawn_hash);
     swap(zbrs, other.zbrs);
 
     std::swap(pt_mb, other.pt_mb);
@@ -39,6 +40,7 @@ void Board::copy_data(const Board& other) {
     side = other.side;
     gamestate = other.gamestate;
     hash = other.hash;
+    pawn_hash = other.pawn_hash;
     zbrs = other.zbrs;
 
     std::memcpy(pt_mb, other.pt_mb, sizeof(pt_mb));
@@ -72,6 +74,7 @@ void Board::clear_data() {
     histply = {};
     half_moves = {};
     hash = {};
+    pawn_hash = {};
 }
 
 Board::Board(std::string_view fenstr)
@@ -85,6 +88,7 @@ void Board::set(std::string_view fen) {
 
     set_fen(*this, fen);
     hash = zobrist::generate_hash(*this);
+    pawn_hash = zobrist::generate_pawn_hash(*this);
 
     init_sliders_attacks(bishop);
     init_sliders_attacks(rook);
