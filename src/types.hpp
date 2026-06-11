@@ -264,9 +264,14 @@ struct alignas(4) Move {
              ))
     {}
 
-    constexpr Move()
-        : data(0)
-    { }
+    // Trivial on purpose: a user-provided ctor (or a default member
+    // initializer on `data`) makes every default-initialized Move array
+    // zero itself — a 1 KB memset per Movelist/PrioritizedMoves at every
+    // search node. Value-init sites (`Move{}`, braced arrays) still
+    // zero-initialize, so null-move semantics are unchanged; only
+    // unbraced arrays become uninitialized, and the only such arrays are
+    // the bounded move buffers that are written before being read.
+    constexpr Move() = default;
 
     [[nodiscard]] constexpr square_t src_sq() const {
         return static_cast<uint8_t>((data >> src_shift) & pos_mask);
@@ -339,7 +344,7 @@ struct alignas(4) Move {
         return data != no_move;
     }
 
-    uint32_t data = no_move;
+    uint32_t data;
 private:
     static constexpr uint32_t piece_size = 6;
     static constexpr uint32_t color_size = 1;

@@ -59,7 +59,10 @@ static inline bool is_castle(Move move) {
 // allocations per call (the old code returned a std::vector<Move>
 // built from a separate std::vector<ScoredMove>).
 struct PrioritizedMoves {
-    std::array<Move, 256> moves{};
+    // Deliberately uninitialized (requires Move's trivial default ctor):
+    // only [0, size) is ever read, and prioritize_moves writes each of
+    // those slots before publishing size.
+    std::array<Move, 256> moves;
     std::size_t           size = 0;
 
     using iterator       = Move *;
