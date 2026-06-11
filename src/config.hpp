@@ -115,7 +115,7 @@ public:
     bool use_tt_upper_cutoff = false;
     bool use_syzygy         = true;
     bool use_nnue           = true;
-    bool use_lmr            = false;
+    bool use_lmr            = true;
     std::string nnue_file     = "";  // empty = embedded default
     std::string move_policy_file = "";
     int move_policy_max_eval_drop = 80;

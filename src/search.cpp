@@ -869,7 +869,11 @@ moves_loop:
             value = static_cast<Value>(-cfgmgr.root_repetition_contempt);
         } else {
             // LMR: Late Move Reductions
-            if (depth >= 3 && !ss->in_check && !protect_quiet_check && ss->move_count > 3 + 2 * pv_node) {
+            if (cfgmgr.use_lmr
+                && depth >= 3
+                && !ss->in_check
+                && !protect_quiet_check
+                && ss->move_count > 3 + 2 * pv_node) {
                 int R = lmr_reductions[depth][ss->move_count];
 
                 R += !improving;

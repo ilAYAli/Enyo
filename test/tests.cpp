@@ -274,6 +274,22 @@ TEST(config, use_nnue_option_round_trips) {
     cfgmgr.use_nnue = original;
 }
 
+TEST(config, use_lmr_option_round_trips) {
+    const bool original = cfgmgr.use_lmr;
+
+    cfgmgr.use_lmr = true;
+    ASSERT_TRUE(cfgmgr.setopt("use_lmr", "false"));
+    EXPECT_FALSE(cfgmgr.use_lmr);
+    EXPECT_NE(
+        cfgmgr.allopts().find("option name use_lmr type check default false"),
+        std::string::npos);
+
+    ASSERT_TRUE(cfgmgr.setopt("use_lmr", "true"));
+    EXPECT_TRUE(cfgmgr.use_lmr);
+
+    cfgmgr.use_lmr = original;
+}
+
 TEST(move_policy, startpos_e2e4_features_match_python_layout) {
     Board b("startpos");
     const auto move = uci_to_move(b, "e2e4");
