@@ -1373,7 +1373,7 @@ void search_position(Worker & worker)
     bool used_instability_extension = false;
     Value prev_iter_value = Value::none;
     bool score_swung_last_iter = false;
-    constexpr int score_swing_cp = 100;
+    const int score_swing_cp = cfgmgr.tm_volatility_threshold;
     Move last_legal_bestmove {};
     bool score_info_emitted = false;
 

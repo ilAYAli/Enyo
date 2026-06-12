@@ -108,6 +108,9 @@ public:
     int num_threads         = 1;
     int hash_size           = 1024;
     int root_repetition_contempt = 24;
+    // Score swing (cp) between iterations that counts as instability for
+    // the soft-time extension. TODO Track 1: SPRT 60/80/150 variants.
+    int tm_volatility_threshold = 100;
     bool use_chess_960      = false;
     bool use_tt             = true;
     bool use_tt_exact_cutoff = true;
@@ -145,6 +148,7 @@ public:
             concat("Threads",       "spin", num_threads, int(1), int(64)) +
             concat("Hash",          "spin", hash_size, int(1), int(33554432)) +
             concat("root_repetition_contempt", "spin", root_repetition_contempt, int(0), int(1000)) +
+            concat("tm_volatility_threshold", "spin", tm_volatility_threshold, int(1), int(10000)) +
             concat("use_tt",        "check", use_tt) +
             concat("use_tt_exact_cutoff", "check", use_tt_exact_cutoff) +
             concat("use_tt_lower_cutoff", "check", use_tt_lower_cutoff) +
@@ -172,6 +176,8 @@ public:
             hash_size = std::stoi(value);
         else if (lc == "root_repetition_contempt")
             root_repetition_contempt = std::max(0, std::stoi(value));
+        else if (lc == "tm_volatility_threshold")
+            tm_volatility_threshold = std::max(1, std::stoi(value));
         else if (lc == "uci_chess960")
             use_chess_960 = true;
         else if (lc == "use_tt")
@@ -223,6 +229,9 @@ private:
             root_repetition_contempt = std::max(
                 0,
                 c.value("root_repetition_contempt", root_repetition_contempt));
+            tm_volatility_threshold = std::max(
+                1,
+                c.value("tm_volatility_threshold", tm_volatility_threshold));
             nnue_file   = c.value("nnue_file", nnue_file);
             move_policy_file = c.value("move_policy_file", move_policy_file);
             move_policy_max_eval_drop = std::max(
