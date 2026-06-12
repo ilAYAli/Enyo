@@ -698,20 +698,23 @@ inline bool apply_move_generic(Board & b, Move mv, NNUE::Net * nnue)
             return true;
         }
     }
-    clr_piece<Us, UpdateZobrist, UpdateNNUE>(b, src_piece, src, nnue, w_ksq, b_ksq);
+    clr_piece<Us, UpdateZobrist, false>(b, src_piece, src, nnue, w_ksq, b_ksq);
     if (dst_piece != no_piece_type)
-        clr_piece<Them, UpdateZobrist, UpdateNNUE>(b, dst_piece, dst, nnue, w_ksq, b_ksq);
-    set_piece<Us, UpdateZobrist, UpdateNNUE>(b, src_piece, dst, nnue, w_ksq, b_ksq);
+        clr_piece<Them, UpdateZobrist, false>(b, dst_piece, dst, nnue, w_ksq, b_ksq);
+    set_piece<Us, UpdateZobrist, false>(b, src_piece, dst, nnue, w_ksq, b_ksq);
 
     if constexpr (UpdateNNUE) {
         assert(nnue && "apply_move_generic: nnue is null");
-        // King moves change the king-bucket index, so the incremental
-        // deltas just applied (using the pre-move king square) become
-        // wrong — refresh through the Finny cache for the new bucket.
-        // Non-king moves keep both king squares stable, so the
-        // incremental updates are authoritative and no refresh is needed.
+        // King moves change the king-bucket index, so incremental deltas
+        // (which would use the pre-move king square) are wrong — refresh
+        // through the Finny cache for the new bucket. The per-piece
+        // updates that used to run before this refresh were dead work
+        // and are skipped. Non-king moves keep both king squares stable,
+        // so one fused incremental update is authoritative.
         if (src_piece == king) {
             nnue->refresh_with_cache(b);
+        } else {
+            nnue->applyMoveDelta(src_piece, Us, src, dst, dst_piece, w_ksq, b_ksq);
         }
     }
 

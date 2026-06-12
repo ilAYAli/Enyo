@@ -223,6 +223,19 @@ struct Net {
         enyo::square_t kingSquare_White,
         enyo::square_t kingSquare_Black
     );
+    // Fused single-pass accumulator update for a generic move (optionally
+    // with a capture on to_square). Equivalent to the separate clr/clr/set
+    // per-feature updates — int16 wrapping adds commute — but touches the
+    // accumulator once instead of two or three times.
+    void applyMoveDelta(
+        enyo::PieceType pieceType,
+        enyo::Color pieceColor,
+        enyo::square_t from_square,
+        enyo::square_t to_square,
+        enyo::PieceType capturedPieceType,
+        enyo::square_t kingSquare_White,
+        enyo::square_t kingSquare_Black
+    );
     void updateAccumulatorFromPrevious(
         enyo::PieceType pieceType,
         enyo::Color pieceColor,

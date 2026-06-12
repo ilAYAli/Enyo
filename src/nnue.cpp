@@ -547,6 +547,78 @@ void Net::updateAccumulator(
 #endif
 }
 
+void Net::applyMoveDelta(
+    enyo::PieceType pieceType,
+    enyo::Color pieceColor,
+    enyo::square_t from_square,
+    enyo::square_t to_square,
+    enyo::PieceType capturedPieceType,
+    enyo::square_t kingSquare_White,
+    enyo::square_t kingSquare_Black)
+{
+    if (capturedPieceType == enyo::no_piece_type) {
+        updateAccumulator(
+            pieceType, pieceColor, from_square, to_square,
+            kingSquare_White, kingSquare_Black);
+        return;
+    }
+
+    const auto capturedColor = ~pieceColor;
+    if (use_network()) {
+        move_network_feature(
+            network_accumulator_stack[currentAccumulator],
+            pieceType, pieceColor, from_square, to_square,
+            kingSquare_White, kingSquare_Black);
+        update_network_feature(
+            network_accumulator_stack[currentAccumulator],
+            capturedPieceType, capturedColor, to_square,
+            kingSquare_White, kingSquare_Black, false);
+        return;
+    }
+    if (Network::INPUT_WEIGHTS != nullptr) {
+        move_network_feature(
+            network_accumulator_stack[currentAccumulator],
+            pieceType, pieceColor, from_square, to_square,
+            kingSquare_White, kingSquare_Black);
+        update_network_feature(
+            network_accumulator_stack[currentAccumulator],
+            capturedPieceType, capturedColor, to_square,
+            kingSquare_White, kingSquare_Black, false);
+    }
+
+    Accumulator &accumulator = accumulator_stack[currentAccumulator];
+    for (auto side : {enyo::white, enyo::black}) {
+        const auto king_square = side == enyo::white ? kingSquare_White : kingSquare_Black;
+        const int inputClear = index(pieceType, pieceColor, from_square, side, king_square);
+        const int inputAdd   = index(pieceType, pieceColor, to_square, side, king_square);
+        const int inputCap   = index(capturedPieceType, capturedColor, to_square, side, king_square);
+
+#if defined(USE_SIMD)
+        const auto weightSub = reinterpret_cast<register_type16 *>(inputWeights.data() + inputClear * HIDDEN_SIZE);
+        const auto weightAdd = reinterpret_cast<register_type16 *>(inputWeights.data() + inputAdd * HIDDEN_SIZE);
+        const auto weightCap = reinterpret_cast<register_type16 *>(inputWeights.data() + inputCap * HIDDEN_SIZE);
+        const auto values = reinterpret_cast<register_type16 *>(accumulator[side].data());
+
+        for (int i = 0; i < HIDDEN_SIZE / STRIDE_16_BIT; ++i) {
+            values[i] = register_sub_epi16(
+                register_add_epi16(
+                    register_sub_epi16(values[i], weightSub[i]),
+                    weightAdd[i]),
+                weightCap[i]);
+        }
+#else
+        const auto weightSub = inputWeights.data() + inputClear * HIDDEN_SIZE;
+        const auto weightAdd = inputWeights.data() + inputAdd * HIDDEN_SIZE;
+        const auto weightCap = inputWeights.data() + inputCap * HIDDEN_SIZE;
+
+        for (int i = 0; i < HIDDEN_SIZE; ++i) {
+            accumulator[side][i] = static_cast<int16_t>(
+                accumulator[side][i] - weightSub[i] + weightAdd[i] - weightCap[i]);
+        }
+#endif
+    }
+}
+
 void Net::updateAccumulatorFromPrevious(
     enyo::PieceType pieceType,
     enyo::Color pieceColor,
