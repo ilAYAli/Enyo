@@ -380,7 +380,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     if (ss->in_check) {
         ss->eval = Value::none;
         best_value = -Value::infinite;
-        lm = generate_legal_moves<Us>(b);
+        generate_legal_moves<Us>(b, lm);
         if (lm.empty())
             return mated_in(ss->ply);
     } else {
@@ -407,7 +407,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         if (best_value > alpha)
             alpha = best_value;
 
-        lm = generate_legal_moves<Us>(b);
+        generate_legal_moves<Us>(b, lm);
     }
 
     PrioritizedMoves mp;
@@ -746,7 +746,8 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             && !ss->in_check
             && ss->eval + probcut_margin >= beta
             && std::abs(beta) < Constexpr::mate_value - MAX_PLY) {
-            auto probcut_lm = generate_legal_moves<Us>(b);
+            Movelist probcut_lm;
+            generate_legal_moves<Us>(b, probcut_lm);
             PrioritizedMoves probcut_mp;
             prioritize_moves<Us, QSEARCH>(
                 probcut_mp, worker, probcut_lm, tt_move, depth);
@@ -779,13 +780,17 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     }
 
 moves_loop:
-    auto const lm = [&] {
-        if constexpr (NT == NodeType::Root) {
-            if (!si.searchmoves.empty()) return si.searchmoves;
-            if (!worker.root_moves.empty()) return worker.root_moves;
-        }
-        return generate_legal_moves<Us>(b);
-    }();
+    Movelist lm;
+    if constexpr (NT == NodeType::Root) {
+        if (!si.searchmoves.empty())
+            lm = si.searchmoves;
+        else if (!worker.root_moves.empty())
+            lm = worker.root_moves;
+        else
+            generate_legal_moves<Us>(b, lm);
+    } else {
+        generate_legal_moves<Us>(b, lm);
+    }
     if (lm.empty()) {
         if (ss->in_check) {
             auto prev_move = b.history[b.histply-1].move;

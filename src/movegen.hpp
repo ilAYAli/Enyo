@@ -1210,8 +1210,11 @@ bitboard_t generate_pawn_moves(Board & b, Movelist & moves)
 }
 
 
+// Fills a caller-owned list. The by-value overload below copies ~1 KB per
+// call (unelidable through copy assignment at the qsearch call site); the
+// search hot path uses this variant instead.
 template <Color Us, bool UpdateZobrist = true, bool UpdateNNUE = true>
-Movelist generate_legal_moves(Board & b)
+void generate_legal_moves(Board & b, Movelist & legal_moves)
 {
     constexpr Color Them = ~Us;
 
@@ -1221,7 +1224,7 @@ Movelist generate_legal_moves(Board & b)
 
     square_t const king_sq = lsb(b.pt_bb[Us][king]);
     const bool king_in_check = b.all_attacks_bb[Them] & (1ULL << king_sq);
-    Movelist legal_moves;
+    legal_moves.clear();
 
     { // pawn:
         Movelist moves;
@@ -1503,6 +1506,12 @@ Movelist generate_legal_moves(Board & b)
         if (!b.pt_bb[white][king]) BREAKPOINT("missing white king");
         if (!b.pt_bb[black][king]) BREAKPOINT("missing black king");
     }
+}
 
+template <Color Us, bool UpdateZobrist = true, bool UpdateNNUE = true>
+Movelist generate_legal_moves(Board & b)
+{
+    Movelist legal_moves;
+    generate_legal_moves<Us, UpdateZobrist, UpdateNNUE>(b, legal_moves);
     return legal_moves;
 }
