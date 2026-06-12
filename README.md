@@ -41,6 +41,11 @@ H1 indexed: white king =  3, black king = 59
 <a href="https://www.chessprogramming.org/Magic_Bitboards" rel="nofollow">Magic Bitboards</a><br>
 </pre>
 
+<pre>
+<h3>perft></h3>
+echo 'position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -\nbench depth 5\nquit' | ./build/enyo
+</pre>
+
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>
 <a href="https://www.chessprogramming.org/Principal_Variation_Search" rel="nofollow">Principal Variation Search</a><br>
