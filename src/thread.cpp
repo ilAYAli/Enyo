@@ -1,5 +1,6 @@
 #include <iostream>
 
+#include "config.hpp"
 #include "thread.hpp"
 
 using namespace enyo;
@@ -86,6 +87,9 @@ void Pool::kill()
 void Pool::init_threads(const SearchInfo & si, int num_threads)
 {
     assert(threads_.empty());
+
+    if (cfgmgr.lmr_dirty)
+        init_search();
 
     stop = false;
     pool_.clear();

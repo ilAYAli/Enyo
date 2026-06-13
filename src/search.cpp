@@ -127,8 +127,8 @@ bool is_tablebase_tt_value(Value value)
 int lmr_reductions[MAX_PLY][MAX_MOVES];
 
 void init_search() {
-    constexpr int lmr_divisor = 224;
-    constexpr int lmr_base = 111;
+    const int lmr_divisor = cfgmgr.lmr_divisor;
+    const int lmr_base = cfgmgr.lmr_base;
     lmr_reductions[0][0] = 0;
     for (int depth = 1; depth < MAX_PLY; depth++) {
         for (int move = 1; move < MAX_MOVES; move++) {
@@ -140,6 +140,7 @@ void init_search() {
                 ));
         }
     }
+    cfgmgr.lmr_dirty = false;
 }
 
 bool is_repetition(const Board & b, int draw)

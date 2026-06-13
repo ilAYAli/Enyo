@@ -111,6 +111,16 @@ public:
     // Score swing (cp) between iterations that counts as instability for
     // the soft-time extension. TODO Track 1: SPRT 60/80/150 variants.
     int tm_volatility_threshold = 100;
+    // LMR formula constants used by init_search() to precompute the
+    // [depth][move_count] reduction table. Stored *100 so UCI spin can
+    // express fractions (e.g. lmr_base 125 -> 1.25). Changing either
+    // forces a rebuild of the table via init_search().
+    int lmr_base = 125;
+    int lmr_divisor = 224;
+    // Set when either lmr_* knob is touched at runtime; consumers must
+    // re-run init_search() and clear it. Kept out of setopt's return so
+    // callers don't have to special-case the recompute.
+    bool lmr_dirty = false;
     bool use_chess_960      = false;
     bool use_tt             = true;
     bool use_tt_exact_cutoff = true;
@@ -149,6 +159,8 @@ public:
             concat("Hash",          "spin", hash_size, int(1), int(33554432)) +
             concat("root_repetition_contempt", "spin", root_repetition_contempt, int(0), int(1000)) +
             concat("tm_volatility_threshold", "spin", tm_volatility_threshold, int(1), int(10000)) +
+            concat("lmr_base", "spin", lmr_base, int(1), int(500)) +
+            concat("lmr_divisor", "spin", lmr_divisor, int(50), int(1000)) +
             concat("use_tt",        "check", use_tt) +
             concat("use_tt_exact_cutoff", "check", use_tt_exact_cutoff) +
             concat("use_tt_lower_cutoff", "check", use_tt_lower_cutoff) +
@@ -178,6 +190,14 @@ public:
             root_repetition_contempt = std::max(0, std::stoi(value));
         else if (lc == "tm_volatility_threshold")
             tm_volatility_threshold = std::max(1, std::stoi(value));
+        else if (lc == "lmr_base") {
+            lmr_base = std::max(1, std::stoi(value));
+            lmr_dirty = true;
+        }
+        else if (lc == "lmr_divisor") {
+            lmr_divisor = std::max(50, std::stoi(value));
+            lmr_dirty = true;
+        }
         else if (lc == "uci_chess960")
             use_chess_960 = true;
         else if (lc == "use_tt")
@@ -232,6 +252,17 @@ private:
             tm_volatility_threshold = std::max(
                 1,
                 c.value("tm_volatility_threshold", tm_volatility_threshold));
+            const int new_lmr_base = std::max(
+                1,
+                c.value("lmr_base", lmr_base));
+            const int new_lmr_divisor = std::max(
+                50,
+                c.value("lmr_divisor", lmr_divisor));
+            if (new_lmr_base != lmr_base || new_lmr_divisor != lmr_divisor) {
+                lmr_base = new_lmr_base;
+                lmr_divisor = new_lmr_divisor;
+                lmr_dirty = true;
+            }
             nnue_file   = c.value("nnue_file", nnue_file);
             move_policy_file = c.value("move_policy_file", move_policy_file);
             move_policy_max_eval_drop = std::max(
