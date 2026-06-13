@@ -20,11 +20,11 @@
 #include <utility>
 
 namespace {
-static constexpr inline auto flag_size = 2;
+static constexpr inline auto flag_size = 3;
 static constexpr inline auto value_size = 16;
 static constexpr inline auto depth_size = 8;
 static constexpr inline auto move_size = 30;
-static constexpr inline auto age_size = 8;
+static constexpr inline auto age_size = 7;
 
 static constexpr inline auto flag_shift = 0;
 static constexpr inline auto value_shift = flag_shift + flag_size;
@@ -56,6 +56,15 @@ enum type {
     UpperBound,
     ExactBound,
 };
+
+// HashEntry::flag packs the bound (bits 0-1) and an optional wasPv hint
+// (bit 2). bound() / set_was_pv() / was_pv() preserve callers that compare
+// flag to the bound enum directly. The wasPv bit never gates cutoffs or
+// replacement — it flows store -> probe -> ss->ttPv -> LMR only.
+inline constexpr int was_pv_bit = 4;
+inline constexpr int bound_mask = 0x3;
+inline constexpr int bound_of(int flag) { return flag & bound_mask; }
+inline constexpr bool was_pv_of(int flag) { return (flag & was_pv_bit) != 0; }
 
 struct HashEntry {
     Move move {};
@@ -107,7 +116,7 @@ constexpr inline Move unpack_move(uint32_t packed)
 constexpr inline uint64_t pack_entry(
     Move move,
     Value value,
-    type flag,
+    int flag,
     int depth,
     uint8_t age)
 {
@@ -178,7 +187,8 @@ public:
     std::vector<ScoredMove> get_pv_line(enyo::Board& b, int maxdepth = enyo::MAX_PLY);
     enyo::ScoredMove get_best_move(enyo::Board& b);
 
-    void store(uint64_t poskey, enyo::Move move, enyo::Value value, type flag, int depth)
+    void store(uint64_t poskey, enyo::Move move, enyo::Value value, type flag,
+               int depth, bool was_pv = false)
     {
         if (flag == NoneBound)
             return;
@@ -187,8 +197,10 @@ public:
         auto & entry = hash_table[index];
         const auto previous_data = entry.data;
 
+        // age is stored in 7 bits; mask the counter so the comparison
+        // stays consistent when current_age wraps past 127.
         if (previous_data != 0
-            && unpack_age(previous_data) == current_age
+            && unpack_age(previous_data) == (current_age & age_mask)
             && unpack_entry(previous_data).depth > depth
             && flag != ExactBound) {
             return;
@@ -208,7 +220,9 @@ public:
         else
             over_write++;
 
-        const auto data = pack_entry(move, value, flag, depth, current_age);
+        // Pack wasPv into flag bit 2; the bound stays in bits 0-1.
+        const int packed_flag = static_cast<int>(flag) | (was_pv ? was_pv_bit : 0);
+        const auto data = pack_entry(move, value, packed_flag, depth, current_age);
         entry.data = data;
         entry.key = poskey ^ data;
     }
@@ -223,7 +237,7 @@ public:
         }
 
         auto he = unpack_entry(data);
-        if (he.flag == NoneBound)
+        if (bound_of(he.flag) == NoneBound)
             return std::nullopt;
         return he;
     }

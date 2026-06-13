@@ -375,9 +375,12 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         const bool can_use_tt_cut =
             !si.suppress_tablebase_cutoffs || !is_tablebase_tt_value(tt_value);
         if (Node != NodeType::PV && tt_value != Value::none && can_use_tt_cut) {
-            if (tthit->flag == tt::type::ExactBound
-            || (tthit->flag == tt::type::UpperBound && (tt_value <= alpha))
-            || (tthit->flag == tt::type::LowerBound && (tt_value >= beta)))
+            // Mask off the wasPv bit: entries stored from PV nodes carry
+            // it in flag bit 2, and raw equality would never match.
+            const int tthit_bound = tt::bound_of(tthit->flag);
+            if (tthit_bound == tt::type::ExactBound
+            || (tthit_bound == tt::type::UpperBound && (tt_value <= alpha))
+            || (tthit_bound == tt::type::LowerBound && (tt_value >= beta)))
                 return tt_value;
         }
     }
@@ -541,10 +544,13 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     if (cfgmgr.use_tt)
         tte = tt::ttable.probe(b.hash);
     ss->tthit = tte.has_value();
+    ss->ttPv = NT != NodeType::NonPV;
     if (ss->tthit) {
         tt::ttable.hit++;
         tt_value = tt::value_from(tte->value, ss->ply);
         tt_move = tte->move;
+        ss->ttPv = ss->ttPv || tt::was_pv_of(tte->flag);
+        const int tte_bound = tt::bound_of(tte->flag);
         const bool can_use_tt_cut =
             !si.suppress_tablebase_cutoffs || !is_tablebase_tt_value(tt_value);
         const bool can_tt_cut =
@@ -555,9 +561,9 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             && ss->excluded_move == Move{}
             && tt_value != Value::none
             && tte->depth >= depth
-            && (tte->flag == tt::type::ExactBound
-             || (tte->flag == tt::type::UpperBound && tt_value <= alpha)
-             || (tte->flag == tt::type::LowerBound && tt_value >= beta));
+            && (tte_bound == tt::type::ExactBound
+             || (tte_bound == tt::type::UpperBound && tt_value <= alpha)
+             || (tte_bound == tt::type::LowerBound && tt_value >= beta));
         if constexpr (NT == NodeType::Root) {
             if (can_tt_cut && tt_move) {
                 const auto & root_moves = !si.searchmoves.empty()
@@ -685,9 +691,10 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     }
     static_eval = ss->eval;
     if (ss->tthit && tt_value != Value::none) {
-        if (tte->flag == tt::type::ExactBound
-        || (tte->flag == tt::type::UpperBound && tt_value < ss->eval)
-        || (tte->flag == tt::type::LowerBound && tt_value > ss->eval)) {
+        const int b_ = tt::bound_of(tte->flag);
+        if (b_ == tt::type::ExactBound
+        || (b_ == tt::type::UpperBound && tt_value < ss->eval)
+        || (b_ == tt::type::LowerBound && tt_value > ss->eval)) {
             ss->eval = tt_value;
         }
     }
@@ -748,7 +755,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         );
         const bool tt_rules_out_nmp = ss->tthit
             && tt_value != Value::none
-            && (tte->flag & tt::type::UpperBound)
+            && (tt::bound_of(tte->flag) & tt::type::UpperBound)
             && tt_value < beta;
 
         if (have_big_pieces
@@ -945,7 +952,7 @@ moves_loop:
             && tt_value != Value::none
             && std::abs(tt_value) < Constexpr::mate_value - 2 * MAX_PLY
             && !is_tablebase_tt_value(tt_value)
-            && (tte->flag & tt::type::LowerBound)
+            && (tt::bound_of(tte->flag) & tt::type::LowerBound)
             && tte->depth >= depth - 3) {
 
             const auto singular_beta =
@@ -1000,6 +1007,11 @@ moves_loop:
                 R += !improving;
                 R -= NT != NodeType::NonPV;
                 R -= is_capture;
+                // Less reduction at positions previously identified as on
+                // a principal variation. ttPv flows: PV-node entries are
+                // stored with the was_pv bit set, the probe surfaces it
+                // into ss->ttPv, and we lighten LMR by one ply here.
+                R -= ss->ttPv;
                 if (is_quiet) {
                     const int h = worker.history[Us][move.src_sq()][move.dst_sq()];
                     R -= std::clamp(h / 8192, -2, 2);
@@ -1168,7 +1180,8 @@ moves_loop:
                             best_move,
                             tt::value_to(best_value, ss->ply),
                             tt::type::LowerBound,
-                            depth
+                            depth,
+                            ss->ttPv
                         );
                     }
                     // Fail-soft: return the real score, not beta. The
@@ -1195,7 +1208,8 @@ moves_loop:
             best_value >= beta
                 ? tt::type::LowerBound
                 : tt::type::UpperBound,
-            depth
+            depth,
+            ss->ttPv
         );
     }
 

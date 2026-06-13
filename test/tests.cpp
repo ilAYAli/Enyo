@@ -67,8 +67,9 @@ TEST(tt, packed_entry_round_trips_search_fields)
 
     const std::array cases {
         EntryCase {Move {}, Value::draw, tt::ExactBound, -5, 0},
-        EntryCase {promotion, static_cast<Value>(-1234), tt::LowerBound, 0, 127},
-        EntryCase {promotion, Value::none, tt::UpperBound, MAX_PLY, 255},
+        EntryCase {promotion, static_cast<Value>(-1234), tt::LowerBound, 0, 90},
+        // age is 7 bits since the wasPv bit widened the flag field
+        EntryCase {promotion, Value::none, tt::UpperBound, MAX_PLY, 127},
     };
 
     EXPECT_EQ(sizeof(tt::SMPentry), 16U);
