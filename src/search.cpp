@@ -896,6 +896,9 @@ moves_loop:
                     const int h = worker.history[Us][move.src_sq()][move.dst_sq()];
                     R -= std::clamp(h / 8192, -2, 2);
                 }
+                if constexpr (NT == NodeType::Root)
+                    if (is_quiet && move.src_piece() == queen)
+                        R = std::min(R, 1);
                 R = std::clamp(new_depth - R, 1, new_depth + 1);
 
                 if (worker.time_expired()) {

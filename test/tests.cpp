@@ -1077,6 +1077,46 @@ static int pv_move_count(std::string_view line)
     return count;
 }
 
+TEST(search, root_lmr_does_not_hide_c7c6_defense) {
+    const int old_threads = cfgmgr.num_threads;
+    const bool old_use_syzygy = cfgmgr.use_syzygy;
+    const bool old_use_tt = cfgmgr.use_tt;
+    const bool old_use_lmr = cfgmgr.use_lmr;
+    const auto old_nnue_file = cfgmgr.nnue_file;
+
+    cfgmgr.num_threads = 1;
+    cfgmgr.use_syzygy = false;
+    cfgmgr.use_tt = true;
+    cfgmgr.use_lmr = true;
+    move_policy::clear_runtime_model();
+
+    Board b;
+    Uci uci{b};
+    testing::internal::CaptureStdout();
+    uci(fmt::format("setoption name nnue_file value {}", EVAL_FILE));
+    (void)testing::internal::GetCapturedStdout();
+    uci("position fen r1bq1b1r/1pp3pk/p2p3B/1P1Q4/8/6R1/1PP2PPP/4R1K1 b - - 0 18");
+
+    thread::pool.stop = false;
+    tt::ttable.clear();
+    testing::internal::CaptureStdout();
+    uci("go depth 20");
+    const auto out = testing::internal::GetCapturedStdout();
+    const auto best = final_bestmove(out);
+
+    testing::internal::CaptureStdout();
+    uci(fmt::format("setoption name nnue_file value {}", old_nnue_file));
+    (void)testing::internal::GetCapturedStdout();
+    cfgmgr.num_threads = old_threads;
+    cfgmgr.use_syzygy = old_use_syzygy;
+    cfgmgr.use_tt = old_use_tt;
+    cfgmgr.use_lmr = old_use_lmr;
+
+    ASSERT_TRUE(best.has_value()) << out;
+    EXPECT_EQ(*best, "c7c6") << out;
+    EXPECT_EQ(out.find("bestmove d8f6"), std::string::npos) << out;
+}
+
 TEST(search, pv_stops_at_fifty_move_rule) {
     const int old_threads = cfgmgr.num_threads;
     const bool old_use_syzygy = cfgmgr.use_syzygy;
