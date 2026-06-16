@@ -251,9 +251,11 @@ bool LoadNetwork(const char* path) {
         sizeof(float) * static_cast<size_t>(output_buckets) * N_OUTPUT;
     if (!read(s_input_weights,  input_weight_bytes,       "INPUT_WEIGHTS")) { std::fclose(fh); return false; }
     
-    // SPIKE_TRAINER FIX: Bullet uses a1-indexing, Enyo uses h1-indexing.
-    // Set ENYO_FLIP_SQUARES=1 to remap spike_trainer nets.
-    if (std::getenv("ENYO_FLIP_SQUARES")) {
+    // SPIKE_TRAINER FIX: Detect and fix square indexing for spike_trainer nets.
+    // Spike_trainer uses a1-indexing (Bullet format), Enyo uses h1-indexing.
+    // Detect spike_trainer nets by size: 16MB (1536 hidden) vs 12MB (512 hidden).
+    const bool is_spike_trainer = (static_cast<size_t>(sz) > 15000000);
+    if (is_spike_trainer) {
         auto* temp = new int16_t[FeatureCount(input_buckets, feature_channels) * N_HIDDEN];
         std::memcpy(temp, s_input_weights, input_weight_bytes);
         const size_t features_per_bucket = feature_channels * 64;
