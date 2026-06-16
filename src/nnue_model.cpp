@@ -250,6 +250,24 @@ bool LoadNetwork(const char* path) {
     const size_t output_bias_bytes =
         sizeof(float) * static_cast<size_t>(output_buckets) * N_OUTPUT;
     if (!read(s_input_weights,  input_weight_bytes,       "INPUT_WEIGHTS")) { std::fclose(fh); return false; }
+    
+    // SPIKE_TRAINER FIX: Bullet uses a1-indexing, Enyo uses h1-indexing.
+    // Set ENYO_FLIP_SQUARES=1 to remap spike_trainer nets.
+    if (std::getenv("ENYO_FLIP_SQUARES")) {
+        auto* temp = new int16_t[FeatureCount(input_buckets, feature_channels) * N_HIDDEN];
+        std::memcpy(temp, s_input_weights, input_weight_bytes);
+        const size_t features_per_bucket = feature_channels * 64;
+        for (size_t b = 0; b < static_cast<size_t>(input_buckets); ++b) {
+            for (size_t p = 0; p < static_cast<size_t>(feature_channels); ++p) {
+                for (size_t sq = 0; sq < 64; ++sq) {
+                    const size_t src = (b * features_per_bucket + p * 64 + (sq ^ 63)) * N_HIDDEN;
+                    const size_t dst = (b * features_per_bucket + p * 64 + sq) * N_HIDDEN;
+                    std::memcpy(&s_input_weights[dst], &temp[src], N_HIDDEN * sizeof(int16_t));
+                }
+            }
+        }
+        delete[] temp;
+    }
     if (!read(s_input_biases,   sizeof(s_input_biases),   "INPUT_BIASES"))  { std::fclose(fh); return false; }
     if (!read(s_l1_weights,     sizeof(s_l1_weights),     "L1_WEIGHTS"))    { std::fclose(fh); return false; }
     if (!read(s_l1_biases,      sizeof(s_l1_biases),      "L1_BIASES"))     { std::fclose(fh); return false; }
