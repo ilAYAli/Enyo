@@ -1,14 +1,21 @@
+#include <array>
 #include <cstdint>
 #include <atomic>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <memory>
 #include <thread>
 #include <string>
+#include <string_view>
 #include <limits>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
+#include <utility>
+#include <vector>
 #include <fmt/format.h>
 
 #include "config.hpp"
@@ -47,7 +54,137 @@ std::string expand_home_path(std::string path)
     return path;
 }
 
-void log_legacy_evaluator(const char * source, const std::string & path = {})
+uint32_t rotr(uint32_t value, int shift)
+{
+    return (value >> shift) | (value << (32 - shift));
+}
+
+std::string sha256_bytes(std::vector<unsigned char> bytes)
+{
+    static constexpr std::array<uint32_t, 64> k = {
+        0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U,
+        0x3956c25bU, 0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U,
+        0xd807aa98U, 0x12835b01U, 0x243185beU, 0x550c7dc3U,
+        0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U,
+        0xe49b69c1U, 0xefbe4786U, 0x0fc19dc6U, 0x240ca1ccU,
+        0x2de92c6fU, 0x4a7484aaU, 0x5cb0a9dcU, 0x76f988daU,
+        0x983e5152U, 0xa831c66dU, 0xb00327c8U, 0xbf597fc7U,
+        0xc6e00bf3U, 0xd5a79147U, 0x06ca6351U, 0x14292967U,
+        0x27b70a85U, 0x2e1b2138U, 0x4d2c6dfcU, 0x53380d13U,
+        0x650a7354U, 0x766a0abbU, 0x81c2c92eU, 0x92722c85U,
+        0xa2bfe8a1U, 0xa81a664bU, 0xc24b8b70U, 0xc76c51a3U,
+        0xd192e819U, 0xd6990624U, 0xf40e3585U, 0x106aa070U,
+        0x19a4c116U, 0x1e376c08U, 0x2748774cU, 0x34b0bcb5U,
+        0x391c0cb3U, 0x4ed8aa4aU, 0x5b9cca4fU, 0x682e6ff3U,
+        0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U,
+        0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U,
+    };
+
+    std::array<uint32_t, 8> h = {
+        0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
+        0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U,
+    };
+
+    const uint64_t bit_len = static_cast<uint64_t>(bytes.size()) * 8;
+    bytes.push_back(0x80);
+    while (bytes.size() % 64 != 56)
+        bytes.push_back(0);
+    for (int i = 7; i >= 0; --i)
+        bytes.push_back(static_cast<unsigned char>((bit_len >> (i * 8)) & 0xff));
+
+    for (size_t offset = 0; offset < bytes.size(); offset += 64) {
+        std::array<uint32_t, 64> w{};
+        for (size_t i = 0; i < 16; ++i) {
+            const size_t j = offset + i * 4;
+            w[i] = (static_cast<uint32_t>(bytes[j]) << 24)
+                | (static_cast<uint32_t>(bytes[j + 1]) << 16)
+                | (static_cast<uint32_t>(bytes[j + 2]) << 8)
+                | static_cast<uint32_t>(bytes[j + 3]);
+        }
+        for (size_t i = 16; i < 64; ++i) {
+            const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            const uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+
+        uint32_t a = h[0];
+        uint32_t b = h[1];
+        uint32_t c = h[2];
+        uint32_t d = h[3];
+        uint32_t e = h[4];
+        uint32_t f = h[5];
+        uint32_t g = h[6];
+        uint32_t hh = h[7];
+
+        for (size_t i = 0; i < 64; ++i) {
+            const uint32_t s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            const uint32_t ch = (e & f) ^ (~e & g);
+            const uint32_t temp1 = hh + s1 + ch + k[i] + w[i];
+            const uint32_t s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            const uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+            const uint32_t temp2 = s0 + maj;
+            hh = g;
+            g = f;
+            f = e;
+            e = d + temp1;
+            d = c;
+            c = b;
+            b = a;
+            a = temp1 + temp2;
+        }
+
+        h[0] += a;
+        h[1] += b;
+        h[2] += c;
+        h[3] += d;
+        h[4] += e;
+        h[5] += f;
+        h[6] += g;
+        h[7] += hh;
+    }
+
+    return fmt::format(
+        "{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}{:08x}",
+        h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
+}
+
+std::optional<std::string> sha256_file(const fs::path & path)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        return std::nullopt;
+
+    std::vector<unsigned char> bytes{
+        std::istreambuf_iterator<char>(in),
+        std::istreambuf_iterator<char>()};
+    if (in.bad())
+        return std::nullopt;
+    return sha256_bytes(std::move(bytes));
+}
+
+std::string proven_path(const fs::path & path)
+{
+    std::error_code ec;
+    auto result = fs::weakly_canonical(path, ec);
+    if (!ec)
+        return result.string();
+    result = fs::absolute(path, ec);
+    return ec ? path.string() : result.lexically_normal().string();
+}
+
+[[noreturn]] void fail_eval_file(const std::string & path, std::string_view reason)
+{
+    const auto msg = fmt::format("info string ERROR: nnue_file '{}' {}\n", path, reason);
+    fmt::print("{}", msg);
+    std::fflush(stdout);
+    eventlog::log<eventlog::Log::error>("{}", msg);
+    std::exit(EXIT_FAILURE);
+}
+
+void log_legacy_evaluator(
+    const char * source,
+    const std::string & path = {},
+    const std::string & sha256 = {})
 {
     if (path.empty()) {
         ucilog(
@@ -57,8 +194,8 @@ void log_legacy_evaluator(const char * source, const std::string & path = {})
     }
 
     ucilog(
-        "info string evaluator=legacy-default source={} path='{}' hidden={} input_buckets={} feature_channels=12\n",
-        source, path, HIDDEN_SIZE, BUCKETS);
+        "info string evaluator=legacy-default source={} path='{}' sha256={} hidden={} input_buckets={} feature_channels=12\n",
+        source, path, sha256, HIDDEN_SIZE, BUCKETS);
 }
 
 bool load_eval_file(const std::string & value)
@@ -70,54 +207,42 @@ bool load_eval_file(const std::string & value)
         return true;
     }
 
-    const auto path = expand_home_path(value);
+    const auto raw_path = fs::path(expand_home_path(value));
+    const auto path = proven_path(raw_path);
     std::error_code ec;
-    if (!fs::exists(path, ec) || ec) {
-        Network::enabled = false;
-        NNUE::Init("");
-        ucilog("info string WARNING: nnue_file '{}' not found/readable\n", path);
-        log_legacy_evaluator("embedded-default");
-        return false;
-    }
+    if (!fs::exists(raw_path, ec) || ec)
+        fail_eval_file(path, "not found/readable");
 
-    const auto size = fs::file_size(path, ec);
-    if (ec) {
-        Network::enabled = false;
-        NNUE::Init("");
-        ucilog("info string WARNING: nnue_file '{}' size check failed\n", path);
-        log_legacy_evaluator("embedded-default");
-        return false;
-    }
+    const auto size = fs::file_size(raw_path, ec);
+    if (ec)
+        fail_eval_file(path, "size check failed");
+
+    const auto sha256 = sha256_file(raw_path);
+    if (!sha256)
+        fail_eval_file(path, "sha256 read failed");
 
     if (Network::IsSupportedNetworkSize(size)) {
         if (Network::LoadNetwork(path.c_str())) {
             Network::enabled = true;
             ucilog(
-                "info string evaluator=native-nnue path='{}' hidden={} input_buckets={} feature_channels={} output_buckets={} head_features={}\n",
-                path, Network::N_HIDDEN, Network::INPUT_BUCKETS,
+                "info string evaluator=native-nnue path='{}' sha256={} hidden={} input_buckets={} feature_channels={} output_buckets={} head_features={}\n",
+                path, *sha256, Network::N_HIDDEN, Network::INPUT_BUCKETS,
                 Network::FEATURE_CHANNELS, Network::OUTPUT_BUCKETS,
                 Network::OUTPUT_HEAD_FEATURES);
             return true;
         }
-        Network::enabled = false;
-        NNUE::Init("");
-        ucilog("info string WARNING: nnue_file '{}' matched native network size but failed to load\n", path);
-        log_legacy_evaluator("embedded-default");
-        return false;
+        fail_eval_file(path, "matched native network size but failed to load");
     }
 
     if (size >= NNUE::LEGACY_NETWORK_SIZE) {
         Network::enabled = false;
-        NNUE::Init(path);
-        log_legacy_evaluator("file", path);
+        if (!NNUE::Init(path))
+            fail_eval_file(path, "matched legacy network size but failed to load");
+        log_legacy_evaluator("file", path, *sha256);
         return true;
     }
 
-    Network::enabled = false;
-    NNUE::Init("");
-    ucilog("info string WARNING: nnue_file '{}' has invalid size {} bytes\n", path, size);
-    log_legacy_evaluator("embedded-default");
-    return false;
+    fail_eval_file(path, fmt::format("has invalid size {} bytes", size));
 }
 
 bool load_move_policy_file(const std::string & value)

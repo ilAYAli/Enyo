@@ -117,16 +117,29 @@ inline constexpr int to_net_piece(enyo::PieceType pt, enyo::Color c) {
     return (bpt << 1) | static_cast<int>(c);
 }
 
-inline constexpr const std::array<uint16_t, 64> & KingBucketsFor(int input_buckets) {
-    return input_buckets == 32 ? KING_BUCKETS_32 : KING_BUCKETS_16;
+inline constexpr bool IsSupportedInputBuckets(int input_buckets) {
+    return input_buckets == 1
+        || input_buckets == 2
+        || input_buckets == 4
+        || input_buckets == 8
+        || input_buckets == 16
+        || input_buckets == 32;
+}
+
+inline constexpr int KingBucketFor(int input_buckets, int oriented_net_sq) {
+    const auto idx = static_cast<size_t>(oriented_net_sq);
+    if (input_buckets == 32)
+        return KING_BUCKETS_32[idx];
+    return KING_BUCKETS_16[idx] * input_buckets / 16;
 }
 
 inline uint16_t KingBucket(int oriented_net_sq) {
-    return KingBucketsFor(INPUT_BUCKETS)[static_cast<size_t>(oriented_net_sq)];
+    return static_cast<uint16_t>(KingBucketFor(INPUT_BUCKETS, oriented_net_sq));
 }
 
 inline constexpr bool IsSupportedFeatureLayout(int input_buckets, int feature_channels) {
-    return feature_channels == LEGACY_FEATURE_CHANNELS
+    return (IsSupportedInputBuckets(input_buckets)
+        && feature_channels == LEGACY_FEATURE_CHANNELS)
         || (input_buckets == 32 && feature_channels == HALFKA_V2_FEATURE_CHANNELS);
 }
 
@@ -175,7 +188,7 @@ inline constexpr int FeatureIdxFormula(int pt,
     const int oriented_king_sq = (7 * !(kingsq & 4)) ^ (56 * view) ^ kingsq;
     const int oriented_sq = (7 * !(kingsq & 4)) ^ (56 * view) ^ sq;
 
-    return KingBucketsFor(input_buckets)[static_cast<size_t>(oriented_king_sq)]
+    return KingBucketFor(input_buckets, oriented_king_sq)
         * feature_channels * 64
         + piece_channel * 64 + oriented_sq;
 }
@@ -212,9 +225,35 @@ inline std::array<int, FEATURE_IDX_TABLE_SIZE> MakeFeatureIdxTable(
     return table;
 }
 
+inline const auto FEATURE_IDX_TABLE_1_12 = MakeFeatureIdxTable(1, 12);
+inline const auto FEATURE_IDX_TABLE_2_12 = MakeFeatureIdxTable(2, 12);
+inline const auto FEATURE_IDX_TABLE_4_12 = MakeFeatureIdxTable(4, 12);
+inline const auto FEATURE_IDX_TABLE_8_12 = MakeFeatureIdxTable(8, 12);
 inline const auto FEATURE_IDX_TABLE_16_12 = MakeFeatureIdxTable(16, 12);
 inline const auto FEATURE_IDX_TABLE_32_12 = MakeFeatureIdxTable(32, 12);
 inline const auto FEATURE_IDX_TABLE_32_11 = MakeFeatureIdxTable(32, 11);
+
+inline const std::array<int, FEATURE_IDX_TABLE_SIZE> & FeatureIdxTableForCurrentLayout()
+{
+    if (FEATURE_CHANNELS == HALFKA_V2_FEATURE_CHANNELS)
+        return FEATURE_IDX_TABLE_32_11;
+
+    switch (INPUT_BUCKETS) {
+    case 1:
+        return FEATURE_IDX_TABLE_1_12;
+    case 2:
+        return FEATURE_IDX_TABLE_2_12;
+    case 4:
+        return FEATURE_IDX_TABLE_4_12;
+    case 8:
+        return FEATURE_IDX_TABLE_8_12;
+    case 32:
+        return FEATURE_IDX_TABLE_32_12;
+    case 16:
+    default:
+        return FEATURE_IDX_TABLE_16_12;
+    }
+}
 
 inline int FeatureIdx(enyo::PieceType pt,
                       enyo::Color piece_color,
@@ -222,9 +261,7 @@ inline int FeatureIdx(enyo::PieceType pt,
                       enyo::square_t enyo_kingsq,
                       enyo::Color view)
 {
-    const auto & table = FEATURE_CHANNELS == HALFKA_V2_FEATURE_CHANNELS
-        ? FEATURE_IDX_TABLE_32_11
-        : (INPUT_BUCKETS == 32 ? FEATURE_IDX_TABLE_32_12 : FEATURE_IDX_TABLE_16_12);
+    const auto & table = FeatureIdxTableForCurrentLayout();
     return table[FeatureIdxTableOffset(
         static_cast<int>(pt),
         static_cast<int>(piece_color),
@@ -366,7 +403,11 @@ struct NetworkLayout {
 };
 
 inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
-    constexpr std::array<std::array<int, 2>, 3> layouts = {{
+    constexpr std::array<std::array<int, 2>, 7> layouts = {{
+        {1, 12},
+        {2, 12},
+        {4, 12},
+        {8, 12},
         {16, 12},
         {32, 12},
         {32, 11},

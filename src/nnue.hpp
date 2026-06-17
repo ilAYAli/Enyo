@@ -288,7 +288,7 @@ struct Net {
         enyo::square_t kingSquare);
 };
 
-void Init(const std::string &file_name);
+bool Init(const std::string &file_name);
 
 // Enumerate active feature indices for a given perspective (view).
 // Indices are in the same space the accumulator uses — each one is

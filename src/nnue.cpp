@@ -1171,17 +1171,17 @@ static bool LoadFromDisk(const std::string & path)
     return true;
 }
 
-void Init(const std::string & file_name)
+bool Init(const std::string & file_name)
 {
-    // Empty path or missing file → use the embedded default network
+    // Empty path or failed file load uses the embedded default network
     // (produced by INCBIN at build time from net/default.net). This
-    // is the behavior the engine has always had; runtime override via
-    // setoption/config is new.
+    // returns false for an explicit file failure so callers can reject it.
     if (!file_name.empty() && LoadFromDisk(file_name)) {
         fmt::print("nnue: loaded network from '{}'\n", file_name);
-        return;
+        return true;
     }
     ReadBin();
+    return file_name.empty();
 }
 
 void feature_indices(const enyo::Board & board,
