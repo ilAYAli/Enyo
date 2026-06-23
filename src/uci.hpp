@@ -45,6 +45,9 @@ private:
     void pgn();
     void stop();
     void quit();
+    void ensure_eval_loaded();
+
+    bool eval_loaded = false;
 };
 
 }

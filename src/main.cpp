@@ -185,9 +185,6 @@ int main(int argc, char **argv)
     // config only mutated cfgmgr.hash_size and the TT stayed at the
     // 64 MB default allocated at singleton construction.
     uci(fmt::format("setoption name Hash value {}", cfgmgr.hash_size));
-    NNUE::Init("");
-    if (!cfgmgr.nnue_file.empty())
-        uci(fmt::format("setoption name nnue_file value {}", cfgmgr.nnue_file));
     if (!cfgmgr.move_policy_file.empty())
         uci(fmt::format("setoption name move_policy_file value {}", cfgmgr.move_policy_file));
 

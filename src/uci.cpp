@@ -498,6 +498,13 @@ Uci::Uci(enyo::Board & board)
     : b(board)
 { }
 
+void Uci::ensure_eval_loaded()
+{
+    if (eval_loaded)
+        return;
+    eval_loaded = load_eval_file(cfgmgr.nnue_file);
+}
+
 int Uci::operator()(const std::string& command)
 {
     if (command.length() == 0)
@@ -811,7 +818,7 @@ void Uci::setoption(std::istringstream& iss)
     if (lower_name == "logfile" || lower_name == "debug log file")
         eventlog::reopen_logfile(cfgmgr.logfile, true);
     if (lower_name == "nnue_file")
-        load_eval_file(cfgmgr.nnue_file);
+        eval_loaded = load_eval_file(cfgmgr.nnue_file);
     if (lower_name == "move_policy_file")
         load_move_policy_file(cfgmgr.move_policy_file);
     if (lower_name == "hash") {
@@ -1045,6 +1052,8 @@ void Uci::go(std::istringstream & iss)
         }
         return;
     }
+
+    ensure_eval_loaded();
 
     si.starttime = std::chrono::high_resolution_clock::now();
     const auto alloc = handle_time_management(b, si);
