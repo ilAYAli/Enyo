@@ -40,30 +40,34 @@ inline void remove_old_logfiles(const std::string& baseFilename, std::size_t max
     if (!fs::exists(logDir))
         return;
 
-    std::vector<fs::directory_entry> logFiles;
+    struct LogFile {
+        fs::path path;
+        fs::file_time_type timestamp;
+    };
+
+    std::vector<LogFile> logFiles;
 
     for (const auto& entry : fs::directory_iterator(logDir)) {
         if (entry.is_regular_file()) {
             const auto& path = entry.path();
             if (path.filename().string().find(logFilePattern) == 0) {
-                logFiles.push_back(entry);
+                std::error_code ec;
+                const auto timestamp = fs::last_write_time(path, ec);
+                if (!ec)
+                    logFiles.push_back({path, timestamp});
             }
         }
     }
 
-    std::sort(logFiles.begin(), logFiles.end(), [](const fs::directory_entry& a, const fs::directory_entry& b) {
-        std::error_code a_ec;
-        std::error_code b_ec;
-        const auto a_time = fs::last_write_time(a, a_ec);
-        const auto b_time = fs::last_write_time(b, b_ec);
-        if (a_ec || b_ec)
-            return a.path().filename().string() < b.path().filename().string();
-        return a_time < b_time;
+    std::sort(logFiles.begin(), logFiles.end(), [](const LogFile& a, const LogFile& b) {
+        if (a.timestamp != b.timestamp)
+            return a.timestamp < b.timestamp;
+        return a.path.filename() < b.path.filename();
     });
 
     while (logFiles.size() > maxFiles) {
         std::error_code ec;
-        fs::remove(logFiles.front(), ec);
+        fs::remove(logFiles.front().path, ec);
         logFiles.erase(logFiles.begin());
     }
 }
