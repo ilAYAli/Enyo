@@ -1563,6 +1563,8 @@ void search_position(Worker & worker)
             ? fmt::format("mate {}", mate_distance)
             : fmt::format("cp {}", value);
 
+        si.update_elapsed_time();
+
         const auto info_pv = is_active_root_move(pvbm)
             ? root_pv_string_until_terminal(board, worker.pvline)
             : fmt::format("{}", is_active_root_move(worker.bestmove)
@@ -1591,6 +1593,7 @@ void search_position(Worker & worker)
     }
     
     if (worker.id == 0) {
+        si.update_elapsed_time();
         if (si.has_searchmoves)
             ucilog("info string forced score {}\n", value);
 

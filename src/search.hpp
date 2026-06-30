@@ -37,6 +37,11 @@ struct SearchInfo {
     }
     SearchInfo() = default;
 
+    void update_elapsed_time() {
+        using namespace std::chrono;
+        elapsed_time = duration_cast<milliseconds>(high_resolution_clock::now() - starttime);
+    }
+
     bool time_expired() {
         using namespace std::chrono;
         const auto now = high_resolution_clock::now();

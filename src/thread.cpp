@@ -14,9 +14,15 @@ using namespace enyo;
     if (id != 0)
         return false;
 
-    const bool out_of_time = si.time_expired();
+    // The watchdog still observes hard deadlines every millisecond.
+    if ((si.nodes & 1023U) != 0)
+        return false;
+
     const bool out_of_nodes =
         si.nodes_limit != 0 && thread::pool.get_nodes() >= si.nodes_limit;
+    const bool has_time_limit =
+        si.stoptime != std::chrono::high_resolution_clock::time_point::max();
+    const bool out_of_time = !out_of_nodes && has_time_limit && si.time_expired();
     if (out_of_time || out_of_nodes) {
         thread::pool.stop = true;
         return true;
