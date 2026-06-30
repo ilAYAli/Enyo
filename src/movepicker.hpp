@@ -1,6 +1,7 @@
 #pragma once
 
-#include <iostream>
+#include <limits>
+
 #include "board.hpp"
 #include "search.hpp"
 #include "movelist.hpp"
@@ -54,27 +55,82 @@ static inline bool is_castle(Move move) {
         && ((src_file & file_e) && (dst_file & (file_c | file_g))));
 }
 
-// Fixed-size buffer for the prioritize_moves result. 256 = max legal
-// moves in any position (Movelist::max_size). Avoids two heap
-// allocations per call (the old code returned a std::vector<Move>
-// built from a separate std::vector<ScoredMove>).
 struct PrioritizedMoves {
-    // Deliberately uninitialized (requires Move's trivial default ctor):
-    // only [0, size) is ever read, and prioritize_moves writes each of
-    // those slots before publishing size.
-    std::array<Move, 256> moves;
-    std::size_t           size = 0;
+    struct Entry {
+        int score;
+        Move move;
+    };
 
-    using iterator       = Move *;
-    using const_iterator = const Move *;
+    void clear() {
+        size = 0;
+        picked = 0;
+        best_score = std::numeric_limits<int>::min();
+        best_is_unique = false;
+        sorted = false;
+    }
 
-    iterator       begin()        { return moves.data(); }
-    iterator       end()          { return moves.data() + size; }
-    const_iterator begin() const  { return moves.data(); }
-    const_iterator end()   const  { return moves.data() + size; }
+    void add(Move move, int score) {
+        assert(size < entries.size());
+        entries[size] = Entry {score, move};
+        if (size == 0 || score > best_score) {
+            best_score = score;
+            best_index = size;
+            best_is_unique = true;
+        } else if (score == best_score) {
+            best_is_unique = false;
+        }
+        ++size;
+    }
 
-    Move operator[](std::size_t i) const { return moves[i]; }
-    Move & operator[](std::size_t i)     { return moves[i]; }
+    Move next() {
+        if (picked == size)
+            return Move {};
+
+        // Keep the original input untouched so a later fallback sort retains
+        // its exact tie order. A unique maximum is first under either path.
+        if (picked == 0 && best_is_unique) {
+            ++picked;
+            return entries[best_index].move;
+        }
+
+        sort();
+        return entries[picked++].move;
+    }
+
+    Move operator[](std::size_t index) const {
+        assert(index < picked);
+        if (!sorted) {
+            assert(index == 0 && best_is_unique);
+            return entries[best_index].move;
+        }
+        return entries[index].move;
+    }
+
+    std::size_t count() const {
+        return size;
+    }
+
+private:
+    void sort() {
+        if (sorted)
+            return;
+
+        std::ranges::sort(
+            entries.begin(),
+            entries.begin() + static_cast<std::ptrdiff_t>(size),
+            [](const Entry & lhs, const Entry & rhs) {
+                return lhs.score > rhs.score;
+            });
+        sorted = true;
+    }
+
+    std::array<Entry, MAX_MOVES> entries;
+    std::size_t size = 0;
+    std::size_t picked = 0;
+    std::size_t best_index = 0;
+    int best_score = std::numeric_limits<int>::min();
+    bool best_is_unique = false;
+    bool sorted = false;
 };
 
 template <Color Us, SearchType ST>
@@ -88,13 +144,8 @@ static inline void prioritize_moves(
     Move countermove = Move{},
     const typename Worker::CmhPieceTable * cmh_slice = nullptr)
 {
-    constexpr bool debug = false;
     auto & board = worker.si.board;
-
-    // Stack-allocated scratch. Same capacity as before but no heap
-    // traffic. Previously two std::vector allocations per call.
-    std::array<ScoredMove, 256> scored;
-    std::size_t n = 0;
+    out.clear();
 
     for (const auto move : moves) {
         int score = DRAW_SCORE;
@@ -148,23 +199,9 @@ static inline void prioritize_moves(
             }
         }
 
-        scored[n++] = ScoredMove{score, move};
+        out.add(move, score);
     }
 
-    std::ranges::sort(
-        scored.begin(), scored.begin() + static_cast<std::ptrdiff_t>(n),
-        [](const auto & a, const auto & b) { return a.score > b.score; });
-
-    if constexpr (debug) {
-        fmt::print("{} moves:{}\n", ST == QSEARCH ? "QS" : "AB", moves.size());
-        for (std::size_t i = 0; i < n; ++i) {
-            if (scored[i].score) fmt::print("  {}: {}\n", scored[i].move, scored[i].score);
-        }
-    }
-
-    out.size = n;
-    for (std::size_t i = 0; i < n; ++i)
-        out.moves[i] = scored[i].move;
 }
 
 

@@ -13,6 +13,7 @@
 #include "nnue.hpp"
 #include "probe.hpp"
 #include "search.hpp"
+#include "movepicker.hpp"
 #include "thread.hpp"
 #include "tt.hpp"
 #include "pgn.hpp"
@@ -119,6 +120,50 @@ TEST(tt, packed_table_preserves_replacement_contract)
     EXPECT_EQ(hit->value, static_cast<Value>(-456));
     EXPECT_EQ(hit->flag, tt::ExactBound);
     EXPECT_EQ(hit->depth, -5);
+}
+
+TEST(move_picker, lazy_ordering_returns_moves_by_score) {
+    PrioritizedMoves moves;
+    const Move low {a2, white, pawn, a3};
+    const Move high {b2, white, pawn, b3};
+    const Move middle {c2, white, pawn, c3};
+
+    moves.add(low, -10);
+    moves.add(high, 200);
+    moves.add(middle, 50);
+
+    EXPECT_EQ(moves.count(), 3U);
+    EXPECT_EQ(moves.next(), high);
+    EXPECT_EQ(moves[0], high);
+    EXPECT_EQ(moves.next(), middle);
+    EXPECT_EQ(moves[0], high);
+    EXPECT_EQ(moves[1], middle);
+    EXPECT_EQ(moves.next(), low);
+    EXPECT_EQ(moves[2], low);
+    EXPECT_EQ(moves.next(), Move {});
+}
+
+TEST(move_picker, lazy_ordering_matches_eager_sort_with_ties) {
+    std::array<ScoredMove, 6> expected {{
+        {40, Move {a2, white, pawn, a3}},
+        {200, Move {b2, white, pawn, b3}},
+        {40, Move {c2, white, pawn, c3}},
+        {-10, Move {d2, white, pawn, d3}},
+        {40, Move {e2, white, pawn, e3}},
+        {20, Move {f2, white, pawn, f3}},
+    }};
+
+    PrioritizedMoves moves;
+    for (const auto & entry : expected)
+        moves.add(entry.move, entry.score);
+
+    std::ranges::sort(expected, [](const auto & lhs, const auto & rhs) {
+        return lhs.score > rhs.score;
+    });
+
+    for (const auto & entry : expected)
+        EXPECT_EQ(moves.next(), entry.move);
+    EXPECT_EQ(moves.next(), Move {});
 }
 
 json make_zero_move_policy_model(double output_bias)

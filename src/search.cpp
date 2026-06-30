@@ -414,7 +414,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     else
         prioritize_moves<Us, QSEARCH>(mp, worker, lm, tt_move, depth);
     Move best_move {};
-    for (auto move : mp) {
+    while (const auto move = mp.next()) {
         if ((si.nodes & 1023U) == 0 && worker.time_expired())
             return Value::draw;
 
@@ -750,7 +750,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             prioritize_moves<Us, QSEARCH>(
                 probcut_mp, worker, probcut_lm, tt_move, depth);
 
-            for (const auto move : probcut_mp) {
+            while (const auto move = probcut_mp.next()) {
                 if ((si.nodes & 1023U) == 0 && worker.time_expired())
                     return Value::draw;
 
@@ -815,8 +815,7 @@ moves_loop:
 
     bool do_fullsearch = false;
     ss->move_count = 0;
-    for (const auto move : mp) {
-    //while (const auto move = mp.next()) {
+    while (const auto move = mp.next()) {
         if ((si.nodes & 1023U) == 0 && worker.time_expired()) {
             return Value::draw;
         }
