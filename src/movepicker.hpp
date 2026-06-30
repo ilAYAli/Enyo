@@ -119,7 +119,7 @@ static inline void prioritize_moves(
             score = TT_SCORE;
         } else if (move.dst_piece() != no_piece_type) {
             if constexpr (ST == QSEARCH) {
-                if (see<Us>(board, move) < 0)
+                if (!see_ge<Us>(board, move))
                     continue;
             }
             score = CAPTURE_SCORE + mvvlva(move);
