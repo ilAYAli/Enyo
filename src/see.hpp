@@ -77,11 +77,6 @@ inline int see(const Board & b, Move move, int threshold = 0)
         ++d;
         gain[d] = piece_value(attacker_pt) - gain[d - 1];
 
-        // Speculative cutoff: if the side to move cannot raise its score
-        // above the caller's best (-gain[d-1]), stop.
-        if (std::max(-gain[d - 1], gain[d]) < 0)
-            break;
-
         const square_t from = lsb(stm_attackers);
         occ &= ~(1ULL << from);
         attackers &= ~(1ULL << from);
@@ -96,11 +91,7 @@ inline int see(const Board & b, Move move, int threshold = 0)
         stm = ~stm;
 
         if (attacker_pt == king) {
-            // King cannot recapture if the opponent still has attackers.
-            bitboard_t opp_remaining = 0;
-            for (PieceType pt : {pawn, knight, bishop, rook, queen})
-                opp_remaining |= attackers & b.pt_bb[stm][pt];
-            if (opp_remaining) {
+            if (attackers & b.color_bb[stm]) {
                 --d;
                 break;
             }

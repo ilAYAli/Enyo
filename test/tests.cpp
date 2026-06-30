@@ -254,6 +254,14 @@ TEST(check, see_rook_battery_xray) {
     ASSERT_EQ(score, see<white>(b, move, 0));
 }
 
+TEST(check, see_rejects_illegal_king_recapture) {
+    Board b("8/8/8/8/8/4k3/3p4/2KR4 w - - 0 1");
+    const auto move = resolve_move<white>(b, rook, d1, d2);
+
+    EXPECT_EQ(piece_value(pawn), see<white>(b, move));
+    EXPECT_TRUE(see_ge<white>(b, move));
+}
+
 template <Color Us>
 void expect_see_ge_matches_exact(std::string_view fen)
 {
@@ -275,6 +283,44 @@ void expect_see_ge_matches_exact(std::string_view fen)
     }
 }
 
+template <Color Us>
+void expect_see_ge_matches_exact_tree(Board & b, int depth, std::size_t & comparisons)
+{
+    Movelist moves;
+    generate_legal_moves<Us>(b, moves);
+    constexpr std::array thresholds = {
+        -1000, -900, -500, -330, -320, -100, -1, 0,
+        1, 100, 320, 330, 500, 900, 1000
+    };
+
+    for (const auto move : moves) {
+        if (!move.dst_piece())
+            continue;
+        for (const int threshold : thresholds) {
+            const bool exact = see<Us>(b, move) >= threshold;
+            const bool fast = see_ge<Us>(b, move, threshold);
+            if (exact != fast) {
+                ADD_FAILURE()
+                    << "fen=" << b.fen()
+                    << " move=" << fmt::format("{}", move)
+                    << " threshold=" << threshold
+                    << " see=" << see<Us>(b, move)
+                    << " see_ge=" << fast;
+            }
+            ++comparisons;
+        }
+    }
+
+    if (depth == 0)
+        return;
+
+    for (const auto move : moves) {
+        apply_move<Us>(b, move);
+        expect_see_ge_matches_exact_tree<~Us>(b, depth - 1, comparisons);
+        revert_move<Us>(b);
+    }
+}
+
 TEST(check, see_ge_matches_exact) {
     expect_see_ge_matches_exact<white>(
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
@@ -288,6 +334,18 @@ TEST(check, see_ge_matches_exact) {
         "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
     expect_see_ge_matches_exact<white>(
         "4k2r/6P1/8/8/8/8/8/4K3 w - - 0 1");
+    expect_see_ge_matches_exact<white>(
+        "8/8/8/8/8/4k3/3p4/2KR4 w - - 0 1");
+}
+
+TEST(check, see_ge_matches_exact_across_move_trees) {
+    std::size_t comparisons = 0;
+    Board start("startpos");
+    expect_see_ge_matches_exact_tree<white>(start, 4, comparisons);
+    Board kiwipete(
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+    expect_see_ge_matches_exact_tree<white>(kiwipete, 3, comparisons);
+    EXPECT_GT(comparisons, 1'000'000U);
 }
 
 template <Color Us>
