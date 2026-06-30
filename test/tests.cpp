@@ -50,6 +50,77 @@ bool load_config() {
     return false;
 }
 
+TEST(tt, packed_entry_round_trips_search_fields)
+{
+    Move promotion {a7, white, pawn, a8};
+    promotion.set_flags(Move::Flags::promote);
+    promotion.set_promo_piece(queen);
+
+    struct EntryCase {
+        Move move;
+        Value value;
+        tt::type flag;
+        int depth;
+        uint8_t age;
+    };
+
+    const std::array cases {
+        EntryCase {Move {}, Value::draw, tt::ExactBound, -5, 0},
+        EntryCase {promotion, static_cast<Value>(-1234), tt::LowerBound, 0, 127},
+        EntryCase {promotion, Value::none, tt::UpperBound, MAX_PLY, 255},
+    };
+
+    EXPECT_EQ(sizeof(tt::SMPentry), 16U);
+    for (const auto & expected : cases) {
+        const auto data = tt::pack_entry(
+            expected.move,
+            expected.value,
+            expected.flag,
+            expected.depth,
+            expected.age);
+        const auto actual = tt::unpack_entry(data);
+
+        EXPECT_EQ(actual.move, expected.move);
+        EXPECT_EQ(actual.value, expected.value);
+        EXPECT_EQ(actual.flag, expected.flag);
+        EXPECT_EQ(actual.depth, expected.depth);
+        EXPECT_EQ(tt::unpack_age(data), expected.age);
+    }
+}
+
+TEST(tt, packed_table_preserves_replacement_contract)
+{
+    auto & table = tt::ttable;
+    table.clear();
+    table.prepare();
+
+    Move original {e2, white, pawn, e4};
+    const uint64_t key = 0x123456789ABCDEF0ULL;
+    table.store(key, original, static_cast<Value>(321), tt::LowerBound, MAX_PLY);
+
+    auto hit = table.probe(key);
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit->move, original);
+    EXPECT_EQ(hit->value, static_cast<Value>(321));
+    EXPECT_EQ(hit->flag, tt::LowerBound);
+    EXPECT_EQ(hit->depth, MAX_PLY);
+
+    Move shallower {d2, white, pawn, d4};
+    table.store(key, shallower, static_cast<Value>(123), tt::UpperBound, -5);
+    hit = table.probe(key);
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit->move, original);
+    EXPECT_EQ(hit->depth, MAX_PLY);
+
+    table.store(key, shallower, static_cast<Value>(-456), tt::ExactBound, -5);
+    hit = table.probe(key);
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit->move, shallower);
+    EXPECT_EQ(hit->value, static_cast<Value>(-456));
+    EXPECT_EQ(hit->flag, tt::ExactBound);
+    EXPECT_EQ(hit->depth, -5);
+}
+
 json make_zero_move_policy_model(double output_bias)
 {
     constexpr int input_dim = 1708;

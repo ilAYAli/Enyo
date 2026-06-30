@@ -20,20 +20,25 @@
 #include <utility>
 
 namespace {
-static constexpr inline auto flag_size =  2;
+static constexpr inline auto flag_size = 2;
 static constexpr inline auto value_size = 16;
-static constexpr inline auto depth_size =  6;
-static constexpr inline auto move_size  = 32;
+static constexpr inline auto depth_size = 8;
+static constexpr inline auto move_size = 30;
+static constexpr inline auto age_size = 8;
 
 static constexpr inline auto flag_shift = 0;
 static constexpr inline auto value_shift = flag_shift + flag_size;
 static constexpr inline auto depth_shift = value_shift + value_size;
 static constexpr inline auto move_shift  = depth_shift + depth_size;
+static constexpr inline auto age_shift = move_shift + move_size;
 
-static constexpr inline auto flag_mask = 0x3;
-static constexpr inline auto value_mask = 0xFFFF;
-static constexpr inline auto depth_mask = 0x3F;
-static constexpr inline auto move_mask  = 0xFFFFFFFF;
+static constexpr inline uint64_t flag_mask = (1ULL << flag_size) - 1;
+static constexpr inline uint64_t value_mask = (1ULL << value_size) - 1;
+static constexpr inline uint64_t depth_mask = (1ULL << depth_size) - 1;
+static constexpr inline uint64_t move_mask = (1ULL << move_size) - 1;
+static constexpr inline uint64_t age_mask = (1ULL << age_size) - 1;
+
+static_assert(age_shift + age_size == 64);
 } // anon ns
 
 
@@ -59,12 +64,75 @@ struct HashEntry {
     int depth {};
 };
 
-struct SMPentry {
+struct LegacySMPentryLayout {
     uint8_t age {};
     uint64_t key {};
     HashEntry entry {};
     bool occupied {};
 };
+
+struct alignas(16) SMPentry {
+    uint64_t key {};
+    uint64_t data {};
+};
+
+static_assert(sizeof(SMPentry) == 16);
+static_assert(sizeof(SMPentry) < sizeof(LegacySMPentryLayout));
+
+constexpr inline uint32_t pack_move(Move move)
+{
+    constexpr uint32_t low_fields_mask = (1U << 25) - 1;
+    constexpr uint32_t flags_mask = 0x7;
+    constexpr uint32_t promotion_mask = 0x3;
+
+    assert((move.data & ((1U << 25) | (1U << 29))) == 0);
+    return (move.data & low_fields_mask)
+         | (((move.data >> 26) & flags_mask) << 25)
+         | (((move.data >> 30) & promotion_mask) << 28);
+}
+
+constexpr inline Move unpack_move(uint32_t packed)
+{
+    constexpr uint32_t low_fields_mask = (1U << 25) - 1;
+    constexpr uint32_t flags_mask = 0x7;
+    constexpr uint32_t promotion_mask = 0x3;
+
+    return Move {
+        (packed & low_fields_mask)
+      | (((packed >> 25) & flags_mask) << 26)
+      | (((packed >> 28) & promotion_mask) << 30)
+    };
+}
+
+constexpr inline uint64_t pack_entry(
+    Move move,
+    Value value,
+    type flag,
+    int depth,
+    uint8_t age)
+{
+    assert(depth >= -128 && depth <= 127);
+    return (static_cast<uint64_t>(flag) & flag_mask) << flag_shift
+         | (static_cast<uint64_t>(static_cast<uint16_t>(value)) & value_mask) << value_shift
+         | (static_cast<uint64_t>(static_cast<uint8_t>(depth)) & depth_mask) << depth_shift
+         | (static_cast<uint64_t>(pack_move(move)) & move_mask) << move_shift
+         | (static_cast<uint64_t>(age) & age_mask) << age_shift;
+}
+
+constexpr inline HashEntry unpack_entry(uint64_t data)
+{
+    return HashEntry {
+        unpack_move(static_cast<uint32_t>((data >> move_shift) & move_mask)),
+        static_cast<Value>(static_cast<int16_t>((data >> value_shift) & value_mask)),
+        static_cast<int>((data >> flag_shift) & flag_mask),
+        static_cast<int>(static_cast<int8_t>((data >> depth_shift) & depth_mask)),
+    };
+}
+
+constexpr inline uint8_t unpack_age(uint64_t data)
+{
+    return static_cast<uint8_t>((data >> age_shift) & age_mask);
+}
 
 
 constexpr inline Value value_from(Value v, int plies) {
@@ -119,34 +187,35 @@ public:
             return;
         auto index = poskey % buckets;
         auto & entry = hash_table[index];
+        const auto previous_data = entry.data;
 
-        if (entry.occupied
-            && entry.age == current_age
-            && entry.entry.depth > depth
+        if (previous_data != 0
+            && unpack_age(previous_data) == current_age
+            && unpack_entry(previous_data).depth > depth
             && flag != ExactBound) {
             return;
         }
 
-        if (!entry.occupied)
+        if (previous_data == 0)
             new_write++;
         else
             over_write++;
 
-        entry.key = poskey;
-        entry.entry = HashEntry{move, value, flag, depth};
-        entry.age = current_age;
-        entry.occupied = true;
+        const auto data = pack_entry(move, value, flag, depth, current_age);
+        entry.data = data;
+        entry.key = poskey ^ data;
     }
 
     std::optional<HashEntry> probe(uint64_t poskey) {
         auto index = poskey % buckets;
         auto & entry = hash_table[index];
+        const auto data = entry.data;
 
-        if (!entry.occupied || entry.key != poskey) {
+        if (data == 0 || (entry.key ^ data) != poskey) {
             return std::nullopt;
         }
 
-        auto he = entry.entry;
+        auto he = unpack_entry(data);
         if (he.flag == NoneBound)
             return std::nullopt;
         if (he.move == enyo::Move::no_move && he.flag != ExactBound)
@@ -256,7 +325,7 @@ private:
     }
 
     static size_t bucket_count_for(int megabytes) {
-        return byte_count_for(megabytes) / sizeof(SMPentry);
+        return byte_count_for(megabytes) / sizeof(LegacySMPentryLayout);
     }
 
     static void release_table(SMPentry * table) {
@@ -272,8 +341,7 @@ private:
     }
 
     static TableAllocation allocate_table(int megabytes) {
-        const auto bytes = byte_count_for(megabytes);
-        const auto requested_buckets = bytes / sizeof(SMPentry);
+        const auto requested_buckets = bucket_count_for(megabytes);
         if (requested_buckets == 0)
             return {};
 
