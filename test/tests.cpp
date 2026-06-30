@@ -253,6 +253,42 @@ TEST(check, see_rook_battery_xray) {
     constexpr auto score = piece_value(pawn) - piece_value(rook) + piece_value(rook) - piece_value(rook);
     ASSERT_EQ(score, see<white>(b, move, 0));
 }
+
+template <Color Us>
+void expect_see_ge_matches_exact(std::string_view fen)
+{
+    Board b(fen);
+    Movelist moves;
+    generate_legal_moves<Us>(b, moves);
+    constexpr std::array thresholds = {
+        -1000, -900, -500, -330, -320, -100, -1, 0,
+        1, 100, 320, 330, 500, 900, 1000
+    };
+
+    for (const auto move : moves) {
+        if (!move.dst_piece())
+            continue;
+        for (const int threshold : thresholds) {
+            EXPECT_EQ(see<Us>(b, move) >= threshold, see_ge<Us>(b, move, threshold))
+                << "move=" << fmt::format("{}", move) << " threshold=" << threshold;
+        }
+    }
+}
+
+TEST(check, see_ge_matches_exact) {
+    expect_see_ge_matches_exact<white>(
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+    expect_see_ge_matches_exact<white>(
+        "8/2q2k2/4rb2/4pR2/5P2/3N4/Q7/4K3 w - - 0 1");
+    expect_see_ge_matches_exact<white>(
+        "2K5/8/8/8/3pRrRr/8/8/2k5 w - - 0 1");
+    expect_see_ge_matches_exact<black>(
+        "2k5/8/8/3PrRrR/8/8/8/2K5 b - - 0 1");
+    expect_see_ge_matches_exact<white>(
+        "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
+    expect_see_ge_matches_exact<white>(
+        "4k2r/6P1/8/8/8/8/8/4K3 w - - 0 1");
+}
 TEST(hash, recompute_matches_initial_position) {
     Board b{"startpos"};
     EXPECT_EQ(b.hash, zobrist::generate_hash(b));
