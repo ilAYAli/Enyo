@@ -1073,6 +1073,39 @@ TEST(search, repetition_detects_claimable_third_occurrence) {
     EXPECT_FALSE(is_repetition(b, 2));
 }
 
+TEST(search, repetition_parity_scan_matches_full_history_scan) {
+    const auto reference = [](const Board & board, int draw) {
+        if (board.half_moves < 2)
+            return false;
+
+        const int begin = board.histply - board.half_moves;
+        int matches = 0;
+        for (int index = begin; index < board.histply; ++index)
+            matches += board.history[index].hash == board.hash;
+        return matches > draw;
+    };
+
+    Board b {"startpos"};
+    const auto expect_matches_reference = [&] {
+        for (int draw = 0; draw <= 6; ++draw)
+            EXPECT_EQ(is_repetition(b, draw), reference(b, draw));
+    };
+
+    for (int cycle = 0; cycle < 8; ++cycle) {
+        apply_move<white>(b, resolve_move<white>(b, knight, g1, f3));
+        expect_matches_reference();
+
+        apply_move<black>(b, resolve_move<black>(b, knight, g8, f6));
+        expect_matches_reference();
+
+        apply_move<white>(b, resolve_move<white>(b, knight, f3, g1));
+        expect_matches_reference();
+
+        apply_move<black>(b, resolve_move<black>(b, knight, f6, g8));
+        expect_matches_reference();
+    }
+}
+
 TEST(search, qsearch_pv_does_not_copy_stale_tail) {
     Board b{"startpos"};
 

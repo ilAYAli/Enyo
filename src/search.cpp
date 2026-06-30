@@ -148,17 +148,14 @@ bool is_repetition(const Board & b, int draw)
     if (b.half_moves < 2)
         return false;
 
-    const auto end = b.histply;
-    const auto begin = end - b.half_moves;
-    return static_cast<std::size_t>(
-        std::ranges::count_if(
-            std::begin(b.history) + begin,
-            std::begin(b.history) + end,
-            [&](auto const & entry) {
-                return entry.hash == b.hash;
-            }
-        )
-    ) > static_cast<size_t>(draw);
+    const int begin = b.histply - b.half_moves;
+    int matches = 0;
+    for (int index = b.histply - 1; index >= begin; index -= 2) {
+        if (b.history[index].hash == b.hash
+            && static_cast<size_t>(++matches) > static_cast<size_t>(draw))
+            return true;
+    }
+    return false;
 }
 
 bool is_fifty_move_draw(const Board & b)
