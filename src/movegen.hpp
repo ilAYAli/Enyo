@@ -1059,7 +1059,7 @@ inline void revert_null_move(Board & b)
 
 
 //----[ pawn moves ]-----------------------------------------------------------
-template <Color Us>
+template <Color Us, bool TacticalOnly = false>
 bitboard_t generate_pawn_moves(Board & b, Movelist & moves)
 {
     constexpr auto Them = ~Us;
@@ -1078,7 +1078,7 @@ bitboard_t generate_pawn_moves(Board & b, Movelist & moves)
     constexpr bool debug_promo = false;
 
     bitboard_t quiet_moves = 0;
-    {
+    if constexpr (!TacticalOnly) {
         constexpr bitboard_t double_step_rank = (Us == white ? rank_3 : rank_6);
 
         bitboard_t b1 = shift<Up>(back_pawns) & empty_squares;
@@ -1213,7 +1213,7 @@ bitboard_t generate_pawn_moves(Board & b, Movelist & moves)
 // Fills a caller-owned list. The by-value overload below copies ~1 KB per
 // call (unelidable through copy assignment at the qsearch call site); the
 // search hot path uses this variant instead.
-template <Color Us, bool UpdateZobrist = true, bool UpdateNNUE = true>
+template <Color Us, bool UpdateZobrist = true, bool UpdateNNUE = true, bool TacticalOnly = false>
 void generate_legal_moves(Board & b, Movelist & legal_moves)
 {
     constexpr Color Them = ~Us;
@@ -1224,11 +1224,12 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
 
     square_t const king_sq = lsb(b.pt_bb[Us][king]);
     const bool king_in_check = b.all_attacks_bb[Them] & (1ULL << king_sq);
+    const bitboard_t enemies = b.color_bb[Them];
     legal_moves.clear();
 
     { // pawn:
         Movelist moves;
-        generate_pawn_moves<Us>(b, moves);
+        generate_pawn_moves<Us, TacticalOnly>(b, moves);
 
         if (!king_in_check) {
             for (auto mv : moves) {
@@ -1276,6 +1277,8 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
                 continue; // can't move in pin direction
             }
             bitboard_t dst_mask = knight_moves<Us>(b, src_sq);
+            if constexpr (TacticalOnly)
+                dst_mask &= enemies;
             while (dst_mask) {
                 const auto dst_sq = pop_lsb(dst_mask);
                 const auto dst_piece = get_piece_type<~Us>(b, dst_sq);
@@ -1300,6 +1303,8 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
                 square_t const src_sq = pop_lsb(src_mask);
                 bitboard_t const src_sq_mask = 1ULL << src_sq;
                 bitboard_t mm = bishop_moves<Us>(b, src_sq);
+                if constexpr (TacticalOnly)
+                    mm &= enemies;
                 if (!(b.blockers_bb[Us] & src_sq_mask)) { // not blocker:
                     while (mm) {
                         square_t dst_sq = pop_lsb(mm);
@@ -1321,6 +1326,8 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
                                 blocker_move_mask |= bb & ~src_sq_mask;
                         }
                     }
+                    if constexpr (TacticalOnly)
+                        blocker_move_mask &= enemies;
                     while (blocker_move_mask) {
                         square_t dst_sq = pop_lsb(blocker_move_mask);
                         const auto dst_piece = get_piece_type<~Us>(b, dst_sq);
@@ -1334,6 +1341,8 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
             while (src_mask) {
                 square_t const src_sq = pop_lsb(src_mask);
                 bitboard_t mm = bishop_moves<Us>(b, src_sq);
+                if constexpr (TacticalOnly)
+                    mm &= enemies;
                 while (mm) {
                     const auto dst_sq = pop_lsb(mm);
                     const auto dst_piece = get_piece_type<~Us>(b, dst_sq);
@@ -1355,6 +1364,8 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
                 square_t const src_sq = pop_lsb(src_mask);
                 bitboard_t const src_sq_mask = 1ULL << src_sq;
                 bitboard_t mm = rook_moves<Us>(b, src_sq);
+                if constexpr (TacticalOnly)
+                    mm &= enemies;
 
                 if (!(b.blockers_bb[Us] & src_sq_mask)) {
                     while (mm) {
@@ -1378,6 +1389,8 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
                             }
                         }
                     }
+                    if constexpr (TacticalOnly)
+                        blocker_move_mask &= enemies;
                     while (blocker_move_mask) {
                         square_t dst_sq = pop_lsb(blocker_move_mask);
                         const auto dst_piece = get_piece_type<~Us>(b, dst_sq);
@@ -1391,6 +1404,8 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
             while (src_mask) {
                 square_t const src_sq = pop_lsb(src_mask);
                 bitboard_t mm = rook_moves<Us>(b, src_sq);
+                if constexpr (TacticalOnly)
+                    mm &= enemies;
                 while (mm) {
                     const auto dst_sq = pop_lsb(mm);
                     const auto dst_piece = get_piece_type<~Us>(b, dst_sq);
@@ -1413,6 +1428,8 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
                 square_t const src_sq = pop_lsb(src_mask);
                 bitboard_t const src_sq_mask = 1ULL << src_sq;
                 bitboard_t mm = queen_moves<Us>(b, src_sq);
+                if constexpr (TacticalOnly)
+                    mm &= enemies;
 
                 // blocker can't move if king is in check:
                 if (!(b.blockers_bb[Us] & src_sq_mask)) {
@@ -1436,6 +1453,8 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
                                 blocker_move_mask |= bb & ~src_sq_mask;
                         }
                     }
+                    if constexpr (TacticalOnly)
+                        blocker_move_mask &= enemies;
                     while (blocker_move_mask) {
                         square_t dst_sq = pop_lsb(blocker_move_mask);
                         const auto dst_piece = get_piece_type<~Us>(b, dst_sq);
@@ -1449,6 +1468,8 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
             while (src_mask) {
                 square_t const src_sq = pop_lsb(src_mask);
                 bitboard_t mm = queen_moves<Us>(b, src_sq);
+                if constexpr (TacticalOnly)
+                    mm &= enemies;
                 while (mm) {
                     const auto dst_sq = pop_lsb(mm);
                     const auto dst_piece = get_piece_type<~Us>(b, dst_sq);
@@ -1474,6 +1495,8 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
         const bool can_castle_queenside = !king_in_check && !(b.all_attacks_bb[Them] & queenside_castle_mask);
 
         bitboard_t king_mask = king_moves<Us, true>(b, king_sq);
+        if constexpr (TacticalOnly)
+            king_mask &= enemies;
         // validate castling:
         while (king_mask) {
             const auto dst_sq = pop_lsb(king_mask);
@@ -1506,6 +1529,12 @@ void generate_legal_moves(Board & b, Movelist & legal_moves)
         if (!b.pt_bb[white][king]) BREAKPOINT("missing white king");
         if (!b.pt_bb[black][king]) BREAKPOINT("missing black king");
     }
+}
+
+template <Color Us, bool UpdateZobrist = true, bool UpdateNNUE = true>
+void generate_legal_tactical_moves(Board & b, Movelist & legal_moves)
+{
+    generate_legal_moves<Us, UpdateZobrist, UpdateNNUE, true>(b, legal_moves);
 }
 
 template <Color Us, bool UpdateZobrist = true, bool UpdateNNUE = true>

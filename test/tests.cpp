@@ -289,6 +289,44 @@ TEST(check, see_ge_matches_exact) {
     expect_see_ge_matches_exact<white>(
         "4k2r/6P1/8/8/8/8/8/4K3 w - - 0 1");
 }
+
+template <Color Us>
+void expect_tactical_moves_match_filtered_legal_moves(std::string_view fen)
+{
+    Board all_board(fen);
+    Board tactical_board(fen);
+    Movelist all_moves;
+    Movelist tactical_moves;
+    Movelist expected;
+    generate_legal_moves<Us>(all_board, all_moves);
+    generate_legal_tactical_moves<Us>(tactical_board, tactical_moves);
+
+    for (const auto move : all_moves) {
+        if (move.dst_piece() || (move.flags() & Move::Flags::promote))
+            expected.emplace(move);
+    }
+
+    ASSERT_EQ(expected.size(), tactical_moves.size()) << fen;
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(expected[i], tactical_moves[i])
+            << "fen=" << fen << " index=" << i;
+    }
+}
+
+TEST(movegen, tactical_moves_match_filtered_legal_moves) {
+    expect_tactical_moves_match_filtered_legal_moves<white>(
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+    expect_tactical_moves_match_filtered_legal_moves<black>(
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R b KQkq - 0 1");
+    expect_tactical_moves_match_filtered_legal_moves<white>(
+        "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
+    expect_tactical_moves_match_filtered_legal_moves<white>(
+        "4k2r/6P1/8/8/8/8/8/4K3 w - - 0 1");
+    expect_tactical_moves_match_filtered_legal_moves<white>(
+        "4r1k1/8/8/8/8/8/4R3/4K3 w - - 0 1");
+    expect_tactical_moves_match_filtered_legal_moves<white>(
+        "6k1/8/8/8/8/8/4r3/4K3 w - - 0 1");
+}
 TEST(hash, recompute_matches_initial_position) {
     Board b{"startpos"};
     EXPECT_EQ(b.hash, zobrist::generate_hash(b));

@@ -408,7 +408,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         if (best_value > alpha)
             alpha = best_value;
 
-        generate_legal_moves<Us>(b, lm);
+        generate_legal_tactical_moves<Us>(b, lm);
     }
 
     PrioritizedMoves mp;
@@ -748,7 +748,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             && ss->eval + probcut_margin >= beta
             && std::abs(beta) < Constexpr::mate_value - MAX_PLY) {
             Movelist probcut_lm;
-            generate_legal_moves<Us>(b, probcut_lm);
+            generate_legal_tactical_moves<Us>(b, probcut_lm);
             PrioritizedMoves probcut_mp;
             prioritize_moves<Us, QSEARCH>(
                 probcut_mp, worker, probcut_lm, tt_move, depth);
