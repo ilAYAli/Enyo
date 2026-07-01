@@ -739,9 +739,11 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             revert_null_move<Us>(b);
 
             if (nullscore >= beta) {
+                // Unproven mate scores from the reduced null search are
+                // clamped to beta; otherwise fail-soft.
                 if (nullscore >= (Constexpr::mate_value - MAX_PLY))
                     nullscore = beta;
-                return beta;
+                return nullscore;
             }
         }
     }
@@ -1013,7 +1015,9 @@ moves_loop:
                             depth
                         );
                     }
-                    return beta;
+                    // Fail-soft: return the real score, not beta. The
+                    // parent gets the same bound the TT just stored.
+                    return best_value;
                 }
             }
         }
@@ -1037,7 +1041,11 @@ moves_loop:
         );
     }
 
-    return alpha;
+    // Fail-soft: on fail-low this returns the sharpest upper bound the
+    // search proved (== what the TT stores) instead of clamping to alpha,
+    // so parents and the aspiration loop re-search less. qsearch already
+    // returns best_value; negamax was the odd one out.
+    return best_value;
 }
 
 
