@@ -87,9 +87,7 @@ void refresh_network_from_table(NNUE::Net & net,
     auto & state = net.network_refresh_table[
         network_refresh_table_index(king_square, side)];
 
-    Network::Delta delta;
-    delta.r = 0;
-    delta.a = 0;
+    Network::Delta delta{};
     for (int pc = 0; pc < Network::N_PIECE_TYPES; ++pc) {
         const auto pt = static_cast<enyo::PieceType>((pc >> 1) + 1);
         const auto color = static_cast<enyo::Color>(pc & 1);
@@ -828,8 +826,7 @@ void Net::refresh_network(enyo::Board &board) {
         return;
 
     Network::Accumulator & accumulator = network_accumulator_stack[currentAccumulator];
-    // Both value rows are overwritten below; only stale metadata needs clearing.
-    std::memset(&accumulator, 0, offsetof(Network::Accumulator, values));
+    std::memset(&accumulator, 0, sizeof(accumulator));
     refresh_network_from_table(*this, accumulator, board, enyo::white);
     refresh_network_from_table(*this, accumulator, board, enyo::black);
 }

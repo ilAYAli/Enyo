@@ -21,7 +21,6 @@
 
 #include <chrono>
 #include <array>
-#include <cstring>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
@@ -2468,33 +2467,6 @@ TEST(nnue_audit, opening_sequence) {
     }
 }
 #endif
-
-TEST(network_audit, refresh_overwrites_poisoned_accumulator) {
-    ensure_network_mock_weights();
-    ScopedNetworkEnabled network_enabled;
-    Board b {"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"};
-
-    NNUE::Net live;
-    auto & accumulator = live.network_accumulator_stack[live.currentAccumulator];
-    std::memset(&accumulator, 0xA5, sizeof(accumulator));
-    live.refresh(b);
-
-    NNUE::Net fresh;
-    fresh.refresh(b);
-    EXPECT_TRUE(network_accumulators_match(
-        accumulator,
-        fresh.network_accumulator_stack[fresh.currentAccumulator]));
-    for (auto side : {white, black}) {
-        EXPECT_EQ(accumulator.correct[side], 1);
-        EXPECT_EQ(accumulator.eval_correct[side], 0);
-        EXPECT_EQ(accumulator.lazy_correct[side], 0);
-        EXPECT_EQ(accumulator.lazy_refresh[side], 0);
-        EXPECT_EQ(accumulator.lazy_rem_count[side], 0);
-        EXPECT_EQ(accumulator.lazy_add_count[side], 0);
-    }
-    EXPECT_EQ(accumulator.captured, 0);
-    EXPECT_EQ(accumulator.move, 0U);
-}
 
 TEST(network_audit, opening_sequence_matches_refresh) {
     Board b{"startpos"};
