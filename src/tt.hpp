@@ -183,8 +183,6 @@ public:
         if (flag == NoneBound)
             return;
 
-        if (move == enyo::Move::no_move && flag != ExactBound)
-            return;
         auto index = poskey % buckets;
         auto & entry = hash_table[index];
         const auto previous_data = entry.data;
@@ -194,6 +192,15 @@ public:
             && unpack_entry(previous_data).depth > depth
             && flag != ExactBound) {
             return;
+        }
+
+        // A move-less bound (fail-low, stand-pat, TB probe) replacing an
+        // entry for the same position would erase its move-ordering hint;
+        // keep the previous move alongside the new bound.
+        if (move == enyo::Move::no_move
+            && previous_data != 0
+            && (entry.key ^ previous_data) == poskey) {
+            move = unpack_entry(previous_data).move;
         }
 
         if (previous_data == 0)
@@ -217,8 +224,6 @@ public:
 
         auto he = unpack_entry(data);
         if (he.flag == NoneBound)
-            return std::nullopt;
-        if (he.move == enyo::Move::no_move && he.flag != ExactBound)
             return std::nullopt;
         return he;
     }

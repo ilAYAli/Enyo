@@ -384,21 +384,11 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     } else {
         best_value = ss->eval = evaluate_runtime<Us>(b, &si.nnue);
         if (best_value >= beta) {
-            if (cfgmgr.use_tt && !ss->tthit) {
-                tt::ttable.store(
-                    b.hash,
-                    Move{},
-                    tt::value_to(best_value, ss->ply),
-                    // Stand-pat >= beta means the static eval already
-                    // established a lower bound on the true value (we
-                    // just proved "score >= best_value >= beta"). Pre-
-                    // viously stored as UpperBound; that's the wrong
-                    // polarity and would only have been usable in
-                    // probes expecting an upper-bound cutoff.
-                    tt::type::LowerBound,
-                    depth
-                );
-            }
+            // No TT store here. A stand-pat cutoff is a static eval, not a
+            // search result; now that the TT accepts move-less bound entries
+            // storing it would go live, and doing so (even at depth 0)
+            // regressed the hypersion blunder-replay gate. Re-adding this is
+            // its own SPRT candidate, not a freebie.
             return best_value;
         }
 
@@ -591,7 +581,16 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
                     if (tb_flag == tt::type::ExactBound
                     || (tb_flag == tt::type::LowerBound && tb_value >= beta)
                     || (tb_flag == tt::type::UpperBound && tb_value <= alpha)) {
-                        if (cfgmgr.use_tt) {
+                        // Only store exact (draw) results. Win/Loss bounds at
+                        // the inflated depth would win every depth-preferred
+                        // replacement fight in their single-slot bucket, so
+                        // the real search result (with its tt_move) could
+                        // never be stored for that position again this age —
+                        // move ordering collapses in the TB region. Verified
+                        // by uci_root.wdl_only_lost_tablebase_root_keeps_
+                        // cutoffs_fast: ~4x node blowup with bound stores on.
+                        // Re-probing the WDL table on revisit is cheap.
+                        if (cfgmgr.use_tt && tb_flag == tt::type::ExactBound) {
                             tt::ttable.store(
                                 b.hash,
                                 Move{},
@@ -1008,8 +1007,11 @@ moves_loop:
     }
 
 
+    // Fail-low nodes leave best_move empty; best_value is still a genuine
+    // upper bound over all legal moves (unlike qsearch's captures-only
+    // subset), so store it. The TT keeps any previous move hint for the
+    // same position when the stored move is empty.
     if (!thread::pool.stop.load(std::memory_order_relaxed)
-        && best_move
         && cfgmgr.use_tt) {
         tt::ttable.store(
             b.hash,
