@@ -727,9 +727,15 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             && std::abs(beta) < Constexpr::mate_value - MAX_PLY) {
 
             int R = 5 + std::min(4, depth / 5) + std::min(Value(3), (ss->eval - beta) / 214);
+            // Publish the null move *before* recursing: the child's
+            // `(ss-1)->move != Move{}` guard above, and its countermove/
+            // CMH lookups, read this field. Setting it after the search
+            // left them a stale move from a previous visit of this stack
+            // frame, so consecutive null moves were silently allowed and
+            // the child keyed continuation history off a bogus move.
+            ss->move = Move{};
             apply_null_move<Us>(b);
             auto nullscore = -negamax<Them, NodeType::NonPV>(depth -R, worker, ss + 1, -beta, -beta + 1);
-            ss->move = Move{};
             revert_null_move<Us>(b);
 
             if (nullscore >= beta) {
