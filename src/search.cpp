@@ -400,9 +400,9 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
 
     PrioritizedMoves mp;
     if (ss->in_check)
-        prioritize_moves<Us, ABSEARCH>(mp, worker, lm, tt_move, depth);
+        prioritize_moves<Us, ABSEARCH>(mp, worker, lm, tt_move);
     else
-        prioritize_moves<Us, QSEARCH>(mp, worker, lm, tt_move, depth);
+        prioritize_moves<Us, QSEARCH>(mp, worker, lm, tt_move);
     Move best_move {};
     while (const auto move = mp.next()) {
         if ((si.nodes & 1023U) == 0 && worker.time_expired())
@@ -760,7 +760,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             generate_legal_tactical_moves<Us>(b, probcut_lm);
             PrioritizedMoves probcut_mp;
             prioritize_moves<Us, QSEARCH>(
-                probcut_mp, worker, probcut_lm, tt_move, depth);
+                probcut_mp, worker, probcut_lm, tt_move);
 
             while (const auto move = probcut_mp.next()) {
                 if ((si.nodes & 1023U) == 0 && worker.time_expired())
@@ -820,7 +820,7 @@ moves_loop:
         ? &worker.cmh[Us][static_cast<size_t>(prev_move.src_piece())][prev_move.dst_sq()]
         : nullptr;
     PrioritizedMoves mp;
-    prioritize_moves<Us, ABSEARCH>(mp, worker, lm, tt_move, depth, ss->killers, cm, cmh_slice);
+    prioritize_moves<Us, ABSEARCH>(mp, worker, lm, tt_move, ss->killers, cm, cmh_slice);
 #else
     auto mp = MovePicker2<Us>(worker, lm, tt_move);
 #endif

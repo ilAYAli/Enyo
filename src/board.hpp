@@ -46,7 +46,6 @@ public:
     bitboard_t pinners_bb[color_nb] {} ;
     bitboard_t attacks_bb[color_nb][square_nb] {} ;
     bitboard_t all_attacks_bb[color_nb]{} ;
-    Move pv_table[MAX_PLY] {};
     Undo history[MAX_HISTORY] {};
     Color side { white };
     int histply {};

@@ -139,7 +139,6 @@ static inline void prioritize_moves(
     Worker& worker,
     const Movelist& moves,
     Move tt_move = 0,
-    int ply = MAX_PLY,
     const Move * killers = nullptr,
     Move countermove = Move{},
     const typename Worker::CmhPieceTable * cmh_slice = nullptr)
@@ -198,10 +197,6 @@ static inline void prioritize_moves(
                 score = worker.history[Us][move.src_sq()][move.dst_sq()];
                 if (cmh_slice) {
                     score += (*cmh_slice)[static_cast<size_t>(move.src_piece())][move.dst_sq()];
-                }
-                auto range = board.pv_table | std::views::take(ply);
-                if (auto it = std::ranges::find(range, move); it != range.end()) {
-                    score += PV_SCORE - static_cast<int>(std::distance(range.begin(), it));
                 }
             }
         }

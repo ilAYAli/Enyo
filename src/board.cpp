@@ -29,7 +29,6 @@ void Board::swap_data(Board& other) {
     std::swap(pinners_bb, other.pinners_bb);
     std::swap(attacks_bb, other.attacks_bb);
     std::swap(all_attacks_bb, other.all_attacks_bb);
-    std::swap(pv_table, other.pv_table);
     std::swap(history, other.history);
 }
 
@@ -52,7 +51,6 @@ void Board::copy_data(const Board& other) {
     std::memcpy(pinners_bb, other.pinners_bb, sizeof(pinners_bb));
     std::memcpy(attacks_bb, other.attacks_bb, sizeof(attacks_bb));
     std::memcpy(all_attacks_bb, other.all_attacks_bb, sizeof(all_attacks_bb));
-    std::memcpy(pv_table, other.pv_table, sizeof(pv_table));
     std::memcpy(history, other.history, sizeof(history));
 }
 
@@ -68,7 +66,6 @@ void Board::clear_data() {
     std::memset(pinners_bb, 0, sizeof(pinners_bb));
     std::memset(attacks_bb, 0, sizeof(attacks_bb));
     std::memset(all_attacks_bb, 0, sizeof(all_attacks_bb));
-    std::fill(std::begin(pv_table), std::end(pv_table), enyo::Move{});
     std::fill(std::begin(history), std::end(history), enyo::Undo{});
     side = {};
     gamestate = {};
