@@ -173,7 +173,14 @@ static inline void prioritize_moves(
                 if (!see_ge<Us>(board, move))
                     continue;
             }
-            score = CAPTURE_SCORE + mvvlva(move);
+            // Losing captures (SEE < 0) go below killers, counters and
+            // quiets: searching QxP-defended before good quiet moves
+            // wastes nodes at every ABSEARCH node. MVV-LVA still orders
+            // within each of the two capture bands.
+            if (ST == ABSEARCH && !see_ge<Us>(board, move))
+                score = NEGATIVE_SCORE + mvvlva(move);
+            else
+                score = CAPTURE_SCORE + mvvlva(move);
         } else if (move.flags() & Move::Flags::promote) {
             score = (move.promo_piece() == queen) ? PROMOTE_SCORE : DRAW_SCORE;
         } else if constexpr (ST == QSEARCH) {
