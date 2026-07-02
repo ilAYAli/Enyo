@@ -883,12 +883,8 @@ moves_loop:
     const Worker::CmhPieceTable * cmh_slice = prev_move
         ? &worker.cmh[Us][static_cast<size_t>(prev_move.src_piece())][prev_move.dst_sq()]
         : nullptr;
-    const Move followup_move = (ss-2)->move;
-    const Worker::CmhPieceTable * fmh_slice = followup_move
-        ? &worker.fmh[Us][static_cast<size_t>(followup_move.src_piece())][followup_move.dst_sq()]
-        : nullptr;
     PrioritizedMoves mp;
-    prioritize_moves<Us, ABSEARCH>(mp, worker, lm, tt_move, ss->killers, cm, cmh_slice, fmh_slice);
+    prioritize_moves<Us, ABSEARCH>(mp, worker, lm, tt_move, ss->killers, cm, cmh_slice);
 #else
     auto mp = MovePicker2<Us>(worker, lm, tt_move);
 #endif
@@ -1176,15 +1172,6 @@ moves_loop:
                                 bonus);
                         }
 
-                        Worker::CmhPieceTable * fmh_update = followup_move
-                            ? &worker.fmh[Us][static_cast<size_t>(followup_move.src_piece())][followup_move.dst_sq()]
-                            : nullptr;
-                        if (fmh_update) {
-                            update_history_score(
-                                (*fmh_update)[static_cast<size_t>(move.src_piece())][move.dst_sq()],
-                                bonus);
-                        }
-
                         for (int i = 0; i < ss->move_count - 1; ++i) {
                             const auto prev = mp[static_cast<size_t>(i)];
                             if (prev.dst_piece() == no_piece_type && prev.flags() != Move::Flags::promote) {
@@ -1192,11 +1179,6 @@ moves_loop:
                                 if (cmh_update) {
                                     update_history_score(
                                         (*cmh_update)[static_cast<size_t>(prev.src_piece())][prev.dst_sq()],
-                                        -bonus / 2);
-                                }
-                                if (fmh_update) {
-                                    update_history_score(
-                                        (*fmh_update)[static_cast<size_t>(prev.src_piece())][prev.dst_sq()],
                                         -bonus / 2);
                                 }
                             }

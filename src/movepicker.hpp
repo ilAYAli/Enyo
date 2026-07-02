@@ -141,8 +141,7 @@ static inline void prioritize_moves(
     Move tt_move = 0,
     const Move * killers = nullptr,
     Move countermove = Move{},
-    const typename Worker::CmhPieceTable * cmh_slice = nullptr,
-    const typename Worker::CmhPieceTable * fmh_slice = nullptr)
+    const typename Worker::CmhPieceTable * cmh_slice = nullptr)
 {
     auto & board = worker.si.board;
     out.clear();
@@ -205,9 +204,6 @@ static inline void prioritize_moves(
                 score = worker.history[Us][move.src_sq()][move.dst_sq()];
                 if (cmh_slice) {
                     score += (*cmh_slice)[static_cast<size_t>(move.src_piece())][move.dst_sq()];
-                }
-                if (fmh_slice) {
-                    score += (*fmh_slice)[static_cast<size_t>(move.src_piece())][move.dst_sq()];
                 }
             }
         }
