@@ -1069,6 +1069,9 @@ moves_loop:
         ss->doubleExtensions = (ss - 1)->doubleExtensions + (extension == 2);
         int new_depth = depth -1 + extension;
 
+        // Node-based TM: measure the subtree each root move consumes.
+        [[maybe_unused]] const uint64_t nodes_before_move = si.nodes;
+
         // make move
         apply_move<Us, true, true>(b, move, &worker.si.nnue);
         bool child_pv_valid = false;
@@ -1156,6 +1159,9 @@ moves_loop:
 
         // revert move
         revert_move<Us, true, true>(b, &worker.si.nnue);
+        if constexpr (NT == NodeType::Root)
+            worker.root_effort[move.src_sq()][move.dst_sq()] +=
+                si.nodes - nodes_before_move;
         if (thread::pool.stop.load(std::memory_order_relaxed))
             return Value::draw;
 
@@ -1708,6 +1714,10 @@ void search_position(Worker & worker)
     Move last_legal_bestmove {};
     bool score_info_emitted = false;
 
+    // Node-based TM state is per-`go`.
+    worker.root_effort = {};
+    si.soft_scale_pct = 100;
+
     // Root search publishes worker.bestmove while the current iteration is
     // still in progress. If time cuts an iteration short, report the last
     // completed iteration's move so UCI bestmove matches the last completed PV.
@@ -1861,6 +1871,21 @@ void search_position(Worker & worker)
                 && !either_mate
                 && std::abs(value - prev_iter_value) >= score_swing_cp;
             prev_iter_value = value;
+            // Node-based TM: when the best root move has absorbed nearly
+            // all search effort, the alternatives have been refuted cheaply
+            // and repeatedly — the decision is settled, so shrink the soft
+            // budget and bank the time. Recomputed every iteration, so a
+            // late challenger restores the full budget.
+            if (worker.id == 0
+                && depth >= 8
+                && is_active_root_move(worker.bestmove)) {
+                const uint64_t bm_effort =
+                    worker.root_effort[worker.bestmove.src_sq()][worker.bestmove.dst_sq()];
+                const uint64_t pct = 100 * bm_effort / std::max<uint64_t>(si.nodes, 1);
+                si.soft_scale_pct = pct > 90 ? 60
+                                  : pct > 75 ? 80
+                                  : 100;
+            }
         } else {
             eventlog::log<eventlog::Log::error>(
                 "pvbm empty at depth {}. pv_str='{}' len[0]={} table[0][0]={} prev_bestmove={} score={} fen={}\n",

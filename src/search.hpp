@@ -51,9 +51,18 @@ struct SearchInfo {
 
     // Soft limit: checked only between root iterations. Once crossed, the
     // current iteration is the last one we'll start — we don't abort it.
+    // soft_scale_pct < 100 shrinks the budget (node-based TM: when one
+    // root move absorbs nearly all effort, the decision is settled and
+    // further iterations rarely change it).
     bool soft_time_expired() {
         using namespace std::chrono;
-        return (starttime != soft_stoptime) && high_resolution_clock::now() > soft_stoptime;
+        if (starttime == soft_stoptime)
+            return false;
+        auto deadline = soft_stoptime;
+        if (soft_scale_pct != 100
+            && soft_stoptime != high_resolution_clock::time_point::max())
+            deadline = starttime + (soft_stoptime - starttime) * soft_scale_pct / 100;
+        return high_resolution_clock::now() > deadline;
     }
 
     Board board{};
@@ -77,6 +86,7 @@ struct SearchInfo {
     uint64_t tbhits = 0; //
     uint64_t nodes {};
     uint64_t nodes_limit {};
+    int soft_scale_pct = 100;
 };
 
 
@@ -164,6 +174,9 @@ struct Worker {
     // Non-pawn sibling, keyed by hash ^ pawn_hash (piece placement minus
     // pawn structure); read at half the pawn table's weight.
     std::array<std::array<int16_t, corrhist_size>, color_nb> nonpawn_corrhist{};
+    // Node-based TM: nodes spent under each root move this `go`,
+    // indexed [src][dst].
+    std::array<std::array<uint64_t, square_nb>, square_nb> root_effort{};
     int id { };
 };
 
