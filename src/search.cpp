@@ -782,8 +782,22 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
                 if (thread::pool.stop.load(std::memory_order_relaxed))
                     return Value::draw;
 
-                if (probcut_value >= probcut_beta)
+                if (probcut_value >= probcut_beta) {
+                    // Remember the refuting capture so a revisit cuts on
+                    // the TT instead of re-running the verification
+                    // search. The verification ran at depth-4, so the
+                    // bound is good for depth-3.
+                    if (cfgmgr.use_tt) {
+                        tt::ttable.store(
+                            b.hash,
+                            move,
+                            tt::value_to(probcut_value, ss->ply),
+                            tt::type::LowerBound,
+                            depth - probcut_reduction + 1
+                        );
+                    }
                     return probcut_value;
+                }
             }
         }
     }
