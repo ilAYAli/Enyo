@@ -959,6 +959,22 @@ moves_loop:
             continue;
         }
 
+        // SEE pruning: at shallow depth, skip captures that lose more
+        // material than a depth-scaled bound. Move ordering already
+        // banishes SEE-losing captures to the bottom band; this skips
+        // their subtrees entirely instead of merely searching them last.
+        // (Quiets can't be SEE-pruned here: see_ge on a non-capture is
+        // `threshold <= 0` — it never evaluates the moved piece hanging.)
+        if (!pv_node
+            && !ss->in_check
+            && is_capture
+            && depth <= 5
+            && ss->move_count > 1
+            && best_value > -Constexpr::mate_value + MAX_PLY
+            && !see_ge<Us>(b, move, -100 * depth)) {
+            continue;
+        }
+
         // Singular extension: if the TT move's stored lower bound is well
         // above what every other move can reach (verified by a reduced
         // search of this same position with the TT move excluded), the
