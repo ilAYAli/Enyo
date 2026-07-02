@@ -89,6 +89,8 @@ if sys.argv[1] == "sprt":
 elif sys.argv[1] == "status":
     print((state / sys.argv[2] / "status.json").read_text())
 elif sys.argv[1] == "sh":
+    count = state / "move-count"
+    count.write_text(str(int(count.read_text() if count.exists() else "0") + 1))
     subprocess.run(["bash", "-c", sys.argv[2]], check=True)
 elif sys.argv[1] == "wait":
     pass
@@ -114,8 +116,7 @@ else:
     assert git(repo, "show", "-s", "--format=%s", rewritten[1]) == "perf: bad elo-30.0, llr-2.94"
     assert git(repo, "show", "-s", "--format=%s", rewritten[2]) == "perf: preserved"
     assert (forge_state / "count").read_text() == "1"
-    assert (engines / f"enyo_{commits[1][:7]}").exists()
-    assert not (engines / f"enyo_{rewritten[0][:7]}").exists()
+    assert (forge_state / "move-count").read_text() == "2"
     assert not (engines / f"enyo_{commits[2][:7]}").exists()
     assert not (engines / f"enyo_{commits[3][:7]}").exists()
     assert (engines / f"enyo_{rewritten[1][:7]}").exists()
