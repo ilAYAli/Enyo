@@ -161,7 +161,10 @@ def main():
         moved = sorted(params, key=lambda p: abs(p["theta"] - p["default"]) / p["c_end"],
                        reverse=True)[:3]
         drift = ", ".join(f"{p['name']}={p['theta']:.1f}" for p in moved)
-        print(f"[{k}/{cfg.iterations}] result={result:+.3f} ({games} games)  {drift}")
+        # flush: with stdout redirected to a log file Python block-buffers,
+        # and a SIGTERM discards the buffer — the log must stream.
+        print(f"[{k}/{cfg.iterations}] result={result:+.3f} ({games} games)  {drift}",
+              flush=True)
 
     print("\nfinal values:")
     for p in params:
