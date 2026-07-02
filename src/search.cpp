@@ -45,17 +45,12 @@ constexpr int corrhist_max = 8192; // 32 cp * grain
 template <Color Us>
 void update_correction_history(Worker & worker, const Board & b, int depth, int diff)
 {
+    if (!b.pawn_hash)
+        return;
+    int16_t & entry = worker.corrhist[Us][b.pawn_hash & (Worker::corrhist_size - 1)];
     const int weight = std::min(depth + 1, 16);
-    const auto nudge = [&](int16_t & entry) {
-        const int updated = (entry * (256 - weight) + diff * corrhist_grain * weight) / 256;
-        entry = static_cast<int16_t>(std::clamp(updated, -corrhist_max, corrhist_max));
-    };
-    // pawn_hash == 0 means no pawns; skip rather than share one entry.
-    if (b.pawn_hash)
-        nudge(worker.corrhist[Us][b.pawn_hash & (Worker::corrhist_size - 1)]);
-    // hash ^ pawn_hash removes the pawn psq terms from the full zobrist:
-    // a non-pawn placement key with no extra board bookkeeping.
-    nudge(worker.nonpawn_corrhist[Us][(b.hash ^ b.pawn_hash) & (Worker::corrhist_size - 1)]);
+    const int updated = (entry * (256 - weight) + diff * corrhist_grain * weight) / 256;
+    entry = static_cast<int16_t>(std::clamp(updated, -corrhist_max, corrhist_max));
 }
 
 // Returns a ply-aware draw score incorporating contempt. At even ply (engine's
@@ -432,24 +427,6 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         if ((si.nodes & 1023U) == 0 && worker.time_expired())
             return Value::draw;
 
-        // Delta pruning: even winning the captured piece outright plus a
-        // safety margin can't lift stand-pat over alpha, so the subtree
-        // can't matter. piece_value() is SEE-scale centipawns but the
-        // NNUE eval runs at ~2.2x cp (a clean extra queen evaluates to
-        // ~2000, startpos to ~+43), so scale piece values by 2 — mixing
-        // the raw scales prunes winning captures and cost -119.7 Elo
-        // (66d64ba). Promotions/ep (non-generic flags) are exempt: their
-        // material swing exceeds piece_value(dst). Mate windows are
-        // exempt: eval arithmetic is meaningless near mate bounds.
-        constexpr int delta_margin = 400;
-        if (!ss->in_check
-            && move.flags() == Move::Flags::generic
-            && std::abs(alpha) < Constexpr::mate_value - MAX_PLY
-            && static_cast<int>(ss->eval)
-               + 2 * piece_value(move.dst_piece())
-               + delta_margin <= alpha)
-            continue;
-
         // SEE pruning: a capture that loses material can't rescue a
         // position where stand-pat already failed to reach beta. Evasions
         // are exempt — when in check every legal move must be considered.
@@ -717,13 +694,10 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     ss->eval = evaluate_runtime<Us>(b, &si.nnue);
     // pawn_hash == 0 means no pawns: every pawnless node would share one
     // entry, turning the correction into a thrashing global eval offset.
-    {
-        int correction = worker.nonpawn_corrhist[Us]
-            [(b.hash ^ b.pawn_hash) & (Worker::corrhist_size - 1)] / 2;
-        if (b.pawn_hash)
-            correction += worker.corrhist[Us][b.pawn_hash & (Worker::corrhist_size - 1)];
+    if (b.pawn_hash) {
         ss->eval = static_cast<Value>(
-            static_cast<int>(ss->eval) + correction / corrhist_grain);
+            static_cast<int>(ss->eval)
+            + worker.corrhist[Us][b.pawn_hash & (Worker::corrhist_size - 1)] / corrhist_grain);
     }
     static_eval = ss->eval;
     if (ss->tthit && tt_value != Value::none) {
@@ -967,42 +941,6 @@ moves_loop:
             continue;
         }
 
-        // History pruning: at shallow depth, skip quiets the continuation
-        // histories actively hate. Complements LMP, which counts moves
-        // but ignores their quality.
-        if (!pv_node
-            && !ss->in_check
-            && is_quiet
-            && !protect_quiet_check
-            && depth <= 4
-            && ss->move_count > 1
-            && best_value > -Constexpr::mate_value + MAX_PLY
-            && (cmh_slice || fmh_slice)) {
-            int ch = 0;
-            if (cmh_slice)
-                ch += (*cmh_slice)[static_cast<size_t>(move.src_piece())][move.dst_sq()];
-            if (fmh_slice)
-                ch += (*fmh_slice)[static_cast<size_t>(move.src_piece())][move.dst_sq()];
-            if (ch < -4000 * depth)
-                continue;
-        }
-
-        // SEE pruning: at shallow depth, skip captures that lose more
-        // material than a depth-scaled bound. Move ordering already
-        // banishes SEE-losing captures to the bottom band; this skips
-        // their subtrees entirely instead of merely searching them last.
-        // (Quiets can't be SEE-pruned here: see_ge on a non-capture is
-        // `threshold <= 0` — it never evaluates the moved piece hanging.)
-        if (!pv_node
-            && !ss->in_check
-            && is_capture
-            && depth <= 5
-            && ss->move_count > 1
-            && best_value > -Constexpr::mate_value + MAX_PLY
-            && !see_ge<Us>(b, move, -100 * depth)) {
-            continue;
-        }
-
         // Singular extension: if the TT move's stored lower bound is well
         // above what every other move can reach (verified by a reduced
         // search of this same position with the TT move excluded), the
@@ -1068,9 +1006,6 @@ moves_loop:
         }
         ss->doubleExtensions = (ss - 1)->doubleExtensions + (extension == 2);
         int new_depth = depth -1 + extension;
-
-        // Node-based TM: measure the subtree each root move consumes.
-        [[maybe_unused]] const uint64_t nodes_before_move = si.nodes;
 
         // make move
         apply_move<Us, true, true>(b, move, &worker.si.nnue);
@@ -1159,9 +1094,6 @@ moves_loop:
 
         // revert move
         revert_move<Us, true, true>(b, &worker.si.nnue);
-        if constexpr (NT == NodeType::Root)
-            worker.root_effort[move.src_sq()][move.dst_sq()] +=
-                si.nodes - nodes_before_move;
         if (thread::pool.stop.load(std::memory_order_relaxed))
             return Value::draw;
 
@@ -1299,24 +1231,6 @@ moves_loop:
         }
     }
 
-
-    // A fail-low here means every reply fell short — the opponent's
-    // previous move earned that. Reward it so its own side orders it
-    // earlier; the mirror of the fail-high malus applied to prior quiets
-    // in the cutoff path above.
-    if (NT != NodeType::Root
-        && !best_move
-        && ss->excluded_move == Move{}
-        && !thread::pool.stop.load(std::memory_order_relaxed)) {
-        const auto prev = (ss - 1)->move;
-        if (prev
-            && prev.dst_piece() == no_piece_type
-            && prev.flags() != Move::Flags::promote) {
-            const int bonus = std::min(1600, depth * depth * 32);
-            update_history_score(
-                worker.history[Them][prev.src_sq()][prev.dst_sq()], bonus);
-        }
-    }
 
     // Fail-low nodes leave best_move empty; best_value is still a genuine
     // upper bound over all legal moves (unlike qsearch's captures-only
@@ -1714,10 +1628,6 @@ void search_position(Worker & worker)
     Move last_legal_bestmove {};
     bool score_info_emitted = false;
 
-    // Node-based TM state is per-`go`.
-    worker.root_effort = {};
-    si.soft_scale_pct = 100;
-
     // Root search publishes worker.bestmove while the current iteration is
     // still in progress. If time cuts an iteration short, report the last
     // completed iteration's move so UCI bestmove matches the last completed PV.
@@ -1871,21 +1781,6 @@ void search_position(Worker & worker)
                 && !either_mate
                 && std::abs(value - prev_iter_value) >= score_swing_cp;
             prev_iter_value = value;
-            // Node-based TM: when the best root move has absorbed nearly
-            // all search effort, the alternatives have been refuted cheaply
-            // and repeatedly — the decision is settled, so shrink the soft
-            // budget and bank the time. Recomputed every iteration, so a
-            // late challenger restores the full budget.
-            if (worker.id == 0
-                && depth >= 8
-                && is_active_root_move(worker.bestmove)) {
-                const uint64_t bm_effort =
-                    worker.root_effort[worker.bestmove.src_sq()][worker.bestmove.dst_sq()];
-                const uint64_t pct = 100 * bm_effort / std::max<uint64_t>(si.nodes, 1);
-                si.soft_scale_pct = pct > 90 ? 60
-                                  : pct > 75 ? 80
-                                  : 100;
-            }
         } else {
             eventlog::log<eventlog::Log::error>(
                 "pvbm empty at depth {}. pv_str='{}' len[0]={} table[0][0]={} prev_bestmove={} score={} fen={}\n",
