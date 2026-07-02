@@ -427,6 +427,12 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         if ((si.nodes & 1023U) == 0 && worker.time_expired())
             return Value::draw;
 
+        // SEE pruning: a capture that loses material can't rescue a
+        // position where stand-pat already failed to reach beta. Evasions
+        // are exempt — when in check every legal move must be considered.
+        if (!ss->in_check && !see_ge<Us>(b, move))
+            continue;
+
         si.nodes++;
 
         apply_move<Us, true, true>(b, move, &si.nnue);
