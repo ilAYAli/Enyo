@@ -972,11 +972,23 @@ moves_loop:
             if (worker.time_expired())
                 return Value::draw;
 
-            if (singular_value < singular_beta)
+            if (singular_value < singular_beta) {
                 extension = 1;
-            else if (singular_beta >= beta)
+                // Double extension: every alternative missed the window
+                // by a wide margin, so the TT move is not merely best but
+                // the only move. Extending +2 grows depth along the path;
+                // the per-path doubleExtensions cap bounds the growth on
+                // top of the global ply < 2 * si.depth cap.
+                if (!pv_node
+                    && singular_value < singular_beta - Value(30)
+                    && (ss - 1)->doubleExtensions <= 4) {
+                    extension = 2;
+                }
+            } else if (singular_beta >= beta) {
                 return singular_beta;
+            }
         }
+        ss->doubleExtensions = (ss - 1)->doubleExtensions + (extension == 2);
         int new_depth = depth -1 + extension;
 
         // make move
