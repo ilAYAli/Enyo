@@ -959,6 +959,26 @@ moves_loop:
             continue;
         }
 
+        // History pruning: at shallow depth, skip quiets the continuation
+        // histories actively hate. Complements LMP, which counts moves
+        // but ignores their quality.
+        if (!pv_node
+            && !ss->in_check
+            && is_quiet
+            && !protect_quiet_check
+            && depth <= 4
+            && ss->move_count > 1
+            && best_value > -Constexpr::mate_value + MAX_PLY
+            && (cmh_slice || fmh_slice)) {
+            int ch = 0;
+            if (cmh_slice)
+                ch += (*cmh_slice)[static_cast<size_t>(move.src_piece())][move.dst_sq()];
+            if (fmh_slice)
+                ch += (*fmh_slice)[static_cast<size_t>(move.src_piece())][move.dst_sq()];
+            if (ch < -4000 * depth)
+                continue;
+        }
+
         // SEE pruning: at shallow depth, skip captures that lose more
         // material than a depth-scaled bound. Move ordering already
         // banishes SEE-losing captures to the bottom band; this skips
