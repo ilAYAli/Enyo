@@ -45,12 +45,17 @@ constexpr int corrhist_max = 8192; // 32 cp * grain
 template <Color Us>
 void update_correction_history(Worker & worker, const Board & b, int depth, int diff)
 {
-    if (!b.pawn_hash)
-        return;
-    int16_t & entry = worker.corrhist[Us][b.pawn_hash & (Worker::corrhist_size - 1)];
     const int weight = std::min(depth + 1, 16);
-    const int updated = (entry * (256 - weight) + diff * corrhist_grain * weight) / 256;
-    entry = static_cast<int16_t>(std::clamp(updated, -corrhist_max, corrhist_max));
+    const auto nudge = [&](int16_t & entry) {
+        const int updated = (entry * (256 - weight) + diff * corrhist_grain * weight) / 256;
+        entry = static_cast<int16_t>(std::clamp(updated, -corrhist_max, corrhist_max));
+    };
+    // pawn_hash == 0 means no pawns; skip rather than share one entry.
+    if (b.pawn_hash)
+        nudge(worker.corrhist[Us][b.pawn_hash & (Worker::corrhist_size - 1)]);
+    // hash ^ pawn_hash removes the pawn psq terms from the full zobrist:
+    // a non-pawn placement key with no extra board bookkeeping.
+    nudge(worker.nonpawn_corrhist[Us][(b.hash ^ b.pawn_hash) & (Worker::corrhist_size - 1)]);
 }
 
 // Returns a ply-aware draw score incorporating contempt. At even ply (engine's
@@ -712,10 +717,13 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     ss->eval = evaluate_runtime<Us>(b, &si.nnue);
     // pawn_hash == 0 means no pawns: every pawnless node would share one
     // entry, turning the correction into a thrashing global eval offset.
-    if (b.pawn_hash) {
+    {
+        int correction = worker.nonpawn_corrhist[Us]
+            [(b.hash ^ b.pawn_hash) & (Worker::corrhist_size - 1)] / 2;
+        if (b.pawn_hash)
+            correction += worker.corrhist[Us][b.pawn_hash & (Worker::corrhist_size - 1)];
         ss->eval = static_cast<Value>(
-            static_cast<int>(ss->eval)
-            + worker.corrhist[Us][b.pawn_hash & (Worker::corrhist_size - 1)] / corrhist_grain);
+            static_cast<int>(ss->eval) + correction / corrhist_grain);
     }
     static_eval = ss->eval;
     if (ss->tthit && tt_value != Value::none) {

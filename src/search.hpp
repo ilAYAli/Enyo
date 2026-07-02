@@ -161,6 +161,9 @@ struct Worker {
     // Pawn-structure-keyed static-eval correction, scaled by corrhist_grain.
     static constexpr int corrhist_size = 16384;
     std::array<std::array<int16_t, corrhist_size>, color_nb> corrhist{};
+    // Non-pawn sibling, keyed by hash ^ pawn_hash (piece placement minus
+    // pawn structure); read at half the pawn table's weight.
+    std::array<std::array<int16_t, corrhist_size>, color_nb> nonpawn_corrhist{};
     int id { };
 };
 
