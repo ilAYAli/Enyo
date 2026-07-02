@@ -175,18 +175,11 @@ static inline void prioritize_moves(
             // Losing captures (SEE < 0) go below killers, counters and
             // quiets: searching QxP-defended before good quiet moves
             // wastes nodes at every ABSEARCH node. MVV-LVA still orders
-            // within each of the two capture bands, nudged by observed
-            // cutoff success (capture history, ±512 at /32 so it mostly
-            // reorders within a victim band).
-            const int capthist = worker.capture_history
-                [Us]
-                [static_cast<size_t>(move.src_piece())]
-                [move.dst_sq()]
-                [static_cast<size_t>(move.dst_piece())] / 32;
+            // within each of the two capture bands.
             if (ST == ABSEARCH && !see_ge<Us>(board, move))
-                score = NEGATIVE_SCORE + mvvlva(move) + capthist;
+                score = NEGATIVE_SCORE + mvvlva(move);
             else
-                score = CAPTURE_SCORE + mvvlva(move) + capthist;
+                score = CAPTURE_SCORE + mvvlva(move);
         } else if (move.flags() & Move::Flags::promote) {
             score = (move.promo_piece() == queen) ? PROMOTE_SCORE : DRAW_SCORE;
         } else if constexpr (ST == QSEARCH) {

@@ -1124,32 +1124,6 @@ moves_loop:
                             static_cast<int>(best_value) - static_cast<int>(static_eval));
                     }
 
-                    // Capture history: reward the cutoff capture, punish
-                    // captures tried before it (regardless of whether the
-                    // cutoff move itself was a capture).
-                    {
-                        const int bonus = std::min(1600, depth * depth * 32);
-                        if (is_capture) {
-                            update_history_score(
-                                worker.capture_history[Us]
-                                    [static_cast<size_t>(move.src_piece())]
-                                    [move.dst_sq()]
-                                    [static_cast<size_t>(move.dst_piece())],
-                                bonus);
-                        }
-                        for (int i = 0; i < ss->move_count - 1; ++i) {
-                            const auto prev = mp[static_cast<size_t>(i)];
-                            if (prev.dst_piece() != no_piece_type) {
-                                update_history_score(
-                                    worker.capture_history[Us]
-                                        [static_cast<size_t>(prev.src_piece())]
-                                        [prev.dst_sq()]
-                                        [static_cast<size_t>(prev.dst_piece())],
-                                    -bonus / 2);
-                            }
-                        }
-                    }
-
                     if (is_quiet) {
                         if (move != ss->killers[0]) {
                             ss->killers[1] = ss->killers[0];
