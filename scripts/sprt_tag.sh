@@ -198,7 +198,6 @@ run_sprt()
             --reference "~/assets/engines/enyo_$reference_hash" \
             --reference-uci "nnue_file=~/assets/nets/default.net" \
             --restart on \
-            --shards "$SHARDS" \
             --tc "$TC" \
             --threads "$THREADS"
         rc=$?
@@ -492,7 +491,6 @@ FORGE=${SPRT_TAG_FORGE:-forge}
 JQ=${SPRT_TAG_JQ:-jq}
 GAMES=${SPRT_TAG_GAMES:-1000}
 # games (1000) /workers (33 slots on 5 workers) = 33 * 2 ~= 60
-SHARDS=${SPRT_TAG_SHARDS:-60}
 TEST_ALL=${SPRT_TAG_TEST_ALL:-1}
 CONCURRENCY=${SPRT_TAG_CONCURRENCY:-1}
 THREADS=${SPRT_TAG_THREADS:-1}
