@@ -455,14 +455,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
             best_move,
             tt::value_to(best_value, ss->ply),
             tt::type::LowerBound,
-            // Store at depth 0, not `depth`: qsearch's depth parameter
-            // counts plies *from the qsearch entry* (it grows +1 per
-            // recursion, entered at 0..2 from negamax/razoring), so a
-            // captures-only bound could otherwise claim depth 8+ —
-            // satisfying negamax's `tte->depth >= depth` cutoff and
-            // winning depth-preferred replacement fights against real
-            // search entries in the same bucket.
-            0
+            depth
         );
     }
 
