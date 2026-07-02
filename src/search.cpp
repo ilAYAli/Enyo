@@ -986,6 +986,12 @@ moves_loop:
                 }
             } else if (singular_beta >= beta) {
                 return singular_beta;
+            } else if (tt_value >= beta) {
+                // Not singular and the TT bound already beats beta: some
+                // alternative also reaches singular_beta, so this node is
+                // very likely to fail high regardless — search the TT
+                // move shallower rather than deeper (negative extension).
+                extension = -1;
             }
         }
         ss->doubleExtensions = (ss - 1)->doubleExtensions + (extension == 2);
