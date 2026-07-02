@@ -505,17 +505,10 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         );
     }
 
-    // Age killers: clear the grandchild slots so killers stay local to
-    // nearby subtrees. Children still share killers with their cousins
-    // (that sharing is the point of the heuristic), but a killer set in
-    // a distant part of the tree — or a previous ID iteration — no
-    // longer outranks every quiet at this ply for the rest of the search.
+    // Children accumulate their beta cutoffs here (ss->cutoffCnt++ on
+    // fail-high); LMR reads it as "how refutable are this node's
+    // children". Reset for the new subtree.
     if (ss->ply < MAX_PLY - 1) {
-        (ss + 2)->killers[0] = Move{};
-        (ss + 2)->killers[1] = Move{};
-        // Children accumulate their beta cutoffs here (ss->cutoffCnt++ on
-        // fail-high); LMR reads it as "how refutable are this node's
-        // children". Reset for the new subtree.
         (ss + 1)->cutoffCnt = 0;
     }
 
