@@ -50,7 +50,6 @@ public:
     Color side { white };
     int histply {};
     uint64_t hash {};
-    uint64_t pawn_hash {};
     zobrist::zbrs zbrs{};
     int half_moves {};
     Gamestate gamestate{};
@@ -86,8 +85,6 @@ static inline constexpr void set_piece(
     if constexpr (UpdateZobrist) {
         const auto before = b.hash;
         b.hash ^= b.zbrs.psq_[Us][pt][sq];
-        if (pt == pawn)
-            b.pawn_hash ^= b.zbrs.psq_[Us][pawn][sq];
 
         if constexpr (zobrist::debug) {
             fmt::print("<{}> zobrist: {} {}@{} before: {:#018x} after: {:#018x}, fen: {}\n",
@@ -115,8 +112,6 @@ static inline constexpr void clr_piece(
     const auto before = b.hash;
     if constexpr (UpdateZobrist) {
         b.hash ^= b.zbrs.psq_[Us][pt][sq];
-        if (pt == pawn)
-            b.pawn_hash ^= b.zbrs.psq_[Us][pawn][sq];
     }
 
     const auto not_sq_mask = ~(1ULL << sq);

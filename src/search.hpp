@@ -153,9 +153,6 @@ struct Worker {
     std::array<std::array<std::array<Move, square_nb>, square_nb>, color_nb> countermove{};
     using CmhPieceTable = std::array<std::array<int16_t, square_nb>, piece_type_nb>;
     std::array<std::array<std::array<CmhPieceTable, square_nb>, piece_type_nb>, color_nb> cmh{};
-    // Pawn-structure-keyed static-eval correction, scaled by corrhist_grain.
-    static constexpr int corrhist_size = 16384;
-    std::array<std::array<int16_t, corrhist_size>, color_nb> corrhist{};
     int id { };
 };
 

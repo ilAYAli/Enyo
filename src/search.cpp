@@ -37,22 +37,6 @@ void update_history_score(int16_t & entry, int bonus)
     entry += static_cast<int16_t>(bonus - (entry * std::abs(bonus)) / max_history);
 }
 
-constexpr int corrhist_grain = 256;
-constexpr int corrhist_max = 8192; // 32 cp * grain
-
-// Exponentially-weighted average of (search score - static eval),
-// depth-weighted so deeper results move the entry more.
-template <Color Us>
-void update_correction_history(Worker & worker, const Board & b, int depth, int diff)
-{
-    if (!b.pawn_hash)
-        return;
-    int16_t & entry = worker.corrhist[Us][b.pawn_hash & (Worker::corrhist_size - 1)];
-    const int weight = std::min(depth + 1, 16);
-    const int updated = (entry * (256 - weight) + diff * corrhist_grain * weight) / 256;
-    entry = static_cast<int16_t>(std::clamp(updated, -corrhist_max, corrhist_max));
-}
-
 // Returns a ply-aware draw score incorporating contempt. At even ply (engine's
 // move) draws are penalised; at odd ply the penalty is mirrored so the parent
 // node (engine) also sees draws as slightly negative after negation.
@@ -654,7 +638,6 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
 
     // depth extension
     bool improving = true;
-    Value static_eval = Value::none;
     if (ss->in_check) {
         improving = false;
         ss->eval = Value::draw;
@@ -692,14 +675,6 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     //   - LowerBound with tt_value > raw: tighter lower bound.
     // Other combinations would widen, not tighten, so raw wins.
     ss->eval = evaluate_runtime<Us>(b, &si.nnue);
-    // pawn_hash == 0 means no pawns: every pawnless node would share one
-    // entry, turning the correction into a thrashing global eval offset.
-    if (b.pawn_hash) {
-        ss->eval = static_cast<Value>(
-            static_cast<int>(ss->eval)
-            + worker.corrhist[Us][b.pawn_hash & (Worker::corrhist_size - 1)] / corrhist_grain);
-    }
-    static_eval = ss->eval;
     if (ss->tthit && tt_value != Value::none) {
         const int b_ = tt::bound_of(tte->flag);
         if (b_ == tt::type::ExactBound
@@ -1109,21 +1084,6 @@ moves_loop:
 
                 if (value >= beta) {
                     ss->cutoffCnt++;
-                    // Fail-high: the true score is a lower bound. Only pull
-                    // the correction up when the bound exceeds static eval;
-                    // a bound below it carries no information. Singular
-                    // verification results don't train the correction.
-                    if (!ss->in_check
-                        && !is_capture
-                        && ss->excluded_move == Move{}
-                        && static_eval != Value::none
-                        && best_value > static_eval
-                        && std::abs(best_value) < Constexpr::mate_value - 2 * MAX_PLY
-                        && !is_tablebase_tt_value(best_value)) {
-                        update_correction_history<Us>(worker, b, depth,
-                            static_cast<int>(best_value) - static_cast<int>(static_eval));
-                    }
-
                     if (is_quiet) {
                         if (move != ss->killers[0]) {
                             ss->killers[1] = ss->killers[0];
@@ -1199,23 +1159,6 @@ moves_loop:
             depth,
             ss->ttPv
         );
-    }
-
-    // Fail-low (no best_move): the score is an upper bound, only pull the
-    // correction down when the bound is below static eval. With a best_move
-    // the score is exact within the window; update unconditionally. A
-    // singular verification (excluded_move set) scores the position with
-    // one move removed, so its result must not train the correction.
-    if (!thread::pool.stop.load(std::memory_order_relaxed)
-        && !ss->in_check
-        && ss->excluded_move == Move{}
-        && !(best_move && best_move.dst_piece() != no_piece_type)
-        && static_eval != Value::none
-        && !(!best_move && best_value >= static_eval)
-        && std::abs(best_value) < Constexpr::mate_value - 2 * MAX_PLY
-        && !is_tablebase_tt_value(best_value)) {
-        update_correction_history<Us>(worker, b, depth,
-            static_cast<int>(best_value) - static_cast<int>(static_eval));
     }
 
     // Fail-soft: on fail-low this returns the sharpest upper bound the

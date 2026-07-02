@@ -671,39 +671,6 @@ TEST(hash, castling_rights_mask_hash_matches_recompute) {
     EXPECT_EQ(b.hash, zobrist::generate_hash(b));
 }
 
-namespace {
-
-template <Color Us>
-void walk_verify_pawn_hash(Board & b, int depth) {
-    ASSERT_EQ(b.pawn_hash, zobrist::generate_pawn_hash(b))
-        << fmt::format("fen={} inc={:016X} rec={:016X}",
-            b.fen(), b.pawn_hash, zobrist::generate_pawn_hash(b));
-    if (depth == 0)
-        return;
-    const auto moves = generate_legal_moves<Us>(b);
-    for (const auto move : moves) {
-        apply_move<Us>(b, move);
-        walk_verify_pawn_hash<~Us>(b, depth - 1);
-        revert_move<Us>(b);
-    }
-}
-
-}
-
-TEST(hash, pawn_hash_matches_recompute_perft_walk) {
-    // startpos: quiets, double pushes
-    Board start{"startpos"};
-    walk_verify_pawn_hash<white>(start, 3);
-
-    // kiwipete: castling, captures, en passant
-    Board kiwi{"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"};
-    walk_verify_pawn_hash<white>(kiwi, 3);
-
-    // promotion-heavy: promotions and under-promotions, promo captures
-    Board promo{"n1n5/PPPk4/8/8/8/8/4Kppp/5N1N w - - 0 1"};
-    walk_verify_pawn_hash<white>(promo, 4);
-}
-
 TEST(fen, round_trips_fullmove_counter) {
     Board b{"1r3rk1/p1q1pp1p/1np1b1p1/2Q5/8/1PNB1P2/P1P3PP/2KR3R b - - 0 17"};
 

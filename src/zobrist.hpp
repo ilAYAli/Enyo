@@ -68,6 +68,5 @@ struct zbrs {
 };
 
 extern uint64_t generate_hash(enyo::Board const & b);
-extern uint64_t generate_pawn_hash(enyo::Board const & b);
 
 }
