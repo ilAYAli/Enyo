@@ -121,6 +121,35 @@ public:
     // re-run init_search() and clear it. Kept out of setopt's return so
     // callers don't have to special-case the recompute.
     bool lmr_dirty = false;
+    // SPSA tuning knobs. Defaults reproduce the previously hardcoded
+    // search constants exactly; a binary with untouched options must
+    // search identically to one built before these existed.
+    int razor_depth = 3;
+    int razor_margin = 63;
+    int razor_depth_factor = 182;
+    int rfp_depth = 7;
+    int rfp_margin = 64;
+    int rfp_improving = 71;
+    int nmp_base = 5;
+    int nmp_depth_div = 5;
+    int nmp_eval_div = 214;
+    int probcut_margin = 150;
+    int futility_depth = 6;
+    int futility_margin = 120;
+    int lmp_depth = 5;
+    int lmp_base = 3;
+    int lmp_improving_base = 5;
+    int se_depth = 8;
+    int se_margin_mult = 2;
+    int se_entry_slack = 3;
+    int se_double_margin = 30;
+    int se_double_cap = 4;
+    int lmr_cutoff_cnt = 3;
+    int lmr_hist_div = 8192;
+    int hist_bonus_cap = 1600;
+    int hist_bonus_scale = 32;
+    int asp_delta = 12;
+    int asp_depth = 5;
     bool use_chess_960      = false;
     bool use_tt             = true;
     bool use_tt_exact_cutoff = true;
@@ -161,6 +190,32 @@ public:
             concat("tm_volatility_threshold", "spin", tm_volatility_threshold, int(1), int(10000)) +
             concat("lmr_base", "spin", lmr_base, int(1), int(500)) +
             concat("lmr_divisor", "spin", lmr_divisor, int(50), int(1000)) +
+            concat("razor_depth", "spin", razor_depth, int(1), int(10)) +
+            concat("razor_margin", "spin", razor_margin, int(1), int(500)) +
+            concat("razor_depth_factor", "spin", razor_depth_factor, int(1), int(1000)) +
+            concat("rfp_depth", "spin", rfp_depth, int(1), int(20)) +
+            concat("rfp_margin", "spin", rfp_margin, int(1), int(300)) +
+            concat("rfp_improving", "spin", rfp_improving, int(0), int(300)) +
+            concat("nmp_base", "spin", nmp_base, int(1), int(10)) +
+            concat("nmp_depth_div", "spin", nmp_depth_div, int(1), int(20)) +
+            concat("nmp_eval_div", "spin", nmp_eval_div, int(50), int(1000)) +
+            concat("probcut_margin", "spin", probcut_margin, int(50), int(500)) +
+            concat("futility_depth", "spin", futility_depth, int(1), int(15)) +
+            concat("futility_margin", "spin", futility_margin, int(20), int(500)) +
+            concat("lmp_depth", "spin", lmp_depth, int(1), int(15)) +
+            concat("lmp_base", "spin", lmp_base, int(0), int(20)) +
+            concat("lmp_improving_base", "spin", lmp_improving_base, int(0), int(20)) +
+            concat("se_depth", "spin", se_depth, int(4), int(16)) +
+            concat("se_margin_mult", "spin", se_margin_mult, int(1), int(10)) +
+            concat("se_entry_slack", "spin", se_entry_slack, int(0), int(10)) +
+            concat("se_double_margin", "spin", se_double_margin, int(5), int(300)) +
+            concat("se_double_cap", "spin", se_double_cap, int(0), int(16)) +
+            concat("lmr_cutoff_cnt", "spin", lmr_cutoff_cnt, int(1), int(10)) +
+            concat("lmr_hist_div", "spin", lmr_hist_div, int(1024), int(65536)) +
+            concat("hist_bonus_cap", "spin", hist_bonus_cap, int(256), int(8192)) +
+            concat("hist_bonus_scale", "spin", hist_bonus_scale, int(4), int(128)) +
+            concat("asp_delta", "spin", asp_delta, int(4), int(100)) +
+            concat("asp_depth", "spin", asp_depth, int(1), int(12)) +
             concat("use_tt",        "check", use_tt) +
             concat("use_tt_exact_cutoff", "check", use_tt_exact_cutoff) +
             concat("use_tt_lower_cutoff", "check", use_tt_lower_cutoff) +
@@ -198,6 +253,58 @@ public:
             lmr_divisor = std::max(50, std::stoi(value));
             lmr_dirty = true;
         }
+        else if (lc == "razor_depth")
+            razor_depth = std::max(1, std::stoi(value));
+        else if (lc == "razor_margin")
+            razor_margin = std::max(1, std::stoi(value));
+        else if (lc == "razor_depth_factor")
+            razor_depth_factor = std::max(1, std::stoi(value));
+        else if (lc == "rfp_depth")
+            rfp_depth = std::max(1, std::stoi(value));
+        else if (lc == "rfp_margin")
+            rfp_margin = std::max(1, std::stoi(value));
+        else if (lc == "rfp_improving")
+            rfp_improving = std::max(0, std::stoi(value));
+        else if (lc == "nmp_base")
+            nmp_base = std::max(1, std::stoi(value));
+        else if (lc == "nmp_depth_div")
+            nmp_depth_div = std::max(1, std::stoi(value));
+        else if (lc == "nmp_eval_div")
+            nmp_eval_div = std::max(50, std::stoi(value));
+        else if (lc == "probcut_margin")
+            probcut_margin = std::max(50, std::stoi(value));
+        else if (lc == "futility_depth")
+            futility_depth = std::max(1, std::stoi(value));
+        else if (lc == "futility_margin")
+            futility_margin = std::max(20, std::stoi(value));
+        else if (lc == "lmp_depth")
+            lmp_depth = std::max(1, std::stoi(value));
+        else if (lc == "lmp_base")
+            lmp_base = std::max(0, std::stoi(value));
+        else if (lc == "lmp_improving_base")
+            lmp_improving_base = std::max(0, std::stoi(value));
+        else if (lc == "se_depth")
+            se_depth = std::max(4, std::stoi(value));
+        else if (lc == "se_margin_mult")
+            se_margin_mult = std::max(1, std::stoi(value));
+        else if (lc == "se_entry_slack")
+            se_entry_slack = std::max(0, std::stoi(value));
+        else if (lc == "se_double_margin")
+            se_double_margin = std::max(5, std::stoi(value));
+        else if (lc == "se_double_cap")
+            se_double_cap = std::max(0, std::stoi(value));
+        else if (lc == "lmr_cutoff_cnt")
+            lmr_cutoff_cnt = std::max(1, std::stoi(value));
+        else if (lc == "lmr_hist_div")
+            lmr_hist_div = std::max(1024, std::stoi(value));
+        else if (lc == "hist_bonus_cap")
+            hist_bonus_cap = std::max(256, std::stoi(value));
+        else if (lc == "hist_bonus_scale")
+            hist_bonus_scale = std::max(4, std::stoi(value));
+        else if (lc == "asp_delta")
+            asp_delta = std::max(4, std::stoi(value));
+        else if (lc == "asp_depth")
+            asp_depth = std::max(1, std::stoi(value));
         else if (lc == "uci_chess960")
             use_chess_960 = true;
         else if (lc == "use_tt")

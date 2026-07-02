@@ -703,18 +703,16 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
 
     // razoring:
     if constexpr (Constexpr::use_razoring) {
-        constexpr int razor_depth = 3;
-        constexpr int razor_margin = 63;
-        constexpr int depth_factor = 182;
-        if (depth < razor_depth
-        && (ss->eval - razor_margin + (depth_factor * depth)) < alpha) {
+        if (depth < cfgmgr.razor_depth
+        && (ss->eval - cfgmgr.razor_margin + (cfgmgr.razor_depth_factor * depth)) < alpha) {
             return qsearch<Us, NodeType::NonPV>(b, worker, ss, depth, alpha, beta);
         }
     }
 
     if constexpr (Constexpr::use_rfp) {
         if (std::abs(beta) <  Constexpr::mate_value - 2 * MAX_PLY)
-            if (depth < 7 && ss->eval - 64 * depth + 71 * improving >= beta)
+            if (depth < cfgmgr.rfp_depth
+                && ss->eval - cfgmgr.rfp_margin * depth + cfgmgr.rfp_improving * improving >= beta)
                 return beta;
     }
 
@@ -744,7 +742,9 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             && !tt_rules_out_nmp
             && std::abs(beta) < Constexpr::mate_value - MAX_PLY) {
 
-            int R = 5 + std::min(4, depth / 5) + std::min(Value(3), (ss->eval - beta) / 214);
+            int R = cfgmgr.nmp_base
+                  + std::min(4, depth / cfgmgr.nmp_depth_div)
+                  + std::min(Value(3), (ss->eval - beta) / cfgmgr.nmp_eval_div);
             apply_null_move<Us>(b);
             auto nullscore = -negamax<Them, NodeType::NonPV>(depth -R, worker, ss + 1, -beta, -beta + 1);
             ss->move = Move{};
@@ -761,7 +761,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     }
 
     if constexpr (Constexpr::use_probcut) {
-        constexpr Value probcut_margin = static_cast<Value>(150);
+        const Value probcut_margin = static_cast<Value>(cfgmgr.probcut_margin);
         constexpr int probcut_reduction = 4;
         const Value probcut_beta = beta + probcut_margin;
 
@@ -886,10 +886,10 @@ moves_loop:
             && !ss->in_check
             && is_quiet
             && !protect_quiet_check
-            && depth <= 6
+            && depth <= cfgmgr.futility_depth
             && ss->move_count > 1
             && ss->eval != Value::none
-            && ss->eval + 120 * depth <= alpha
+            && ss->eval + cfgmgr.futility_margin * depth <= alpha
             && std::abs(alpha) < Constexpr::mate_value - MAX_PLY) {
             continue;
         }
@@ -899,9 +899,11 @@ moves_loop:
             && !ss->in_check
             && is_quiet
             && !protect_quiet_check
-            && depth <= 5
+            && depth <= cfgmgr.lmp_depth
             && best_value > -Constexpr::mate_value + MAX_PLY
-            && ss->move_count > (improving ? 5 + depth * depth : 3 + depth * depth)) {
+            && ss->move_count > (improving
+                ? cfgmgr.lmp_improving_base + depth * depth
+                : cfgmgr.lmp_base + depth * depth)) {
             continue;
         }
 
@@ -913,7 +915,7 @@ moves_loop:
         // refute this node: fail high without searching further (multicut).
         int extension = 0;
         if (NT != NodeType::Root
-            && depth >= 8
+            && depth >= cfgmgr.se_depth
             && move == tt_move
             // An extended TT move searches at new_depth == depth, so a
             // chain of singular nodes never loses depth; without a ply
@@ -927,10 +929,10 @@ moves_loop:
             && std::abs(tt_value) < Constexpr::mate_value - 2 * MAX_PLY
             && !is_tablebase_tt_value(tt_value)
             && (tt::bound_of(tte->flag) & tt::type::LowerBound)
-            && tte->depth >= depth - 3) {
+            && tte->depth >= depth - cfgmgr.se_entry_slack) {
 
             const auto singular_beta =
-                static_cast<Value>(static_cast<int>(tt_value) - 2 * depth);
+                static_cast<Value>(static_cast<int>(tt_value) - cfgmgr.se_margin_mult * depth);
             const int singular_depth = (depth - 1) / 2;
             // The verification runs on this same stack frame; save the
             // move-loop state it will clobber.
@@ -954,8 +956,8 @@ moves_loop:
                 // the per-path doubleExtensions cap bounds the growth on
                 // top of the global ply < 2 * si.depth cap.
                 if (!pv_node
-                    && singular_value < singular_beta - Value(30)
-                    && (ss - 1)->doubleExtensions <= 4) {
+                    && singular_value < singular_beta - static_cast<Value>(cfgmgr.se_double_margin)
+                    && (ss - 1)->doubleExtensions <= cfgmgr.se_double_cap) {
                     extension = 2;
                 }
             } else if (singular_beta >= beta) {
@@ -999,7 +1001,7 @@ moves_loop:
                 R += !improving;
                 // Several children already failed high: this node's moves
                 // keep getting refuted, so late ones deserve less effort.
-                R += (ss + 1)->cutoffCnt > 3;
+                R += (ss + 1)->cutoffCnt > cfgmgr.lmr_cutoff_cnt;
                 R -= NT != NodeType::NonPV;
                 R -= is_capture;
                 // Less reduction at positions previously identified as on
@@ -1009,7 +1011,7 @@ moves_loop:
                 R -= ss->ttPv;
                 if (is_quiet) {
                     const int h = worker.history[Us][move.src_sq()][move.dst_sq()];
-                    R -= std::clamp(h / 8192, -2, 2);
+                    R -= std::clamp(h / cfgmgr.lmr_hist_div, -2, 2);
                 }
                 if constexpr (NT == NodeType::Root)
                     if (is_quiet && move.src_piece() == queen)
@@ -1087,7 +1089,9 @@ moves_loop:
                             worker.countermove[Us][prev_move.src_sq()][prev_move.dst_sq()] = move;
                         }
 
-                        const int bonus = std::min(1600, depth * depth * 32);
+                        const int bonus = std::min(
+                            cfgmgr.hist_bonus_cap,
+                            depth * depth * cfgmgr.hist_bonus_scale);
                         update_history_score(worker.history[Us][move.src_sq()][move.dst_sq()], bonus);
 
                         Worker::CmhPieceTable * cmh_update = prev_move
@@ -1167,12 +1171,10 @@ namespace {
 template <Color Us>
 Value aspiration_window(Value prev_eval, int depth, Worker & worker, Stack * ss)
 {
-    constexpr Value initial_delta = static_cast<Value>(12);
+    const Value initial_delta = static_cast<Value>(cfgmgr.asp_delta);
     constexpr Value infinite = Value::infinite;
     constexpr Value mate_value = Value::mate;
-    constexpr auto aspiration_depth = 5;
-
-    if (depth < aspiration_depth || std::abs(prev_eval) >= mate_value / 2) {
+    if (depth < cfgmgr.asp_depth || std::abs(prev_eval) >= mate_value / 2) {
         return negamax<Us, NodeType::Root>(depth, worker, ss, -infinite, infinite);
     }
 
