@@ -3280,7 +3280,7 @@ TEST(uci_root, wdl_only_lost_tablebase_root_keeps_cutoffs_fast) {
         thread::pool.stop = false;
         tt::ttable.clear();
         testing::internal::CaptureStdout();
-        uci("go depth 6");
+        uci("go depth 8");
         return testing::internal::GetCapturedStdout();
     };
 
@@ -3290,12 +3290,12 @@ TEST(uci_root, wdl_only_lost_tablebase_root_keeps_cutoffs_fast) {
     EXPECT_NE(tb_out.find("string tbhit loss"), std::string::npos) << tb_out;
     EXPECT_EQ(plain_out.find("string tbhit"), std::string::npos) << plain_out;
 
-    const auto tb_nodes = uci_nodes_at_depth(tb_out, 6);
-    const auto plain_nodes = uci_nodes_at_depth(plain_out, 6);
+    const auto tb_nodes = uci_nodes_at_depth(tb_out, 8);
+    const auto plain_nodes = uci_nodes_at_depth(plain_out, 8);
     EXPECT_TRUE(tb_nodes.has_value()) << tb_out;
     EXPECT_TRUE(plain_nodes.has_value()) << plain_out;
     if (tb_nodes && plain_nodes) {
-        EXPECT_LT(*tb_nodes, 2000u) << tb_out;
+        EXPECT_LT(*tb_nodes, 3500u) << tb_out;
         EXPECT_LT(*tb_nodes * 2, *plain_nodes) << "tb:\n" << tb_out << "\nplain:\n" << plain_out;
     }
 

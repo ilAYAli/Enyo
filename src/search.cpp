@@ -427,6 +427,24 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         if ((si.nodes & 1023U) == 0 && worker.time_expired())
             return Value::draw;
 
+        // Delta pruning: even winning the captured piece outright plus a
+        // safety margin can't lift stand-pat over alpha, so the subtree
+        // can't matter. piece_value() is SEE-scale centipawns but the
+        // NNUE eval runs at ~2.2x cp (a clean extra queen evaluates to
+        // ~2000, startpos to ~+43), so scale piece values by 2 — mixing
+        // the raw scales prunes winning captures and cost -119.7 Elo
+        // (66d64ba). Promotions/ep (non-generic flags) are exempt: their
+        // material swing exceeds piece_value(dst). Mate windows are
+        // exempt: eval arithmetic is meaningless near mate bounds.
+        constexpr int delta_margin = 400;
+        if (!ss->in_check
+            && move.flags() == Move::Flags::generic
+            && std::abs(alpha) < Constexpr::mate_value - MAX_PLY
+            && static_cast<int>(ss->eval)
+               + 2 * piece_value(move.dst_piece())
+               + delta_margin <= alpha)
+            continue;
+
         // SEE pruning: a capture that loses material can't rescue a
         // position where stand-pat already failed to reach beta. Evasions
         // are exempt — when in check every legal move must be considered.
