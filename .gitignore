@@ -15,7 +15,6 @@ value_tables.hpp
 misc/*
 logs/*
 books/*
-scripts/*
 bugs/*
 releases/*
 linux/
