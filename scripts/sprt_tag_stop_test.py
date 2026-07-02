@@ -41,10 +41,23 @@ with tempfile.TemporaryDirectory(prefix="sprt-tag-stop-") as tmp:
     git(repo, "config", "user.name", "Petter Wahlman")
     git(repo, "config", "user.email", "petter@wahlman.no")
 
-    commits = []
-    for index, subject in enumerate(("base", "perf: bad", "perf: preserved")):
-        (repo / "engine").write_text(f"{index}\n")
-        git(repo, "add", "engine")
+    source = repo / "src" / "engine.cpp"
+    source.parent.mkdir()
+    source.write_text("0\n")
+    git(repo, "add", "src/engine.cpp")
+    run("git", "commit", "-m", "base", cwd=repo)
+    commits = [git(repo, "rev-parse", "HEAD")]
+
+    scripts = repo / "scripts"
+    scripts.mkdir()
+    (scripts / "helper.sh").write_text("tooling only\n")
+    git(repo, "add", "scripts/helper.sh")
+    run("git", "commit", "-m", "chore: tooling", cwd=repo)
+    commits.append(git(repo, "rev-parse", "HEAD"))
+
+    for index, subject in enumerate(("perf: bad", "perf: preserved"), start=1):
+        source.write_text(f"{index}\n")
+        git(repo, "add", "src/engine.cpp")
         run("git", "commit", "-m", subject, cwd=repo)
         commits.append(git(repo, "rev-parse", "HEAD"))
 
@@ -91,16 +104,20 @@ else:
         "SPRT_TAG_NOTIFY_COMMAND": str(notify),
         "SPRT_TAG_STATE_ROOT": str(root / "state"),
         "SPRT_TAG_WORK_ROOT": str(root / "work"),
+        "SPRT_TAG_TEST_ALL": "0",
     })
     subprocess.run([str(SCRIPT), commits[0]], cwd=repo, env=env, check=True)
 
     rewritten = git(repo, "rev-list", "--reverse", f"{commits[0]}..HEAD").splitlines()
-    assert len(rewritten) == 2
-    assert git(repo, "show", "-s", "--format=%s", rewritten[0]) == "perf: bad elo-30.0, llr-2.94"
-    assert git(repo, "show", "-s", "--format=%s", rewritten[1]) == "perf: preserved"
+    assert len(rewritten) == 3
+    assert git(repo, "show", "-s", "--format=%s", rewritten[0]) == "chore: tooling"
+    assert git(repo, "show", "-s", "--format=%s", rewritten[1]) == "perf: bad elo-30.0, llr-2.94"
+    assert git(repo, "show", "-s", "--format=%s", rewritten[2]) == "perf: preserved"
     assert (forge_state / "count").read_text() == "1"
-    assert not (engines / f"enyo_{commits[1][:7]}").exists()
+    assert (engines / f"enyo_{commits[1][:7]}").exists()
+    assert not (engines / f"enyo_{rewritten[0][:7]}").exists()
     assert not (engines / f"enyo_{commits[2][:7]}").exists()
-    assert (engines / f"enyo_{rewritten[0][:7]}").exists()
+    assert not (engines / f"enyo_{commits[3][:7]}").exists()
     assert (engines / f"enyo_{rewritten[1][:7]}").exists()
+    assert (engines / f"enyo_{rewritten[2][:7]}").exists()
     print("significant-regression stop test passed")

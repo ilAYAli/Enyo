@@ -82,6 +82,12 @@ commit_tree()
     git rev-parse "$1^{tree}"
 }
 
+changes_engine()
+{
+    ! git diff --quiet "$1" "$2" -- \
+        CMakeLists.txt 3rdparty cmake incbin magic precalc src
+}
+
 normalize_number()
 {
     local value=$1
@@ -377,6 +383,7 @@ finalize_pending_move()
     local ci
     local llr
     local stop
+    local engine_commit
 
     old_hash=$(read_value "$STATE_DIR/pending_old_hash")
     new_hash=$(read_value "$STATE_DIR/pending_new_hash")
@@ -385,15 +392,18 @@ finalize_pending_move()
     ci=$(read_value "$STATE_DIR/pending_ci")
     llr=$(read_value "$STATE_DIR/pending_llr")
     stop=$(read_value "$STATE_DIR/pending_stop")
+    engine_commit=$(read_value "$STATE_DIR/pending_engine_commit")
 
-    printf 'Moving worker engines enyo_%s -> enyo_%s\n' "$old_hash" "$new_hash"
-    move_worker_binary "$old_hash" "$new_hash"
+    if test "$engine_commit" = 1; then
+        printf 'Moving worker engines enyo_%s -> enyo_%s\n' "$old_hash" "$new_hash"
+        move_worker_binary "$old_hash" "$new_hash"
+        write_value "$STATE_DIR/reference_hash" "$new_hash"
+    fi
 
     if ! grep -q "^$old_commit"$'\t' "$STATE_DIR/mapping.tsv"; then
         printf '%s\t%s\t%s\t%s\t%s\n' "$old_commit" \
             "$(git -C "$WORKTREE" rev-parse HEAD)" "$elo" "$ci" "$llr" >>"$STATE_DIR/mapping.tsv"
     fi
-    write_value "$STATE_DIR/reference_hash" "$new_hash"
     write_value "$STATE_DIR/next_index" "$((index + 1))"
     if test "$stop" = 1; then
         write_value "$STATE_DIR/stop_labeling" 1
@@ -618,8 +628,17 @@ while (( INDEX < TOTAL )); do
     fi
 
     LABEL_CURRENT=1
+    ENGINE_COMMIT=1
     STOP_AFTER=0
-    if test "$TEST_ALL" != 1 && test -f "$STATE_DIR/stop_labeling"; then
+    if ! changes_engine "$OLD_PARENT" "$OLD_COMMIT"; then
+        ENGINE_COMMIT=0
+        LABEL_CURRENT=0
+        ELO=unlabeled
+        CI=unlabeled
+        LLR=unlabeled
+        printf 'Replaying non-engine commit without SPRT: %s %s\n' \
+            "$OLD_HASH" "$(git show -s --format=%s "$OLD_COMMIT")"
+    elif test "$TEST_ALL" != 1 && test -f "$STATE_DIR/stop_labeling"; then
         LABEL_CURRENT=0
         STOP_AFTER=1
         ELO=unlabeled
@@ -671,6 +690,7 @@ while (( INDEX < TOTAL )); do
     write_value "$STATE_DIR/pending_ci" "$CI"
     write_value "$STATE_DIR/pending_llr" "$LLR"
     write_value "$STATE_DIR/pending_stop" "$STOP_AFTER"
+    write_value "$STATE_DIR/pending_engine_commit" "$ENGINE_COMMIT"
     finalize_pending_move "$INDEX"
     INDEX=$(read_value "$STATE_DIR/next_index")
 done
