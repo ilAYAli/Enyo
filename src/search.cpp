@@ -533,8 +533,11 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             !si.suppress_tablebase_cutoffs || !is_tablebase_tt_value(tt_value);
         const bool can_tt_cut =
             can_use_tt_cut
-            &&
-            tt_value != Value::none
+            // A singular verification search probes the same position it
+            // is verifying; the stored entry is what's being questioned,
+            // so it must not answer.
+            && ss->excluded_move == Move{}
+            && tt_value != Value::none
             && tte->depth >= depth
             && (tte->flag == tt::type::ExactBound
              || (tte->flag == tt::type::UpperBound && tt_value <= alpha)
@@ -567,6 +570,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             const auto tb_max = static_cast<int>(syzygy::largest());
             if (NT != NodeType::Root
                 && !worker.si.suppress_tablebase_cutoffs
+                && ss->excluded_move == Move{}
                 && tb_max > 0
                 && num_pieces <= tb_max
                 && !board.gamestate.can_castle(CastlingRights::any_castling)) {
@@ -726,6 +730,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             && depth >= 3
             && ss->eval >= beta
             && (ss-1)->move != Move{}
+            && ss->excluded_move == Move{}
             && !tt_rules_out_nmp
             && std::abs(beta) < Constexpr::mate_value - MAX_PLY) {
 
@@ -753,6 +758,10 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
         if (NT == NodeType::NonPV
             && depth >= 5
             && !ss->in_check
+            // The excluded (TT) move is a tactical move candidate here,
+            // so probcut inside a singular verification could "refute"
+            // the position with the very move being verified.
+            && ss->excluded_move == Move{}
             && ss->eval + probcut_margin >= beta
             && std::abs(beta) < Constexpr::mate_value - MAX_PLY) {
             Movelist probcut_lm;
@@ -841,6 +850,11 @@ moves_loop:
     bool do_fullsearch = false;
     ss->move_count = 0;
     while (const auto move = mp.next()) {
+        // Inside a singular verification search: the whole point is to ask
+        // "how good is this position without the TT move?".
+        if (move == ss->excluded_move)
+            continue;
+
         if ((si.nodes & 1023U) == 0 && worker.time_expired()) {
             return Value::draw;
         }
@@ -881,8 +895,52 @@ moves_loop:
             continue;
         }
 
-        // todo: Extensions
+        // Singular extension: if the TT move's stored lower bound is well
+        // above what every other move can reach (verified by a reduced
+        // search of this same position with the TT move excluded), the
+        // move is forced-ish — search it one ply deeper. If instead the
+        // verification proves another move also beats beta, two moves
+        // refute this node: fail high without searching further (multicut).
         int extension = 0;
+        if (NT != NodeType::Root
+            && depth >= 8
+            && move == tt_move
+            // An extended TT move searches at new_depth == depth, so a
+            // chain of singular nodes never loses depth; without a ply
+            // cap the chain only terminates at MAX_PLY (observed: 10x
+            // test-suite wall time). Cap extensions to twice the current
+            // iteration depth, as Stockfish does.
+            && ss->ply < 2 * si.depth
+            && ss->excluded_move == Move{}
+            && ss->tthit
+            && tt_value != Value::none
+            && std::abs(tt_value) < Constexpr::mate_value - 2 * MAX_PLY
+            && !is_tablebase_tt_value(tt_value)
+            && (tte->flag & tt::type::LowerBound)
+            && tte->depth >= depth - 3) {
+
+            const auto singular_beta =
+                static_cast<Value>(static_cast<int>(tt_value) - 2 * depth);
+            const int singular_depth = (depth - 1) / 2;
+            // The verification runs on this same stack frame; save the
+            // move-loop state it will clobber.
+            const int saved_move_count = ss->move_count;
+
+            ss->excluded_move = move;
+            const Value singular_value = negamax<Us, NodeType::NonPV>(
+                singular_depth, worker, ss, singular_beta - 1, singular_beta);
+            ss->excluded_move = Move{};
+            ss->move_count = saved_move_count;
+            ss->move = move;
+
+            if (worker.time_expired())
+                return Value::draw;
+
+            if (singular_value < singular_beta)
+                extension = 1;
+            else if (singular_beta >= beta)
+                return singular_beta;
+        }
         int new_depth = depth -1 + extension;
 
         // make move
@@ -1017,7 +1075,10 @@ moves_loop:
                         }
                     }
 
-                    if (cfgmgr.use_tt) {
+                    // A singular verification search must not overwrite
+                    // the entry it is verifying with its reduced-depth,
+                    // offset-window result.
+                    if (cfgmgr.use_tt && ss->excluded_move == Move{}) {
                         tt::ttable.store(
                             b.hash,
                             best_move,
@@ -1038,8 +1099,10 @@ moves_loop:
     // Fail-low nodes leave best_move empty; best_value is still a genuine
     // upper bound over all legal moves (unlike qsearch's captures-only
     // subset), so store it. The TT keeps any previous move hint for the
-    // same position when the stored move is empty.
+    // same position when the stored move is empty. Singular verification
+    // results (excluded_move set) stay out of the table entirely.
     if (!thread::pool.stop.load(std::memory_order_relaxed)
+        && ss->excluded_move == Move{}
         && cfgmgr.use_tt) {
         tt::ttable.store(
             b.hash,
