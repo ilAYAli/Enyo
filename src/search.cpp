@@ -523,6 +523,10 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     if (ss->ply < MAX_PLY - 1) {
         (ss + 2)->killers[0] = Move{};
         (ss + 2)->killers[1] = Move{};
+        // Children accumulate their beta cutoffs here (ss->cutoffCnt++ on
+        // fail-high); LMR reads it as "how refutable are this node's
+        // children". Reset for the new subtree.
+        (ss + 1)->cutoffCnt = 0;
     }
 
     if (NT != NodeType::Root) {
@@ -1023,6 +1027,9 @@ moves_loop:
                 int R = lmr_reductions[depth][ss->move_count];
 
                 R += !improving;
+                // Several children already failed high: this node's moves
+                // keep getting refuted, so late ones deserve less effort.
+                R += (ss + 1)->cutoffCnt > 3;
                 R -= NT != NodeType::NonPV;
                 R -= is_capture;
                 // Less reduction at positions previously identified as on
@@ -1106,6 +1113,7 @@ moves_loop:
                 }
 
                 if (value >= beta) {
+                    ss->cutoffCnt++;
                     // Fail-high: the true score is a lower bound. Only pull
                     // the correction up when the bound exceeds static eval;
                     // a bound below it carries no information. Singular
