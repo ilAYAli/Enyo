@@ -1044,15 +1044,8 @@ moves_loop:
                 // into ss->ttPv, and we lighten LMR by one ply here.
                 R -= ss->ttPv;
                 if (is_quiet) {
-                    // Full quiet-stat sum (butterfly + cmh + fmh), the
-                    // same signals move ordering uses; divisor doubled
-                    // since the sum spans up to 3x the single-table range.
-                    int h = worker.history[Us][move.src_sq()][move.dst_sq()];
-                    if (cmh_slice)
-                        h += (*cmh_slice)[static_cast<size_t>(move.src_piece())][move.dst_sq()];
-                    if (fmh_slice)
-                        h += (*fmh_slice)[static_cast<size_t>(move.src_piece())][move.dst_sq()];
-                    R -= std::clamp(h / 16384, -2, 2);
+                    const int h = worker.history[Us][move.src_sq()][move.dst_sq()];
+                    R -= std::clamp(h / 8192, -2, 2);
                 }
                 if constexpr (NT == NodeType::Root)
                     if (is_quiet && move.src_piece() == queen)
