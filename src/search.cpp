@@ -1286,6 +1286,24 @@ moves_loop:
     }
 
 
+    // A fail-low here means every reply fell short — the opponent's
+    // previous move earned that. Reward it so its own side orders it
+    // earlier; the mirror of the fail-high malus applied to prior quiets
+    // in the cutoff path above.
+    if (NT != NodeType::Root
+        && !best_move
+        && ss->excluded_move == Move{}
+        && !thread::pool.stop.load(std::memory_order_relaxed)) {
+        const auto prev = (ss - 1)->move;
+        if (prev
+            && prev.dst_piece() == no_piece_type
+            && prev.flags() != Move::Flags::promote) {
+            const int bonus = std::min(1600, depth * depth * 32);
+            update_history_score(
+                worker.history[Them][prev.src_sq()][prev.dst_sq()], bonus);
+        }
+    }
+
     // Fail-low nodes leave best_move empty; best_value is still a genuine
     // upper bound over all legal moves (unlike qsearch's captures-only
     // subset), so store it. The TT keeps any previous move hint for the
