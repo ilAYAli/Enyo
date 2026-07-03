@@ -4,6 +4,7 @@
 #include <sstream>
 #include <thread>
 #include <string>
+#include <string_view>
 #include "fmt/format.h"
 
 #include "fen.hpp"
@@ -25,6 +26,8 @@ public:
 
     void parse(std::string const & command);
     int operator()(const std::string & command);
+    void prepare_benchmark();
+    uint64_t benchmark_position(std::string_view fen, int depth);
 
     std::chrono::milliseconds time_limit {};
     std::thread main_search_thread {};

@@ -20,6 +20,7 @@ public:
 
     void kill();
     void wait();
+    uint64_t wait_and_get_nodes();
 
     std::atomic_bool stop { false };
 

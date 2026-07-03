@@ -156,6 +156,7 @@ set(ENYO_CHESS_SOURCES
 
 set(ENYO_ENGINE_SOURCES
     src/main.cpp
+    src/benchmark.cpp
     src/exepath.cpp
     src/thread.cpp
     src/uci.cpp

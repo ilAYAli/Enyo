@@ -498,6 +498,27 @@ Uci::Uci(enyo::Board & board)
     : b(board)
 { }
 
+void Uci::prepare_benchmark()
+{
+    thread::pool.kill();
+    ensure_eval_loaded();
+}
+
+uint64_t Uci::benchmark_position(std::string_view fen, int depth)
+{
+    thread::pool.kill();
+    b.set(std::string{fen});
+    tt::ttable.clear();
+
+    SearchInfo si{b, depth};
+    si.starttime = std::chrono::high_resolution_clock::now();
+    si.stoptime = std::chrono::high_resolution_clock::time_point::max();
+    si.soft_stoptime = std::chrono::high_resolution_clock::time_point::max();
+
+    thread::pool.init_threads(si, 1);
+    return thread::pool.wait_and_get_nodes();
+}
+
 void Uci::ensure_eval_loaded()
 {
     if (eval_loaded)

@@ -41,9 +41,18 @@ H1 indexed: white king =  3, black king = 59
 <a href="https://www.chessprogramming.org/Magic_Bitboards" rel="nofollow">Magic Bitboards</a><br>
 </pre>
 
+<h3>Benchmark</h3>
 <pre>
-<h3>perft></h3>
-echo 'position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -\nbench depth 5\nquit' | ./build/enyo
+./build/enyo bench
+./scripts/bench_avg.py ./build/enyo 10
+</pre>
+The benchmark searches 24 built-in positions at depth 11 with one thread, a
+16 MB hash, and tablebases disabled. It uses the configured evaluator; the
+reported node total is the deterministic search signature.
+
+<h3>Perft</h3>
+<pre>
+./build/enyo bench perft
 </pre>
 
 <h3>Search</h3>

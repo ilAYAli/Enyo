@@ -75,13 +75,20 @@ uint64_t Pool::get_tbhits() const
 
 void Pool::wait()
 {
+    (void)wait_and_get_nodes();
+}
+
+uint64_t Pool::wait_and_get_nodes()
+{
     std::ranges::for_each(threads_, [](auto& th) {
         if (th.joinable()) {
             th.join();
         }
     });
+    const uint64_t nodes = pool_.empty() ? 0 : get_nodes();
     pool_.clear();
     threads_.clear();
+    return nodes;
 }
 
 void Pool::kill()

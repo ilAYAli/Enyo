@@ -1,10 +1,12 @@
 #include "board.hpp"
+#include "benchmark.hpp"
 #include "uci.hpp"
 #include "pgn.hpp"
 #include "exepath.hpp"
 #include "probe.hpp"
 #include "getopt.h"
 #include "thread.hpp"
+#include "tt.hpp"
 #include "version.hpp"
 #include "eventlog.hpp"
 
@@ -15,6 +17,7 @@
 #include <iostream>
 #include <cstdio>
 #include <filesystem>
+#include <string_view>
 #include <thread>
 #include <nlohmann/json.hpp>
 
@@ -26,6 +29,15 @@ using namespace enyo;
 namespace {
 
 namespace fs = std::filesystem;
+
+enum class RunMode {
+    uci,
+    search_benchmark,
+    perft_benchmark,
+};
+
+constexpr std::string_view perft_benchmark_fen =
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 10";
 
 std::string get_default_config_file_path() {
     // Precedence:
@@ -138,7 +150,9 @@ int main(int argc, char **argv)
     }
 
     if (print_help) {
-        fmt::print("Usage: {} [OPTIONS]\n\n", argv[0]);
+        fmt::print("Usage: {} [OPTIONS]\n", argv[0]);
+        fmt::print("       {} bench [--depth=VALUE]\n", argv[0]);
+        fmt::print("       {} bench perft [--depth=VALUE] [--fen=FEN]\n\n", argv[0]);
         fmt::print("Options:\n");
         fmt::print("  -h, --help            Show this help message\n");
         fmt::print("  -b, --perft           Run perft test\n");
@@ -153,6 +167,29 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    RunMode run_mode = RunMode::uci;
+    if (optind < argc) {
+        if (std::string_view{argv[optind]} != "bench") {
+            fmt::print(stderr, "error: unknown command '{}'\n", argv[optind]);
+            return 1;
+        }
+        run_mode = RunMode::search_benchmark;
+        ++optind;
+        if (optind < argc && std::string_view{argv[optind]} == "perft") {
+            run_mode = RunMode::perft_benchmark;
+            ++optind;
+        }
+        if (optind < argc) {
+            fmt::print(stderr, "error: unexpected argument '{}'\n", argv[optind]);
+            return 1;
+        }
+    }
+
+    if (perft && run_mode != RunMode::uci) {
+        fmt::print(stderr, "error: --perft cannot be combined with the bench command\n");
+        return 1;
+    }
+
     if (!config_file_path.empty()) {
         if (!cfgmgr.load_config(config_file_path)) {
             fmt::print("error: failed to load config file: '{}'\n", config_file_path);
@@ -161,9 +198,45 @@ int main(int argc, char **argv)
         fmt::print("Using config file: '{}'\n", config_file_path);
     } else {
         config_file_path = get_default_config_file_path();
-        if (cfgmgr.load_config(config_file_path)) {
+        if (cfgmgr.load_config(config_file_path))
             fmt::print("Using config file: '{}'\n", config_file_path);
+    }
+
+    if (run_mode == RunMode::search_benchmark) {
+        if (!fen.empty()) {
+            fmt::print(stderr, "error: --fen is only valid with 'bench perft'\n");
+            return 1;
         }
+
+        eventlog::init();
+        if (!cfgmgr.move_policy_file.empty())
+            uci(fmt::format("setoption name move_policy_file value {}", cfgmgr.move_policy_file));
+        for (const auto& [name, value] : cfgmgr.configured_uci_options())
+            uci(fmt::format("setoption name {} value {}", name, value));
+
+        cfgmgr.num_threads = 1;
+        cfgmgr.hash_size = benchmark_hash_size_mb;
+        cfgmgr.use_syzygy = false;
+        if (!tt::ttable.set_size(benchmark_hash_size_mb)) {
+            fmt::print(stderr, "error: failed to allocate {} MB benchmark hash\n",
+                benchmark_hash_size_mb);
+            return 1;
+        }
+
+        init_search();
+        const int benchmark_depth = depth > 0 ? depth : default_benchmark_depth;
+        const auto result = run_search_benchmark(uci, benchmark_depth);
+        fmt::print("Benchmark depth: {}\n", benchmark_depth);
+        fmt::print("Positions: {}\n", result.positions);
+        fmt::print("Total time (ms): {}\n", result.elapsed.count());
+        fmt::print("Nodes searched: {}\n", result.nodes);
+        fmt::print("Nodes/second: {}\n", result.nodes_per_second);
+        return 0;
+    }
+
+    if (run_mode == RunMode::perft_benchmark) {
+        uci(fmt::format("position fen {}", fen.empty() ? perft_benchmark_fen : fen));
+        return uci(fmt::format("go perft {}", depth > 0 ? depth : 5));
     }
 
     if (!pgnfile.empty()) {
