@@ -56,8 +56,16 @@ Use <code>bench perft</code> for the move-generation-only benchmark.
 <h3>Configuration</h3>
 Enyo reads <code>~/.config/enyo/settings.json</code>. The file contains one
 <code>uci_options</code> object; every entry is validated and applied through
-the same <code>setoption</code> path used by a UCI client. Search parameters
-belong here only after their SPSA result has been validated.
+the same <code>setoption</code> path used by a UCI client. Options absent from
+the file keep their compiled defaults, and later UCI commands take precedence.
+Search parameters belong here only after their SPSA result has been validated.
+After validating a completed 1500-iteration SPSA run, apply its rounded theta
+values while preserving the other settings:
+<pre>
+./scripts/spsa_apply.py --state ~/spsa/spsa_state.json
+</pre>
+Use <code>--dry-run</code> to inspect the resulting JSON without changing the
+settings file.
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>
