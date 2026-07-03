@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).with_name("spsa_sprt.py").resolve()
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/spsa_sprt.py"
 
 
 def executable(path: Path, contents: str) -> None:
