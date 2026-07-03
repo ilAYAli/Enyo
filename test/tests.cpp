@@ -507,52 +507,62 @@ TEST(hash, recompute_matches_initial_position) {
     EXPECT_EQ(b.hash, zobrist::generate_hash(b));
 }
 
-TEST(config, use_nnue_option_round_trips) {
-    const bool original = cfgmgr.use_nnue;
+TEST(config, loads_only_uci_options)
+{
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto path = fs::temp_directory_path() / fmt::format("enyo_config_{}.json", stamp);
+    {
+        std::ofstream out(path);
+        out << R"({"uci_options":{"Threads":4,"Hash":128,"use_syzygy":false}})";
+    }
 
-    cfgmgr.use_nnue = true;
-    ASSERT_TRUE(cfgmgr.setopt("use_nnue", "false"));
-    EXPECT_FALSE(cfgmgr.use_nnue);
-    EXPECT_NE(
-        cfgmgr.allopts().find("option name use_nnue type check default false"),
-        std::string::npos);
+    ConfigManager config;
+    ASSERT_TRUE(config.load_config(path.string()));
+    const auto & options = config.configured_uci_options();
+    const auto value_of = [&](std::string_view name) -> std::optional<std::string> {
+        const auto it = std::ranges::find_if(options, [&](const auto & option) {
+            return option.first == name;
+        });
+        return it == options.end()
+            ? std::nullopt
+            : std::optional<std::string>{it->second};
+    };
 
-    ASSERT_TRUE(cfgmgr.setopt("use_nnue", "true"));
-    EXPECT_TRUE(cfgmgr.use_nnue);
-
-    cfgmgr.use_nnue = original;
+    EXPECT_EQ(value_of("Threads"), "4");
+    EXPECT_EQ(value_of("Hash"), "128");
+    EXPECT_EQ(value_of("use_syzygy"), "false");
+    EXPECT_EQ(config.num_threads, 1);
+    EXPECT_EQ(config.hash_size, 1024);
+    fs::remove(path);
 }
 
-TEST(config, use_lmr_option_round_trips) {
-    const bool original = cfgmgr.use_lmr;
+TEST(config, rejects_legacy_and_unknown_configuration)
+{
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto path = fs::temp_directory_path() / fmt::format("enyo_legacy_config_{}.json", stamp);
+    {
+        std::ofstream out(path);
+        out << R"({"constants":{"threads":4},"toggles":{"use_lmr":true}})";
+    }
 
-    cfgmgr.use_lmr = true;
-    ASSERT_TRUE(cfgmgr.setopt("use_lmr", "false"));
-    EXPECT_FALSE(cfgmgr.use_lmr);
-    EXPECT_NE(
-        cfgmgr.allopts().find("option name use_lmr type check default false"),
-        std::string::npos);
+    ConfigManager config;
+    testing::internal::CaptureStderr();
+    EXPECT_FALSE(config.load_config(path.string()));
+    const auto error = testing::internal::GetCapturedStderr();
+    EXPECT_NE(error.find("must contain only an object named 'uci_options'"), std::string::npos);
+    EXPECT_FALSE(config.setopt("use_tt", "false"));
+    EXPECT_FALSE(config.setopt("use_lmr", "false"));
+    EXPECT_FALSE(config.setopt("use_nnue", "false"));
 
-    ASSERT_TRUE(cfgmgr.setopt("use_lmr", "true"));
-    EXPECT_TRUE(cfgmgr.use_lmr);
-
-    cfgmgr.use_lmr = original;
-}
-
-TEST(config, use_tt_option_round_trips) {
-    const bool original = cfgmgr.use_tt;
-
-    cfgmgr.use_tt = true;
-    ASSERT_TRUE(cfgmgr.setopt("use_tt", "false"));
-    EXPECT_FALSE(cfgmgr.use_tt);
-    EXPECT_NE(
-        cfgmgr.allopts().find("option name use_tt type check default false"),
-        std::string::npos);
-
-    ASSERT_TRUE(cfgmgr.setopt("use_tt", "true"));
-    EXPECT_TRUE(cfgmgr.use_tt);
-
-    cfgmgr.use_tt = original;
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << R"({"uci_options":{"not_an_option":1}})";
+    }
+    testing::internal::CaptureStderr();
+    EXPECT_FALSE(config.load_config(path.string()));
+    const auto unknown_error = testing::internal::GetCapturedStderr();
+    EXPECT_NE(unknown_error.find("unknown UCI option 'not_an_option'"), std::string::npos);
+    fs::remove(path);
 }
 
 TEST(move_policy, startpos_e2e4_features_match_python_layout) {
@@ -1362,14 +1372,10 @@ static int pv_move_count(std::string_view line)
 TEST(search, root_lmr_does_not_hide_c7c6_defense) {
     const int old_threads = cfgmgr.num_threads;
     const bool old_use_syzygy = cfgmgr.use_syzygy;
-    const bool old_use_tt = cfgmgr.use_tt;
-    const bool old_use_lmr = cfgmgr.use_lmr;
     const auto old_nnue_file = cfgmgr.nnue_file;
 
     cfgmgr.num_threads = 1;
     cfgmgr.use_syzygy = false;
-    cfgmgr.use_tt = true;
-    cfgmgr.use_lmr = true;
     move_policy::clear_runtime_model();
 
     Board b;
@@ -1391,8 +1397,6 @@ TEST(search, root_lmr_does_not_hide_c7c6_defense) {
     (void)testing::internal::GetCapturedStdout();
     cfgmgr.num_threads = old_threads;
     cfgmgr.use_syzygy = old_use_syzygy;
-    cfgmgr.use_tt = old_use_tt;
-    cfgmgr.use_lmr = old_use_lmr;
 
     ASSERT_TRUE(best.has_value()) << out;
     EXPECT_EQ(*best, "c7c6") << out;

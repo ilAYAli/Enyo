@@ -3,32 +3,33 @@
 #include "uci.hpp"
 #include "pgn.hpp"
 #include "exepath.hpp"
-#include "probe.hpp"
 #include "getopt.h"
 #include "thread.hpp"
 #include "tt.hpp"
 #include "version.hpp"
 #include "eventlog.hpp"
 
-#include <fcntl.h>
-#include <unistd.h>
-
-
 #include <iostream>
 #include <cstdio>
+#include <cctype>
 #include <filesystem>
 #include <string_view>
-#include <thread>
-#include <nlohmann/json.hpp>
 
 #include "fmt/core.h"
 
-using json = nlohmann::json;
 using namespace enyo;
 
 namespace {
 
 namespace fs = std::filesystem;
+
+std::string lowercase(std::string value)
+{
+    std::ranges::transform(value, value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
 
 enum class RunMode {
     uci,
@@ -70,6 +71,24 @@ void read_input_from_stdin(Uci& uci) {
                 break;
         }
     }
+}
+
+void apply_configured_uci_options(Uci & uci)
+{
+    const auto apply = [&](std::string_view selected_name) {
+        for (const auto& [name, value] : cfgmgr.configured_uci_options()) {
+            if (lowercase(name) == selected_name)
+                uci(fmt::format("setoption name {} value {}", name, value));
+        }
+    };
+
+    apply("use_syzygy");
+    for (const auto& [name, value] : cfgmgr.configured_uci_options()) {
+        const auto lower_name = lowercase(name);
+        if (lower_name != "use_syzygy" && lower_name != "syzygypath")
+            uci(fmt::format("setoption name {} value {}", name, value));
+    }
+    apply("syzygypath");
 }
 
 } // anon ns
@@ -198,7 +217,11 @@ int main(int argc, char **argv)
         fmt::print("Using config file: '{}'\n", config_file_path);
     } else {
         config_file_path = get_default_config_file_path();
-        if (cfgmgr.load_config(config_file_path))
+        if (!config_file_path.empty() && !cfgmgr.load_config(config_file_path)) {
+            fmt::print("error: failed to load config file: '{}'\n", config_file_path);
+            return 1;
+        }
+        if (!config_file_path.empty())
             fmt::print("Using config file: '{}'\n", config_file_path);
     }
 
@@ -209,10 +232,15 @@ int main(int argc, char **argv)
         }
 
         eventlog::init();
-        if (!cfgmgr.move_policy_file.empty())
-            uci(fmt::format("setoption name move_policy_file value {}", cfgmgr.move_policy_file));
-        for (const auto& [name, value] : cfgmgr.configured_uci_options())
-            uci(fmt::format("setoption name {} value {}", name, value));
+        for (const auto& [name, value] : cfgmgr.configured_uci_options()) {
+            const auto lower_name = lowercase(name);
+            if (lower_name != "threads"
+                && lower_name != "hash"
+                && lower_name != "use_syzygy"
+                && lower_name != "syzygypath") {
+                uci(fmt::format("setoption name {} value {}", name, value));
+            }
+        }
 
         cfgmgr.num_threads = 1;
         cfgmgr.hash_size = benchmark_hash_size_mb;
@@ -261,21 +289,7 @@ int main(int argc, char **argv)
     if (!cfgmgr.move_policy_file.empty())
         uci(fmt::format("setoption name move_policy_file value {}", cfgmgr.move_policy_file));
 
-    for (const auto& [name, value] : cfgmgr.configured_uci_options())
-        uci(fmt::format("setoption name {} value {}", name, value));
-
-#if ENYO_USE_SYZYGY
-    if (cfgmgr.use_syzygy && !cfgmgr.syzygy_path.empty()) {
-        const auto path = syzygy::resolve_path(cfgmgr.syzygy_path);
-        if (!syzygy::init(path)) {
-            fmt::print(stderr,
-                "Fatal: failed to initialize tablebases at '{}'\n"
-                "Fix or remove the SyzygyPath setting before starting.\n",
-                path);
-            std::exit(1);
-        }
-    }
-#endif
+    apply_configured_uci_options(uci);
 
     init_search();
 

@@ -19,7 +19,6 @@
 #include "movepicker.hpp"
 #include "config.hpp"
 #include "tt.hpp"
-#include "hce.hpp"
 #include "see.hpp"
 #include "move_policy.hpp"
 
@@ -185,45 +184,26 @@ std::string root_pv_string_until_terminal(Board const & root, QuadraticPV const 
     return out;
 }
 
-template <Color Us, bool UseNNUE = true>
+template <Color Us>
 Value evaluate(Board & b, NNUE::Net * nnue)
 {
-    if constexpr (UseNNUE) {
-        if (Network::enabled && Network::INPUT_WEIGHTS != nullptr) {
-            auto const score = static_cast<Value>(nnue->Evaluate2(b, Us));
-            if constexpr (Constexpr::debug_eval)
-                fmt::print("<{}> move: {}, score2: {}\n", Us, b.history[b.histply -1].move, score);
-            return score;
-        }
-        auto const score = static_cast<Value>(nnue->Evaluate(Us));
+    if (Network::enabled && Network::INPUT_WEIGHTS != nullptr) {
+        auto const score = static_cast<Value>(nnue->Evaluate2(b, Us));
         if constexpr (Constexpr::debug_eval)
-            fmt::print("<{}> move: {}, score: {}\n", Us, b.history[b.histply -1].move, score);
-        return score;
-    } else {
-        const auto mv = b.history[b.histply -1].move;
-        if (mv.flags() == Move::Flags::promote)
-            return static_cast<Value>(enyo::HCE_evaluation<Us>(b));
-        const auto score = static_cast<Value>(enyo::HCE_evaluation<Us>(b));
-        if constexpr (Constexpr::debug_eval)
-            fmt::print("<{}> move: {}, score: {}, repeat: {}, key: {:016X}, fen: {}\n",
-                Us, b.history[b.histply -1].move, score, is_repetition(b), b.hash, b.fen());
+            fmt::print("<{}> move: {}, score2: {}\n", Us, b.history[b.histply -1].move, score);
         return score;
     }
-}
-
-template <Color Us>
-Value evaluate_runtime(Board & b, NNUE::Net * nnue)
-{
-    return cfgmgr.use_nnue
-        ? evaluate<Us, true>(b, nnue)
-        : evaluate<Us, false>(b, nnue);
+    auto const score = static_cast<Value>(nnue->Evaluate(Us));
+    if constexpr (Constexpr::debug_eval)
+        fmt::print("<{}> move: {}, score: {}\n", Us, b.history[b.histply -1].move, score);
+    return score;
 }
 
 template <Color Us>
 Value static_root_score_after(Board & b, NNUE::Net * nnue, Move move)
 {
     apply_move<Us, true, true>(b, move, nnue);
-    const auto score = static_cast<Value>(-evaluate_runtime<~Us>(b, nnue));
+    const auto score = static_cast<Value>(-evaluate<~Us>(b, nnue));
     revert_move<Us, true, true>(b, nnue);
     return score;
 }
@@ -339,7 +319,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     if (ss->ply >= MAX_PLY) {
         return ss->in_check
             ? Value::draw
-            : evaluate_runtime<Us>(b, &si.nnue);
+            : evaluate<Us>(b, &si.nnue);
     }
 
     if (is_repetition(b)) {
@@ -348,9 +328,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
 
     Move tt_move {};
     auto tt_value = Value::none;
-    std::optional<tt::HashEntry> tthit;
-    if (cfgmgr.use_tt)
-        tthit = tt::ttable.probe(b.hash);
+    auto tthit = tt::ttable.probe(b.hash);
     ss->tthit = tthit.has_value();
     if (ss->tthit) {
         tt_value = tt::value_from(tthit->value, ss->ply);
@@ -385,7 +363,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         if (lm.empty())
             return mated_in(ss->ply);
     } else {
-        best_value = ss->eval = evaluate_runtime<Us>(b, &si.nnue);
+        best_value = ss->eval = evaluate<Us>(b, &si.nnue);
         if (best_value >= beta) {
             // No TT store here. A stand-pat cutoff is a static eval, not a
             // search result; now that the TT accepts move-less bound entries
@@ -457,7 +435,6 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     // via tt_move but removes the unsoundness.
     if (!thread::pool.stop.load(std::memory_order_relaxed)
         && best_move
-        && cfgmgr.use_tt
         && best_value >= beta) {
         tt::ttable.store(
             b.hash,
@@ -492,7 +469,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     if (ss->ply >= MAX_PLY) {
         ss->in_check = is_check<Us>(b);
         return !ss->in_check
-            ? evaluate_runtime<Us>(b, &si.nnue)
+            ? evaluate<Us>(b, &si.nnue)
             : Value::draw;
     }
 
@@ -527,9 +504,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     // tt lookup:
     Move tt_move {};
     auto tt_value = -Value::none;
-    std::optional<tt::HashEntry> tte;
-    if (cfgmgr.use_tt)
-        tte = tt::ttable.probe(b.hash);
+    auto tte = tt::ttable.probe(b.hash);
     ss->tthit = tte.has_value();
     ss->ttPv = NT != NodeType::NonPV;
     if (ss->tthit) {
@@ -613,7 +588,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
                         // by uci_root.wdl_only_lost_tablebase_root_keeps_
                         // cutoffs_fast: ~4x node blowup with bound stores on.
                         // Re-probing the WDL table on revisit is cheap.
-                        if (cfgmgr.use_tt && tb_flag == tt::type::ExactBound) {
+                        if (tb_flag == tt::type::ExactBound) {
                             tt::ttable.store(
                                 b.hash,
                                 Move{},
@@ -667,7 +642,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     //   - UpperBound with tt_value < raw: tighter upper bound.
     //   - LowerBound with tt_value > raw: tighter lower bound.
     // Other combinations would widen, not tighten, so raw wins.
-    ss->eval = evaluate_runtime<Us>(b, &si.nnue);
+    ss->eval = evaluate<Us>(b, &si.nnue);
     if (ss->tthit && tt_value != Value::none) {
         const int b_ = tt::bound_of(tte->flag);
         if (b_ == tt::type::ExactBound
@@ -806,15 +781,13 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
                     // the TT instead of re-running the verification
                     // search. The verification ran at depth-4, so the
                     // bound is good for depth-3.
-                    if (cfgmgr.use_tt) {
-                        tt::ttable.store(
-                            b.hash,
-                            move,
-                            tt::value_to(probcut_value, ss->ply),
-                            tt::type::LowerBound,
-                            depth - probcut_reduction + 1
-                        );
-                    }
+                    tt::ttable.store(
+                        b.hash,
+                        move,
+                        tt::value_to(probcut_value, ss->ply),
+                        tt::type::LowerBound,
+                        depth - probcut_reduction + 1
+                    );
                     return probcut_value;
                 }
             }
@@ -991,8 +964,7 @@ moves_loop:
             value = static_cast<Value>(-cfgmgr.root_repetition_contempt);
         } else {
             // LMR: Late Move Reductions
-            if (cfgmgr.use_lmr
-                && depth >= 3
+            if (depth >= 3
                 && !ss->in_check
                 && !protect_quiet_check
                 && ss->move_count > 3 + 2 * pv_node) {
@@ -1119,7 +1091,7 @@ moves_loop:
                     // A singular verification search must not overwrite
                     // the entry it is verifying with its reduced-depth,
                     // offset-window result.
-                    if (cfgmgr.use_tt && ss->excluded_move == Move{}) {
+                    if (ss->excluded_move == Move{}) {
                         tt::ttable.store(
                             b.hash,
                             best_move,
@@ -1144,8 +1116,7 @@ moves_loop:
     // same position when the stored move is empty. Singular verification
     // results (excluded_move set) stay out of the table entirely.
     if (!thread::pool.stop.load(std::memory_order_relaxed)
-        && ss->excluded_move == Move{}
-        && cfgmgr.use_tt) {
+        && ss->excluded_move == Move{}) {
         tt::ttable.store(
             b.hash,
             best_move,

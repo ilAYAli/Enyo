@@ -53,6 +53,12 @@ hash, and no tablebases. The reported node total is the search signature;
 nodes per second measures speed. Use <code>bench_avg.py</code> for repeated timing.
 Use <code>bench perft</code> for the move-generation-only benchmark.
 
+<h3>Configuration</h3>
+Enyo reads <code>~/.config/enyo/settings.json</code>. The file contains one
+<code>uci_options</code> object; every entry is validated and applied through
+the same <code>setoption</code> path used by a UCI client. Search parameters
+belong here only after their SPSA result has been validated.
+
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>
 <a href="https://www.chessprogramming.org/Principal_Variation_Search" rel="nofollow">Principal Variation Search</a><br>

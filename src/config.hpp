@@ -41,18 +41,10 @@ namespace enyo {
 
 namespace Constexpr {
     // toggles:
-    static constexpr bool use_qsearch                = true;
     static constexpr bool use_nullmove               = true; // +195.2 Elo
     static constexpr bool use_aspiration_window      = true; // +274.6 Elo
     static constexpr bool use_razoring               = true; // +135.5 Elo
     static constexpr bool use_probcut                = true;
-    static constexpr bool use_tt                     = true;
-    // Experimental: gate the qsearch TT-cut only. Probe still happens (tt_move
-    // is still used for ordering), but the early return on flag match is
-    // skipped. Negamax TT-cut is unaffected. Intended to isolate whether the
-    // depth-unguarded qsearch cut is the source of warm-TT depth-1 blowups in
-    // check-rich endgames (see odonata-bot vs EnyoBot JCKXOwix move 60).
-    static constexpr bool use_qsearch_tt_cut         = true;
     static constexpr bool use_syzygy                 = ENYO_USE_SYZYGY != 0;
     // testing:
     static constexpr bool use_iir                    = true; //
@@ -151,13 +143,7 @@ public:
     int asp_delta = 12;
     int asp_depth = 5;
     bool use_chess_960      = false;
-    bool use_tt             = true;
-    bool use_tt_exact_cutoff = true;
-    bool use_tt_lower_cutoff = false;
-    bool use_tt_upper_cutoff = false;
     bool use_syzygy         = true;
-    bool use_nnue           = true;
-    bool use_lmr            = true;
     std::string nnue_file     = "";  // empty = embedded default
     std::string move_policy_file = "";
     int move_policy_max_eval_drop = 80;
@@ -171,15 +157,57 @@ public:
     }
 
     bool load_config(const std::string& filename) {
-        if (fs::exists(filename) && fs::is_regular_file(filename)) {
-            std::ifstream config_file(filename);
-            if (config_file) {
-                config_file >> option;
-                update_config();
-                return true;
+        uci_options.clear();
+        if (!fs::exists(filename) || !fs::is_regular_file(filename))
+            return false;
+
+        std::ifstream config_file(filename);
+        if (!config_file)
+            return false;
+
+        try {
+            json config;
+            config_file >> config;
+            if (!config.is_object()
+                || config.size() != 1
+                || !config.contains("uci_options")
+                || !config["uci_options"].is_object()) {
+                fmt::print(stderr,
+                    "error: config '{}' must contain only an object named 'uci_options'\n",
+                    filename);
+                return false;
             }
+
+            ConfigManager validated = *this;
+            for (auto it = config["uci_options"].begin();
+                 it != config["uci_options"].end(); ++it) {
+                if (!it.value().is_primitive()) {
+                    fmt::print(stderr,
+                        "error: UCI option '{}' in '{}' must be a scalar value\n",
+                        it.key(), filename);
+                    uci_options.clear();
+                    return false;
+                }
+                const auto value = json_value_to_string(it.value());
+                if (!validated.setopt(it.key(), value)) {
+                    fmt::print(stderr,
+                        "error: unknown UCI option '{}' in '{}'\n",
+                        it.key(), filename);
+                    uci_options.clear();
+                    return false;
+                }
+                uci_options.emplace_back(it.key(), value);
+            }
+            return true;
+        } catch (const json::exception& e) {
+            fmt::print(stderr, "error: failed to parse config '{}': {}\n", filename, e.what());
+            uci_options.clear();
+            return false;
+        } catch (const std::exception& e) {
+            fmt::print(stderr, "error: invalid option in config '{}': {}\n", filename, e.what());
+            uci_options.clear();
+            return false;
         }
-        return false;
     }
 
     std::string allopts() const {
@@ -216,19 +244,13 @@ public:
             concat("hist_bonus_scale", "spin", hist_bonus_scale, int(4), int(128)) +
             concat("asp_delta", "spin", asp_delta, int(4), int(100)) +
             concat("asp_depth", "spin", asp_depth, int(1), int(12)) +
-            concat("use_tt",        "check", use_tt) +
-            concat("use_tt_exact_cutoff", "check", use_tt_exact_cutoff) +
-            concat("use_tt_lower_cutoff", "check", use_tt_lower_cutoff) +
-            concat("use_tt_upper_cutoff", "check", use_tt_upper_cutoff) +
             concat("use_syzygy",    "check", use_syzygy) +
-            concat("use_nnue",      "check", use_nnue) +
             //concat("UCI_Chess960",  "check", use_chess_960) +
             concat("nnue_file",     "string", nnue_file) +
             concat("move_policy_file", "string", move_policy_file) +
             concat("move_policy_max_eval_drop", "spin", move_policy_max_eval_drop, int(0), int(1000)) +
             concat("logfile",       "string", logfile) +
-            concat("SyzygyPath",    "string", syzygy_path) +
-            concat("use_lmr",       "check", use_lmr);
+            concat("SyzygyPath",    "string", syzygy_path);
     }
 
     bool setopt(const std::string& opt, const std::string& value)
@@ -307,18 +329,8 @@ public:
             asp_depth = std::max(1, std::stoi(value));
         else if (lc == "uci_chess960")
             use_chess_960 = true;
-        else if (lc == "use_tt")
-            use_tt = (value == "true");
-        else if (lc == "use_tt_exact_cutoff")
-            use_tt_exact_cutoff = (value == "true");
-        else if (lc == "use_tt_lower_cutoff")
-            use_tt_lower_cutoff = (value == "true");
-        else if (lc == "use_tt_upper_cutoff")
-            use_tt_upper_cutoff = (value == "true");
         else if (lc == "use_syzygy")
             use_syzygy = (value == "true");
-        else if (lc == "use_nnue")
-            use_nnue = (value == "true");
         else if (lc == "nnue_file")
             nnue_file = value;
         else if (lc == "move_policy_file")
@@ -329,8 +341,6 @@ public:
             logfile = value;
         else if (lc == "syzygypath")
             syzygy_path = value;
-        else if (lc == "use_lmr")
-            use_lmr = (value == "true");
         else
             found = false;
         return found;
@@ -342,58 +352,6 @@ public:
     }
 
 private:
-    // Config is nested under "constants" / "toggles". Any field may be absent,
-    // in which case the member's in-class default is kept — so a user's
-    // settings.json only needs to carry the fields they care about overriding.
-    void update_config() {
-        try {
-            const json empty = json::object();
-            const auto& c = option.contains("constants") ? option["constants"] : empty;
-            const auto& t = option.contains("toggles")   ? option["toggles"]   : empty;
-
-            num_threads = c.value("threads",   num_threads);
-            hash_size   = c.value("Hash",      hash_size);
-            root_repetition_contempt = std::max(
-                0,
-                c.value("root_repetition_contempt", root_repetition_contempt));
-            tm_volatility_threshold = std::max(
-                1,
-                c.value("tm_volatility_threshold", tm_volatility_threshold));
-            const int new_lmr_base = std::max(
-                1,
-                c.value("lmr_base", lmr_base));
-            const int new_lmr_divisor = std::max(
-                50,
-                c.value("lmr_divisor", lmr_divisor));
-            if (new_lmr_base != lmr_base || new_lmr_divisor != lmr_divisor) {
-                lmr_base = new_lmr_base;
-                lmr_divisor = new_lmr_divisor;
-                lmr_dirty = true;
-            }
-            nnue_file   = c.value("nnue_file", nnue_file);
-            move_policy_file = c.value("move_policy_file", move_policy_file);
-            move_policy_max_eval_drop = std::max(
-                0,
-                c.value("move_policy_max_eval_drop", move_policy_max_eval_drop));
-            logfile     = c.value("logfile",   logfile);
-            syzygy_path = c.value("syzygy_path", c.value("SyzygyPath", syzygy_path));
-
-            use_tt              = t.value("use_tt",              use_tt);
-            use_tt_exact_cutoff = t.value("use_tt_exact_cutoff", use_tt_exact_cutoff);
-            use_tt_lower_cutoff = t.value("use_tt_lower_cutoff", use_tt_lower_cutoff);
-            use_tt_upper_cutoff = t.value("use_tt_upper_cutoff", use_tt_upper_cutoff);
-            use_syzygy          = t.value("use_syzygy",          use_syzygy);
-            use_nnue            = t.value("use_nnue",            use_nnue);
-            use_lmr             = t.value("use_lmr",             use_lmr);
-
-            uci_options.clear();
-            if (option.contains("uci_options"))
-                load_uci_options(option["uci_options"]);
-        } catch (const json::exception& e) {
-            fmt::print("Error: Unable to parse config JSON: '{}'\n", e.what());
-        }
-    }
-
     static std::string json_value_to_string(const json& value)
     {
         if (value.is_string())
@@ -411,24 +369,6 @@ private:
         return value.dump();
     }
 
-    void load_uci_options(const json& options)
-    {
-        if (options.is_object()) {
-            for (auto it = options.begin(); it != options.end(); ++it)
-                uci_options.emplace_back(it.key(), json_value_to_string(it.value()));
-            return;
-        }
-        if (options.is_array()) {
-            for (const auto& entry : options) {
-                if (!entry.is_object() || !entry.contains("name"))
-                    continue;
-                uci_options.emplace_back(
-                    entry.value("name", ""),
-                    json_value_to_string(entry.value("value", json{})));
-            }
-        }
-    }
-
     template <typename T>
     std::string concat(
         const std::string& name,
@@ -439,8 +379,6 @@ private:
         return fmt::format("option name {} type {} default {}", name, type, value)
             + (type == "spin" ? fmt::format(" min {} max {}", min, max) : "") + '\n';
     }
-
-    json option;
 };
 
 
