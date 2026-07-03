@@ -32,8 +32,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#MODES[@]} -eq 0 ]]; then
-    usage
-    exit 1
+    MODES+=("candidate")
 fi
 
 # Git checks
