@@ -11,15 +11,17 @@ command resumes where it left off. A per-iteration CSV log goes next to
 the state file.
 
 Example (smoke test):
-  scripts/spsa_tune.py --iterations 4 --rounds 2 --tc 1+0.01 --concurrency 4
+  ./spsa/tune.py --iterations 4 --rounds 2 --tc 1+0.01 --concurrency 4
 
 Real run (one ~30 thread box, a day or two):
-  scripts/spsa_tune.py --iterations 1500 --rounds 16 --tc 5+0.05 --concurrency 30
+  ./spsa/tune.py --iterations 1500 --rounds 16 --tc 5+0.05 --concurrency 30
 """
 
 import argparse
 import csv
+import fcntl
 import json
+import os
 import random
 import re
 import subprocess
@@ -28,6 +30,9 @@ from pathlib import Path
 
 ALPHA = 0.602
 GAMMA = 0.101
+DIRECTORY = Path(__file__).resolve().parent
+DEFAULT_PARAMS = DIRECTORY / "params.txt"
+DEFAULT_STATE = DIRECTORY / "state.json"
 
 # fastchess summary block: "Results of plus vs minus (...)" followed by
 # "Games: 4, Wins: 1, Losses: 1, Draws: 2, ..." (from plus's perspective).
@@ -92,13 +97,40 @@ def run_match(cfg, plus_opts, minus_opts):
     return (wins - losses) / max(games, 1), games
 
 
+def lock_state(state_path: Path):
+    """Exclusively lock one tuner state until this process exits."""
+    lock_path = state_path.with_suffix(".lock")
+    lock_file = lock_path.open("a+")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_file.close()
+        raise RuntimeError(
+            f"another SPSA tuner is already using {state_path}"
+        ) from None
+    lock_file.seek(0)
+    lock_file.truncate()
+    lock_file.write(f"{os.getpid()}\n")
+    lock_file.flush()
+    return lock_file
+
+
+def write_state(path: Path, state: dict) -> None:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps(state, indent=1))
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--engine", default=str(Path.home() / "assets/engines/candidate"))
     ap.add_argument("--book", default=str(Path.home() / "assets/books/AntiDraw_V2.1/WOMP_Openings_V1/WOMP_V1_+150_+159/WOMP_V1_6mvs_big_+140_+169.epd"))
-    ap.add_argument("--params", default=str(Path(__file__).parent / "spsa_params.txt"))
-    ap.add_argument("--state", default="spsa_state.json")
+    ap.add_argument("--params", type=Path, default=DEFAULT_PARAMS)
+    ap.add_argument("--state", type=Path, default=DEFAULT_STATE)
     ap.add_argument("--fastchess", default="fastchess")
     ap.add_argument("--tc", default="5+0.05")
     ap.add_argument("--hash", type=int, default=64)
@@ -113,8 +145,15 @@ def main():
     cfg = ap.parse_args()
 
     rng = random.Random(cfg.seed)
-    params = parse_params(cfg.params)
-    state_path = Path(cfg.state)
+    params = parse_params(cfg.params.expanduser())
+    state_path = cfg.state.expanduser()
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        state_lock = lock_state(state_path)
+    except RuntimeError as error:
+        raise SystemExit(f"error: {error}") from error
+    # Keep the descriptor alive for the entire tuning run. The OS releases the
+    # lock automatically after normal completion, Ctrl-C, or process failure.
     log_path = state_path.with_suffix(".csv")
 
     start_k = 1
@@ -149,11 +188,11 @@ def main():
             p["theta"] += (a_k / c_k) * flip * result
             p["theta"] = min(p["max"], max(p["min"], p["theta"]))
 
-        state_path.write_text(json.dumps({
+        write_state(state_path, {
             "k": k,
             "names": [p["name"] for p in params],
             "theta": [p["theta"] for p in params],
-        }, indent=1))
+        })
         with open(log_path, "a", newline="") as f:
             csv.writer(f).writerow([k, f"{result:+.3f}", games]
                                    + [f"{p['theta']:.2f}" for p in params])
@@ -169,6 +208,7 @@ def main():
     print("\nfinal values:")
     for p in params:
         print(f"  setoption name {p['name']} value {round(p['theta'])}")
+    state_lock.close()
 
 
 if __name__ == "__main__":

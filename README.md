@@ -63,10 +63,13 @@ compiled defaults. Validate a completed theta with the same binary and network
 on both sides, then promote it into both the engine and the next tuner's
 defaults:
 <pre>
-./scripts/spsa_sprt.py --games 300
-./scripts/spsa_sprt.py --games 1000
-./scripts/spsa_promote.py --state ~/spsa/spsa_state.json
+./spsa/tune.py --rounds 14 --concurrency 28
+./spsa/sprt.py --games 300
+./spsa/sprt.py --games 1000
+./spsa/promote.py
 </pre>
+The SPSA tools, parameter definitions, and ignored run state are all kept in
+<code>./spsa</code>. Tuning resumes from <code>spsa/state.json</code> when it exists.
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>

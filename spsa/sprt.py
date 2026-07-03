@@ -12,8 +12,9 @@ from datetime import datetime
 from pathlib import Path
 
 
-DEFAULT_STATE = Path("~/spsa/spsa_state.json")
-DEFAULT_PARAMS = Path(__file__).with_name("spsa_params.txt")
+DIRECTORY = Path(__file__).resolve().parent
+DEFAULT_STATE = DIRECTORY / "state.json"
+DEFAULT_PARAMS = DIRECTORY / "params.txt"
 DEFAULT_ENGINE = "~/assets/engines/candidate"
 DEFAULT_NET = "~/code/cpp/chess/enyo/net/berserk-9b84c340af7e.nn"
 DEFAULT_BOOK = (
@@ -81,7 +82,7 @@ def load_theta(
             f"iteration {required_iteration} is required"
         )
     if names != expected_names:
-        raise ValueError("SPSA state names do not match spsa_params.txt")
+        raise ValueError("SPSA state names do not match the parameter definitions")
     if not isinstance(theta, list) or len(theta) != len(names):
         raise ValueError("SPSA state theta does not match its parameter names")
 

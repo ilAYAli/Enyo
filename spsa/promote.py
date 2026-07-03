@@ -9,13 +9,14 @@ import stat
 import tempfile
 from pathlib import Path
 
-from spsa_sprt import load_parameters, load_theta
+from sprt import load_parameters, load_theta
 
 
-ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_STATE = Path("~/spsa/spsa_state.json")
+DIRECTORY = Path(__file__).resolve().parent
+ROOT = DIRECTORY.parent
+DEFAULT_STATE = DIRECTORY / "state.json"
 DEFAULT_CONFIG = ROOT / "src/config.hpp"
-DEFAULT_PARAMS = Path(__file__).with_name("spsa_params.txt")
+DEFAULT_PARAMS = DIRECTORY / "params.txt"
 
 
 def replace_compiled_defaults(
@@ -37,7 +38,7 @@ def replace_compiled_defaults(
         if current != default:
             raise ValueError(
                 f"compiled default for {name} is {current}, "
-                f"but spsa_params.txt says {default}"
+                f"but the parameter definitions say {default}"
             )
         updated = pattern.sub(
             lambda match: (

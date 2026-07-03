@@ -1,7 +1,7 @@
 # SPSA parameter list: name, default, min, max, c_end, r_end
 #   c_end: final perturbation size (knob units)
 #   r_end: final learning-rate factor (fishtest convention, a = r * c^2)
-# Defaults must match the engine's UCI defaults (see config.hpp).
+# Defaults must match the engine's UCI defaults in ../src/config.hpp.
 # rfp_* knobs are excluded: Constexpr::use_rfp is false, the code is dead.
 razor_depth,             3,    1,   10,    1,   0.03
 razor_margin,           58,    1,  500,   15,   0.03
