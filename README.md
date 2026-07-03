@@ -44,16 +44,19 @@ H1 indexed: white king =  3, black king = 59
 <h3>Benchmark</h3>
 <pre>
 ./build/enyo bench
+./build/enyo bench --depth 12
 ./scripts/bench_avg.py ./build/enyo 10
 </pre>
-The benchmark searches 24 built-in positions at depth 11 with one thread, a
-16 MB hash, and tablebases disabled. It uses the configured evaluator; the
-reported node total is the deterministic search signature.
+The <code>bench</code> argument runs a deterministic 24-position search suite
+with the configured evaluator. It defaults to depth 11, one thread, a 16 MB
+hash, and no tablebases. The reported node total is the search signature;
+nodes per second measures speed. Use <code>bench_avg.py</code> for repeated timing.
 
 <h3>Perft</h3>
 <pre>
 ./build/enyo bench perft
 </pre>
+Use <code>bench perft</code> for the move-generation-only benchmark.
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>
