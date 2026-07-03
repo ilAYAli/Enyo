@@ -102,46 +102,44 @@ public:
     int root_repetition_contempt = 24;
     // Score swing (cp) between iterations that counts as instability for
     // the soft-time extension. TODO Track 1: SPRT 60/80/150 variants.
-    int tm_volatility_threshold = 100;
+    int tm_volatility_threshold = 101;
     // LMR formula constants used by init_search() to precompute the
     // [depth][move_count] reduction table. Stored *100 so UCI spin can
     // express fractions (e.g. lmr_base 125 -> 1.25). Changing either
     // forces a rebuild of the table via init_search().
-    int lmr_base = 125;
-    int lmr_divisor = 224;
+    int lmr_base = 131;
+    int lmr_divisor = 185;
     // Set when either lmr_* knob is touched at runtime; consumers must
     // re-run init_search() and clear it. Kept out of setopt's return so
     // callers don't have to special-case the recompute.
     bool lmr_dirty = false;
-    // SPSA tuning knobs. Defaults reproduce the previously hardcoded
-    // search constants exactly; a binary with untouched options must
-    // search identically to one built before these existed.
+    // Search defaults promoted from SPSA; UCI options may override them.
     int razor_depth = 3;
-    int razor_margin = 63;
-    int razor_depth_factor = 182;
+    int razor_margin = 58;
+    int razor_depth_factor = 202;
     int rfp_depth = 7;
     int rfp_margin = 64;
     int rfp_improving = 71;
-    int nmp_base = 5;
-    int nmp_depth_div = 5;
-    int nmp_eval_div = 214;
-    int probcut_margin = 150;
+    int nmp_base = 6;
+    int nmp_depth_div = 6;
+    int nmp_eval_div = 190;
+    int probcut_margin = 151;
     int futility_depth = 6;
-    int futility_margin = 120;
+    int futility_margin = 142;
     int lmp_depth = 5;
-    int lmp_base = 3;
-    int lmp_improving_base = 5;
-    int se_depth = 8;
+    int lmp_base = 4;
+    int lmp_improving_base = 6;
+    int se_depth = 10;
     int se_margin_mult = 2;
     int se_entry_slack = 3;
-    int se_double_margin = 30;
+    int se_double_margin = 37;
     int se_double_cap = 4;
     int lmr_cutoff_cnt = 3;
-    int lmr_hist_div = 8192;
-    int hist_bonus_cap = 1600;
-    int hist_bonus_scale = 32;
-    int asp_delta = 12;
-    int asp_depth = 5;
+    int lmr_hist_div = 7782;
+    int hist_bonus_cap = 1711;
+    int hist_bonus_scale = 33;
+    int asp_delta = 11;
+    int asp_depth = 4;
     bool use_chess_960      = false;
     bool use_syzygy         = true;
     std::string nnue_file     = "";  // empty = embedded default

@@ -4,28 +4,28 @@
 # Defaults must match the engine's UCI defaults (see config.hpp).
 # rfp_* knobs are excluded: Constexpr::use_rfp is false, the code is dead.
 razor_depth,             3,    1,   10,    1,   0.03
-razor_margin,           63,    1,  500,   15,   0.03
-razor_depth_factor,    182,    1, 1000,   30,   0.03
-nmp_base,                5,    1,   10,    1,   0.03
-nmp_depth_div,           5,    1,   20,    2,   0.03
-nmp_eval_div,          214,   50, 1000,   40,   0.03
-probcut_margin,        150,   50,  500,   25,   0.03
+razor_margin,           58,    1,  500,   15,   0.03
+razor_depth_factor,    202,    1, 1000,   30,   0.03
+nmp_base,                6,    1,   10,    1,   0.03
+nmp_depth_div,           6,    1,   20,    2,   0.03
+nmp_eval_div,          190,   50, 1000,   40,   0.03
+probcut_margin,        151,   50,  500,   25,   0.03
 futility_depth,          6,    1,   15,    1,   0.03
-futility_margin,       120,   20,  500,   25,   0.03
+futility_margin,       142,   20,  500,   25,   0.03
 lmp_depth,               5,    1,   15,    1,   0.03
-lmp_base,                3,    0,   20,    1,   0.03
-lmp_improving_base,      5,    0,   20,    1,   0.03
-se_depth,                8,    4,   16,    1,   0.03
+lmp_base,                4,    0,   20,    1,   0.03
+lmp_improving_base,      6,    0,   20,    1,   0.03
+se_depth,               10,    4,   16,    1,   0.03
 se_margin_mult,          2,    1,   10,    1,   0.03
 se_entry_slack,          3,    0,   10,    1,   0.03
-se_double_margin,       30,    5,  300,   10,   0.03
+se_double_margin,       37,    5,  300,   10,   0.03
 se_double_cap,           4,    0,   16,    1,   0.03
 lmr_cutoff_cnt,          3,    1,   10,    1,   0.03
-lmr_hist_div,         8192, 1024, 65536, 1500,  0.03
-hist_bonus_cap,       1600,  256, 8192,  300,   0.03
-hist_bonus_scale,       32,    4,  128,    8,   0.03
-asp_delta,              12,    4,  100,    4,   0.03
-asp_depth,               5,    1,   12,    1,   0.03
-lmr_base,              125,    1,  500,   15,   0.03
-lmr_divisor,           224,   50, 1000,   25,   0.03
-tm_volatility_threshold,100,   1, 10000,  25,   0.03
+lmr_hist_div,         7782, 1024, 65536, 1500,  0.03
+hist_bonus_cap,       1711,  256, 8192,  300,   0.03
+hist_bonus_scale,       33,    4,  128,    8,   0.03
+asp_delta,              11,    4,  100,    4,   0.03
+asp_depth,               4,    1,   12,    1,   0.03
+lmr_base,              131,    1,  500,   15,   0.03
+lmr_divisor,           185,   50, 1000,   25,   0.03
+tm_volatility_threshold,101,   1, 10000,  25,   0.03
