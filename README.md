@@ -44,18 +44,13 @@ H1 indexed: white king =  3, black king = 59
 <h3>Benchmark</h3>
 <pre>
 ./build/enyo bench
-./build/enyo bench --depth 12
 ./scripts/bench_avg.py ./build/enyo 10
+./build/enyo bench perft
 </pre>
 The <code>bench</code> argument runs a deterministic 24-position search suite
 with the configured evaluator. It defaults to depth 11, one thread, a 16 MB
 hash, and no tablebases. The reported node total is the search signature;
 nodes per second measures speed. Use <code>bench_avg.py</code> for repeated timing.
-
-<h3>Perft</h3>
-<pre>
-./build/enyo bench perft
-</pre>
 Use <code>bench perft</code> for the move-generation-only benchmark.
 
 <h3>Search</h3>
