@@ -66,6 +66,13 @@ values while preserving the other settings:
 </pre>
 Use <code>--dry-run</code> to inspect the resulting JSON without changing the
 settings file.
+Validate the final theta against the compiled defaults with the same binary and
+network on both sides. The launcher supplies every parameter explicitly and
+runs Forge outside the caller's current repository:
+<pre>
+./scripts/spsa_sprt.py --games 300
+./scripts/spsa_sprt.py --games 1000
+</pre>
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>
