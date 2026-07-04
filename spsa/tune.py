@@ -25,6 +25,7 @@ import json
 import os
 import random
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -80,6 +81,22 @@ def engine_args(name, engine, options, extra_uci):
     return args
 
 
+def stop_process_group(proc):
+    """Terminate fastchess and every engine process it started."""
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.communicate()
+
+
 def run_match(cfg, plus_opts, minus_opts):
     cmd = [cfg.fastchess,
            "-engine", *engine_args("plus", cfg.engine, plus_opts, cfg.uci),
@@ -89,11 +106,18 @@ def run_match(cfg, plus_opts, minus_opts):
            "-rounds", str(cfg.rounds), "-repeat",
            "-concurrency", str(cfg.concurrency),
            "-recover"]
-    proc = subprocess.run(cmd, capture_output=True, text=True,
-                          timeout=cfg.match_timeout)
-    scores = SCORE_RE.findall(proc.stdout)
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=cfg.match_timeout)
+    except (KeyboardInterrupt, subprocess.TimeoutExpired):
+        stop_process_group(proc)
+        raise
+    scores = SCORE_RE.findall(stdout)
     if not scores:
-        sys.stderr.write(proc.stdout[-2000:] + proc.stderr[-2000:])
+        sys.stderr.write(stdout[-2000:] + stderr[-2000:])
         raise RuntimeError("could not parse match score from fastchess output")
     games, wins, losses, _draws = map(int, scores[-1])
     return (wins - losses) / max(games, 1), games
@@ -256,51 +280,73 @@ def main():
                                    + [p["name"] for p in params])
 
     run_started = time.monotonic()
-    for k in range(start_k, target_k + 1):
-        flips, plus_opts, minus_opts = [], {}, {}
+    last_completed = current_k
+    try:
+        for k in range(start_k, target_k + 1):
+            flips, plus_opts, minus_opts = [], {}, {}
+            for p in params:
+                _, c_k = schedules(p, k, target_k)
+                flip = rng.choice((-1, 1))
+                flips.append(flip)
+                lo, hi = p["min"], p["max"]
+                plus_opts[p["name"]] = round(
+                    min(hi, max(lo, p["theta"] + c_k * flip))
+                )
+                minus_opts[p["name"]] = round(
+                    min(hi, max(lo, p["theta"] - c_k * flip))
+                )
+
+            result, games = run_match(cfg, plus_opts, minus_opts)
+
+            for p, flip in zip(params, flips):
+                a_k, c_k = schedules(p, k, target_k)
+                p["theta"] += (a_k / c_k) * flip * result
+                p["theta"] = min(p["max"], max(p["min"], p["theta"]))
+
+            write_state(state_path, state_data(k, params, batch))
+            last_completed = k
+            with open(log_path, "a", newline="") as f:
+                csv.writer(f).writerow(
+                    [k, f"{result:+.3f}", games]
+                    + [f"{p['theta']:.2f}" for p in params]
+                )
+
+            moved = sorted(
+                params,
+                key=lambda p: abs(p["theta"] - p["default"]) / p["c_end"],
+                reverse=True,
+            )[:3]
+            drift = ", ".join(f"{p['name']}={p['theta']:.1f}" for p in moved)
+            # flush: with stdout redirected to a log file Python block-buffers,
+            # and a SIGTERM discards the buffer — the log must stream.
+            batch_k = k - batch["start_k"] + 1
+            completed = k - start_k + 1
+            seconds_per_iteration = (time.monotonic() - run_started) / completed
+            eta = format_duration(seconds_per_iteration * (target_k - k))
+            print(
+                f"[{batch_k}/{batch['iterations']}] "
+                f"result={result:+.3f}  {drift}  eta={eta}",
+                flush=True,
+            )
+
+        batch["complete"] = True
+        write_state(state_path, state_data(target_k, params, batch))
+
+        print("\nfinal values:")
         for p in params:
-            _, c_k = schedules(p, k, target_k)
-            flip = rng.choice((-1, 1))
-            flips.append(flip)
-            lo, hi = p["min"], p["max"]
-            plus_opts[p["name"]] = round(min(hi, max(lo, p["theta"] + c_k * flip)))
-            minus_opts[p["name"]] = round(min(hi, max(lo, p["theta"] - c_k * flip)))
-
-        result, games = run_match(cfg, plus_opts, minus_opts)
-
-        for p, flip in zip(params, flips):
-            a_k, c_k = schedules(p, k, target_k)
-            p["theta"] += (a_k / c_k) * flip * result
-            p["theta"] = min(p["max"], max(p["min"], p["theta"]))
-
-        write_state(state_path, state_data(k, params, batch))
-        with open(log_path, "a", newline="") as f:
-            csv.writer(f).writerow([k, f"{result:+.3f}", games]
-                                   + [f"{p['theta']:.2f}" for p in params])
-
-        moved = sorted(params, key=lambda p: abs(p["theta"] - p["default"]) / p["c_end"],
-                       reverse=True)[:3]
-        drift = ", ".join(f"{p['name']}={p['theta']:.1f}" for p in moved)
-        # flush: with stdout redirected to a log file Python block-buffers,
-        # and a SIGTERM discards the buffer — the log must stream.
-        batch_k = k - batch["start_k"] + 1
-        completed = k - start_k + 1
-        seconds_per_iteration = (time.monotonic() - run_started) / completed
-        eta = format_duration(seconds_per_iteration * (target_k - k))
+            print(f"  setoption name {p['name']} value {round(p['theta'])}")
+        return 0
+    except KeyboardInterrupt:
         print(
-            f"[{batch_k}/{batch['iterations']}] "
-            f"result={result:+.3f}  {drift}  eta={eta}",
+            f"\ninterrupted: checkpoint saved at iteration {last_completed}; "
+            f"resume target {target_k}",
+            file=sys.stderr,
             flush=True,
         )
-
-    batch["complete"] = True
-    write_state(state_path, state_data(target_k, params, batch))
-
-    print("\nfinal values:")
-    for p in params:
-        print(f"  setoption name {p['name']} value {round(p['theta'])}")
-    state_lock.close()
+        return 130
+    finally:
+        state_lock.close()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

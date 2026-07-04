@@ -3,9 +3,11 @@
 import fcntl
 import json
 import os
+import signal
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -139,6 +141,47 @@ class SpsaTuneTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("another SPSA tuner is already using", result.stderr)
         self.assertFalse(self.state.exists())
+
+    def test_ctrl_c_stops_match_and_preserves_checkpoint(self):
+        started = self.root / "fastchess-started"
+        terminated = self.root / "fastchess-terminated"
+        executable(
+            self.fastchess,
+            "#!/bin/sh\n"
+            "echo $$ > \"$FASTCHESS_STARTED\"\n"
+            "trap 'touch \"$FASTCHESS_TERMINATED\"; exit 0' TERM\n"
+            "sleep 60 &\n"
+            "wait\n",
+        )
+        environment = os.environ.copy()
+        environment["FASTCHESS_STARTED"] = str(started)
+        environment["FASTCHESS_TERMINATED"] = str(terminated)
+        process = subprocess.Popen(
+            self.command(iterations=2), stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, env=environment,
+        )
+        deadline = time.monotonic() + 5
+        while not started.exists() and time.monotonic() < deadline:
+            self.assertIsNone(process.poll())
+            time.sleep(0.01)
+        self.assertTrue(started.exists())
+
+        process.send_signal(signal.SIGINT)
+        stdout, stderr = process.communicate(timeout=10)
+
+        self.assertEqual(process.returncode, 130)
+        self.assertIn("starting 2 new iterations", stdout)
+        self.assertIn(
+            "interrupted: checkpoint saved at iteration 0; resume target 2",
+            stderr,
+        )
+        self.assertNotIn("Traceback", stderr)
+        self.assertTrue(terminated.exists())
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state["k"], 0)
+        self.assertFalse(state["batch"]["complete"])
+        with self.state.with_suffix(".lock").open("a+") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     def test_infers_parallelism_from_available_processors(self):
         arguments = self.root / "fastchess-arguments"

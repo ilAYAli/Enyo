@@ -79,7 +79,8 @@ round count, games per iteration, time control, and hash size are printed at
 startup. Progress lines include an ETA derived from the average duration of the
 iterations completed by the current process.
 When resuming an unfinished batch, its stored target is authoritative and a new
-<code>--iterations</code> value is ignored.
+<code>--iterations</code> value is ignored. Ctrl+C terminates the active match,
+preserves the last completed checkpoint, and leaves the batch ready to resume.
 The SPSA SPRT defaults to 1000 games and returns after launching the Forge run;
 use <code>--wait</code> only when foreground waiting is desired.
 
