@@ -77,7 +77,8 @@ class SpsaTuneTest(unittest.TestCase):
         self.assertEqual(state["batch"]["start_k"], 8)
         self.assertEqual(state["batch"]["target_k"], 9)
         progress = next(line for line in result.stdout.splitlines()
-                        if line.startswith("[1/2; total 8]"))
+                        if line.startswith("[1/2]"))
+        self.assertNotIn("total", progress)
         self.assertNotIn("games)", progress)
         self.assertRegex(progress, r"eta=\d+(?:h\d{2}m|m\d{2}s|s)$")
 

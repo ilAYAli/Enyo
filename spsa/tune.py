@@ -288,7 +288,7 @@ def main():
         seconds_per_iteration = (time.monotonic() - run_started) / completed
         eta = format_duration(seconds_per_iteration * (target_k - k))
         print(
-            f"[{batch_k}/{batch['iterations']}; total {k}] "
+            f"[{batch_k}/{batch['iterations']}] "
             f"result={result:+.3f}  {drift}  eta={eta}",
             flush=True,
         )
