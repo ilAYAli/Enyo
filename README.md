@@ -62,26 +62,19 @@ Keep machine-specific options here; validated search parameters belong in the
 compiled defaults.
 
 <h3>SPSA tuning</h3>
-Run one complete tuning and validation cycle with:
+Train, test, and promote are separate operations:
 <pre>
-./spsa/train
+./spsa/train                         # train 500 iterations
+./spsa/train --iterations 100        # train 100 iterations
+./spsa/sprt                          # test current values with Forge
+./spsa/promote --dry-run             # inspect promotion
+./spsa/promote                       # update params.txt and src/config.hpp
 </pre>
-This adds 500 iterations by default. Override the batch size with:
-<pre>
-./spsa/train --iterations 100
-</pre>
-The command checkpoints and pushes the current state, tunes with all available
-processors, checkpoints the result, returns to <code>main</code>, and launches a
-detached 1000-game Forge SPRT. Ctrl+C preserves the last completed iteration;
-run the same command again to resume the stored target.
-
-After a positive SPRT, inspect and promote the result with:
-<pre>
-./spsa/train --promote --dry-run
-./spsa/train --promote
-</pre>
-The tracked <code>spsa/state.json</code> is the canonical tuning checkpoint;
-runtime CSV and lock files are kept under <code>spsa/.runtime</code>.
+<code>train</code> only updates <code>spsa/state.json</code> and resumes an
+unfinished batch after Ctrl+C. <code>sprt</code> launches a detached 1000-game
+test against the last promoted defaults. <code>promote</code> only updates the
+two tracked defaults files; it does not commit or push. Runtime CSV and lock
+files are kept under <code>spsa/.runtime</code>.
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>

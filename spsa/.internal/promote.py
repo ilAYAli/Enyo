@@ -113,11 +113,10 @@ def show_diff(path: Path, before: str, after: str) -> None:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="./spsa/promote", description=__doc__)
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--params", type=Path, default=DEFAULT_PARAMS)
-    parser.add_argument("--require-iteration", type=int, default=1500)
     parser.add_argument(
         "--dry-run", action="store_true",
         help="print the source changes without writing them",
@@ -127,18 +126,13 @@ def parse_args():
 
 def main() -> int:
     args = parse_args()
-    if args.require_iteration <= 0:
-        raise SystemExit("error: --require-iteration must be positive")
-
     state_path = args.state.expanduser()
     config_path = args.config.expanduser().resolve(strict=False)
     params_path = args.params.expanduser().resolve(strict=False)
     try:
         parameters = load_parameters(params_path)
         names = [name for name, _ in parameters]
-        iteration, theta = load_theta(
-            state_path, names, args.require_iteration
-        )
+        iteration, theta = load_theta(state_path, names)
         config_before = read_text(config_path, "engine config")
         params_before = read_text(params_path, "SPSA parameters")
         config_after = replace_compiled_defaults(

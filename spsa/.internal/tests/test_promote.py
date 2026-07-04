@@ -88,9 +88,9 @@ class SpsaPromoteTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("compiled default for alpha is 4", result.stderr)
 
-    def test_rejects_incomplete_state(self):
+    def test_rejects_unfinished_tuning_batch(self):
         state = json.loads(self.state.read_text())
-        state["k"] = 1499
+        state["batch"] = {"complete": False}
         self.state.write_text(json.dumps(state))
 
         result = subprocess.run(
@@ -98,7 +98,7 @@ class SpsaPromoteTest(unittest.TestCase):
         )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("iteration 1500 is required", result.stderr)
+        self.assertIn("unfinished tuning batch", result.stderr)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare a completed SPSA theta with its original defaults through Forge."""
+"""Compare the current completed SPSA theta with promoted defaults through Forge."""
 
 import argparse
 import json
@@ -59,9 +59,7 @@ def load_parameters(path: Path) -> list[tuple[str, int]]:
     return parameters
 
 
-def load_theta(
-    path: Path, expected_names: list[str], required_iteration: int
-) -> tuple[int, list[int]]:
+def load_theta(path: Path, expected_names: list[str]) -> tuple[int, list[int]]:
     try:
         state = json.loads(path.read_text())
     except FileNotFoundError as error:
@@ -71,16 +69,16 @@ def load_theta(
 
     if not isinstance(state, dict):
         raise ValueError("SPSA state must be a JSON object")
+    batch = state.get("batch")
+    if isinstance(batch, dict) and batch.get("complete") is False:
+        raise ValueError("SPSA state contains an unfinished tuning batch")
     iteration = state.get("k")
     names = state.get("names")
     theta = state.get("theta")
     if isinstance(iteration, bool) or not isinstance(iteration, int):
         raise ValueError("SPSA state has an invalid iteration 'k'")
-    if iteration < required_iteration:
-        raise ValueError(
-            f"SPSA state is only at iteration {iteration}; "
-            f"iteration {required_iteration} is required"
-        )
+    if iteration < 0:
+        raise ValueError("SPSA state has a negative iteration 'k'")
     if names != expected_names:
         raise ValueError("SPSA state names do not match the parameter definitions")
     if not isinstance(theta, list) or len(theta) != len(names):
@@ -106,14 +104,14 @@ def require_local_file(value: str, description: str, *, executable=False) -> Non
 
 def build_command(args, parameters: list[tuple[str, int]], theta: list[int], iteration: int):
     run = args.run or (
-        f"spsa-final-vs-defaults-{args.games}-"
+        f"spsa-k{iteration}-vs-promoted-{args.games}-"
         f"{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     )
     command = [args.forge, "sprt", "--run", run]
     if args.wait:
         command.append("--wait")
     command.extend([
-        "--comment", f"SPSA iteration {iteration} vs compiled defaults",
+        "--comment", f"SPSA iteration {iteration} vs promoted defaults",
         "--book", args.book,
         "--reference", args.engine,
         "--candidate", args.engine,
@@ -138,7 +136,7 @@ def build_command(args, parameters: list[tuple[str, int]], theta: list[int], ite
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="./spsa/sprt", description=__doc__)
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
     parser.add_argument("--params", type=Path, default=DEFAULT_PARAMS)
     parser.add_argument("--games", type=positive_int, default=1000)
@@ -152,7 +150,6 @@ def parse_args():
     parser.add_argument("--hash", type=positive_int, default=128)
     parser.add_argument("--tc", default="10+0.1")
     parser.add_argument("--restart", choices=("on", "off"), default="on")
-    parser.add_argument("--require-iteration", type=positive_int, default=1500)
     parser.add_argument("--forge", default="forge")
     parser.add_argument(
         "--wait", action=argparse.BooleanOptionalAction, default=False,
@@ -172,9 +169,7 @@ def main() -> int:
     try:
         parameters = load_parameters(params_path)
         names = [name for name, _ in parameters]
-        iteration, theta = load_theta(
-            state_path, names, args.require_iteration
-        )
+        iteration, theta = load_theta(state_path, names)
         defaults = [default for _, default in parameters]
         if theta == defaults:
             raise ValueError(

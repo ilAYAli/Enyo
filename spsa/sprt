@@ -3,4 +3,4 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec "$SCRIPT_DIR/.internal/tune.py" "$@"
+exec "$SCRIPT_DIR/.internal/sprt.py" "$@"

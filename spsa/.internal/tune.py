@@ -12,10 +12,10 @@ command resumes its unfinished batch instead of adding another batch. A
 per-iteration CSV log goes next to the state file.
 
 Example (smoke test):
-  ./spsa/.internal/tune.py --iterations 4 --tc 1+0.01 --concurrency 4
+  ./spsa/train --iterations 4 --tc 1+0.01 --concurrency 4
 
-Real run (one ~30 thread box, a day or two):
-  ./spsa/.internal/tune.py --iterations 1500 --tc 5+0.05
+Normal run:
+  ./spsa/train --iterations 500
 """
 
 import argparse
@@ -186,7 +186,7 @@ def format_duration(seconds):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
+    ap = argparse.ArgumentParser(prog="./spsa/train", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--engine", default=str(Path.home() / "assets/engines/candidate"))
     ap.add_argument("--book", default=str(Path.home() / "assets/books/AntiDraw_V2.1/WOMP_Openings_V1/WOMP_V1_+150_+159/WOMP_V1_6mvs_big_+140_+169.epd"))
@@ -204,8 +204,11 @@ def main():
         help="concurrent games; defaults to available processors",
     )
     ap.add_argument(
-        "--iterations", type=int, default=1500,
-        help="new iterations to run; ignored when resuming an unfinished batch",
+        "--iterations", type=int, default=500,
+        help=(
+            "new iterations to run (default: 500); ignored when resuming "
+            "an unfinished batch"
+        ),
     )
     ap.add_argument("--match-timeout", type=int, default=3600)
     ap.add_argument("--uci", action="append", default=[],

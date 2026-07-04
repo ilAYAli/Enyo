@@ -135,9 +135,9 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
         self.assertIn("--candidate-uci alpha=2", result.stdout)
         self.assertFalse(self.capture.exists())
 
-    def test_rejects_incomplete_state(self):
+    def test_rejects_invalid_iteration(self):
         state = json.loads(self.state.read_text())
-        state["k"] = 1499
+        state["k"] = -1
         self.state.write_text(json.dumps(state))
 
         result = subprocess.run(
@@ -150,7 +150,7 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
         )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("iteration 1500 is required", result.stderr)
+        self.assertIn("negative iteration", result.stderr)
         self.assertFalse(self.capture.exists())
 
     def test_rejects_parameter_name_mismatch(self):
@@ -187,6 +187,24 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("matches the reference defaults", result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_rejects_unfinished_tuning_batch(self):
+        state = json.loads(self.state.read_text())
+        state["batch"] = {"complete": False}
+        self.state.write_text(json.dumps(state))
+
+        result = subprocess.run(
+            self.command(),
+            cwd=self.root,
+            env=self.environment(),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unfinished tuning batch", result.stderr)
         self.assertFalse(self.capture.exists())
 
 
