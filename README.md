@@ -83,6 +83,12 @@ When resuming an unfinished batch, its stored target is authoritative and a new
 preserves the last completed checkpoint, and leaves the batch ready to resume.
 The SPSA SPRT defaults to 1000 games and returns after launching the Forge run;
 use <code>--wait</code> only when foreground waiting is desired.
+To checkpoint the current state, tune to iteration 3000, checkpoint again, and
+launch the SPRT as one resumable workflow, run:
+<pre>
+./spsa/tune_and_sprt.sh
+</pre>
+Pass another target iteration as its sole argument when needed.
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>
