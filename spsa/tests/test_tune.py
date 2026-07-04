@@ -76,7 +76,10 @@ class SpsaTuneTest(unittest.TestCase):
         self.assertEqual(state["k"], 9)
         self.assertEqual(state["batch"]["start_k"], 8)
         self.assertEqual(state["batch"]["target_k"], 9)
-        self.assertRegex(result.stdout, r"\[1/2; total 8\].*eta=\d+[hms]")
+        progress = next(line for line in result.stdout.splitlines()
+                        if line.startswith("[1/2; total 8]"))
+        self.assertNotIn("games)", progress)
+        self.assertRegex(progress, r"eta=\d+(?:h\d{2}m|m\d{2}s|s)$")
 
     def test_interrupted_batch_resumes_its_original_target(self):
         self.state.write_text(json.dumps({
