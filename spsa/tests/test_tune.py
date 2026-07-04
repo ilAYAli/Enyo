@@ -2,6 +2,7 @@
 
 import fcntl
 import json
+import os
 import stat
 import subprocess
 import tempfile
@@ -34,17 +35,18 @@ class SpsaTuneTest(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def command(self, iterations=1):
-        return [
+    def command(self, iterations=1, explicit_parallelism=True):
+        command = [
             str(SCRIPT),
             "--params", str(self.params),
             "--state", str(self.state),
             "--fastchess", str(self.fastchess),
             "--iterations", str(iterations),
-            "--rounds", "1",
-            "--concurrency", "1",
             "--seed", "1",
         ]
+        if explicit_parallelism:
+            command.extend(["--rounds", "1", "--concurrency", "1"])
+        return command
 
     def test_writes_state_and_csv_next_to_each_other(self):
         result = subprocess.run(
@@ -109,6 +111,32 @@ class SpsaTuneTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("another SPSA tuner is already using", result.stderr)
         self.assertFalse(self.state.exists())
+
+    def test_infers_parallelism_from_available_processors(self):
+        arguments = self.root / "fastchess-arguments"
+        executable(
+            self.fastchess,
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$@\" > \"$FASTCHESS_ARGUMENTS\"\n"
+            "echo 'Games: 2, Wins: 1, Losses: 0, Draws: 1'\n",
+        )
+        environment = os.environ.copy()
+        environment["FASTCHESS_ARGUMENTS"] = str(arguments)
+
+        subprocess.run(
+            self.command(explicit_parallelism=False), check=True,
+            capture_output=True, text=True, env=environment,
+        )
+
+        args = arguments.read_text().splitlines()
+        if hasattr(os, "sched_getaffinity"):
+            concurrency = max(1, len(os.sched_getaffinity(0)))
+        else:
+            concurrency = max(1, os.cpu_count() or 1)
+        self.assertEqual(args[args.index("-concurrency") + 1], str(concurrency))
+        self.assertEqual(
+            args[args.index("-rounds") + 1], str(max(1, concurrency // 2))
+        )
 
 
 if __name__ == "__main__":

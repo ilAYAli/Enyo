@@ -12,10 +12,10 @@ command resumes its unfinished batch instead of adding another batch. A
 per-iteration CSV log goes next to the state file.
 
 Example (smoke test):
-  ./spsa/tune.py --iterations 4 --rounds 2 --tc 1+0.01 --concurrency 4
+  ./spsa/tune.py --iterations 4 --tc 1+0.01 --concurrency 4
 
 Real run (one ~30 thread box, a day or two):
-  ./spsa/tune.py --iterations 1500 --rounds 16 --tc 5+0.05 --concurrency 30
+  ./spsa/tune.py --iterations 1500 --tc 5+0.05
 """
 
 import argparse
@@ -134,6 +134,13 @@ def state_data(k, params, batch):
     }
 
 
+def available_processors():
+    """Return the number of processors available to this process."""
+    if hasattr(os, "sched_getaffinity"):
+        return max(1, len(os.sched_getaffinity(0)))
+    return max(1, os.cpu_count() or 1)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -144,9 +151,14 @@ def main():
     ap.add_argument("--fastchess", default="fastchess")
     ap.add_argument("--tc", default="5+0.05")
     ap.add_argument("--hash", type=int, default=64)
-    ap.add_argument("--rounds", type=int, default=16,
-                    help="rounds per iteration; games = 2x rounds")
-    ap.add_argument("--concurrency", type=int, default=8)
+    ap.add_argument(
+        "--rounds", type=int,
+        help="paired rounds per iteration; defaults to concurrency / 2",
+    )
+    ap.add_argument(
+        "--concurrency", type=int, default=available_processors(),
+        help="concurrent games; defaults to available processors",
+    )
     ap.add_argument(
         "--iterations", type=int, default=1500,
         help="new iterations to run; interrupted batches resume automatically",
@@ -158,6 +170,12 @@ def main():
     cfg = ap.parse_args()
     if cfg.iterations < 1:
         ap.error("--iterations must be positive")
+    if cfg.concurrency < 1:
+        ap.error("--concurrency must be positive")
+    if cfg.rounds is None:
+        cfg.rounds = max(1, cfg.concurrency // 2)
+    elif cfg.rounds < 1:
+        ap.error("--rounds must be positive")
 
     rng = random.Random(cfg.seed)
     params = parse_params(cfg.params.expanduser())

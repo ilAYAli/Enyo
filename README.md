@@ -63,13 +63,16 @@ compiled defaults. Validate a completed theta with the same binary and network
 on both sides, then promote it into both the engine and the next tuner's
 defaults:
 <pre>
-./spsa/tune.py --rounds 14 --concurrency 28
+./spsa/tune.py
 ./spsa/sprt.py --games 300
 ./spsa/sprt.py --games 1000
 ./spsa/promote.py
 </pre>
 The SPSA tools, parameter definitions, and ignored run state are all kept in
 <code>./spsa</code>. Tuning resumes from <code>spsa/state.json</code> when it exists.
+By default, the local tuner uses every processor available to it and runs one
+paired round per two concurrent games. Use <code>--concurrency</code> or
+<code>--rounds</code> only to override those defaults.
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>
