@@ -68,7 +68,7 @@ class SpsaTuneTest(unittest.TestCase):
             "theta": [1.0],
         }))
 
-        subprocess.run(
+        result = subprocess.run(
             self.command(iterations=2), check=True, capture_output=True, text=True
         )
 
@@ -76,6 +76,7 @@ class SpsaTuneTest(unittest.TestCase):
         self.assertEqual(state["k"], 9)
         self.assertEqual(state["batch"]["start_k"], 8)
         self.assertEqual(state["batch"]["target_k"], 9)
+        self.assertRegex(result.stdout, r"\[1/2; total 8\].*eta=\d+[hms]")
 
     def test_interrupted_batch_resumes_its_original_target(self):
         self.state.write_text(json.dumps({

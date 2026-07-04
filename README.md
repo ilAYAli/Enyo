@@ -74,7 +74,8 @@ By default, the local tuner uses every processor available to it and runs one
 paired round per two concurrent games. Use <code>--concurrency</code> or
 <code>--rounds</code> only to override those defaults. The resolved concurrency,
 round count, games per iteration, time control, and hash size are printed at
-startup.
+startup. Progress lines include an ETA derived from the average duration of the
+iterations completed by the current process.
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>

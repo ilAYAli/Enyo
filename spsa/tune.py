@@ -27,6 +27,7 @@ import random
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ALPHA = 0.602
@@ -141,6 +142,17 @@ def available_processors():
     return max(1, os.cpu_count() or 1)
 
 
+def format_duration(seconds):
+    total = max(0, round(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    if minutes:
+        return f"{minutes}m{seconds:02d}s"
+    return f"{seconds}s"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -249,6 +261,7 @@ def main():
             csv.writer(f).writerow(["iter", "result", "games"]
                                    + [p["name"] for p in params])
 
+    run_started = time.monotonic()
     for k in range(start_k, target_k + 1):
         flips, plus_opts, minus_opts = [], {}, {}
         for p in params:
@@ -277,9 +290,12 @@ def main():
         # flush: with stdout redirected to a log file Python block-buffers,
         # and a SIGTERM discards the buffer — the log must stream.
         batch_k = k - batch["start_k"] + 1
+        completed = k - start_k + 1
+        seconds_per_iteration = (time.monotonic() - run_started) / completed
+        eta = format_duration(seconds_per_iteration * (target_k - k))
         print(
             f"[{batch_k}/{batch['iterations']}; total {k}] "
-            f"result={result:+.3f} ({games} games)  {drift}",
+            f"result={result:+.3f} ({games} games) eta={eta}  {drift}",
             flush=True,
         )
 
