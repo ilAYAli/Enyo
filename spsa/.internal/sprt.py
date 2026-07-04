@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-DIRECTORY = Path(__file__).resolve().parent
+DIRECTORY = Path(__file__).resolve().parent.parent
 DEFAULT_STATE = DIRECTORY / "state.json"
 DEFAULT_PARAMS = DIRECTORY / "params.txt"
 DEFAULT_ENGINE = "~/assets/engines/candidate"

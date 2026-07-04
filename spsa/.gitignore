@@ -1,4 +1,3 @@
-/state.csv
-/state.lock
+/.runtime/
 /spsa.log
 /.state.json.*.tmp

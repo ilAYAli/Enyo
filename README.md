@@ -59,36 +59,29 @@ Enyo reads <code>~/.config/enyo/settings.json</code>. The file contains one
 the same <code>setoption</code> path used by a UCI client. Options absent from
 the file keep their compiled defaults, and later UCI commands take precedence.
 Keep machine-specific options here; validated search parameters belong in the
-compiled defaults. Validate a completed theta with the same binary and network
-on both sides, then promote it into both the engine and the next tuner's
-defaults:
+compiled defaults.
+
+<h3>SPSA tuning</h3>
+Run one complete tuning and validation cycle with:
 <pre>
-./spsa/tune.py
-./spsa/sprt.py
-./spsa/promote.py
+./spsa/train
 </pre>
-The SPSA tools, parameter definitions, and canonical checkpoint are all kept in
-<code>./spsa</code>. Tuning resumes from the tracked
-<code>spsa/state.json</code>; commit it after a completed tuning session so Git
-synchronizes the checkpoint across hosts. CSV history, locks, and logs remain
-local run artifacts.
-By default, the local tuner uses every processor available to it and runs one
-paired round per two concurrent games. Use <code>--concurrency</code> or
-<code>--rounds</code> only to override those defaults. The resolved concurrency,
-round count, games per iteration, time control, and hash size are printed at
-startup. Progress lines include an ETA derived from the average duration of the
-iterations completed by the current process.
-When resuming an unfinished batch, its stored target is authoritative and a new
-<code>--iterations</code> value is ignored. Ctrl+C terminates the active match,
-preserves the last completed checkpoint, and leaves the batch ready to resume.
-The SPSA SPRT defaults to 1000 games and returns after launching the Forge run;
-use <code>--wait</code> only when foreground waiting is desired.
-To checkpoint the current state, tune to iteration 3000, checkpoint again, and
-launch the SPRT as one resumable workflow, run:
+This adds 500 iterations by default. Override the batch size with:
 <pre>
-./spsa/tune_and_sprt.sh
+./spsa/train --iterations 100
 </pre>
-Pass another target iteration as its sole argument when needed.
+The command checkpoints and pushes the current state, tunes with all available
+processors, checkpoints the result, returns to <code>main</code>, and launches a
+detached 1000-game Forge SPRT. Ctrl+C preserves the last completed iteration;
+run the same command again to resume the stored target.
+
+After a positive SPRT, inspect and promote the result with:
+<pre>
+./spsa/train --promote --dry-run
+./spsa/train --promote
+</pre>
+The tracked <code>spsa/state.json</code> is the canonical tuning checkpoint;
+runtime CSV and lock files are kept under <code>spsa/.runtime</code>.
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>

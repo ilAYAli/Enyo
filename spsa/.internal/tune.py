@@ -12,10 +12,10 @@ command resumes its unfinished batch instead of adding another batch. A
 per-iteration CSV log goes next to the state file.
 
 Example (smoke test):
-  ./spsa/tune.py --iterations 4 --tc 1+0.01 --concurrency 4
+  ./spsa/.internal/tune.py --iterations 4 --tc 1+0.01 --concurrency 4
 
 Real run (one ~30 thread box, a day or two):
-  ./spsa/tune.py --iterations 1500 --tc 5+0.05
+  ./spsa/.internal/tune.py --iterations 1500 --tc 5+0.05
 """
 
 import argparse
@@ -33,9 +33,10 @@ from pathlib import Path
 
 ALPHA = 0.602
 GAMMA = 0.101
-DIRECTORY = Path(__file__).resolve().parent
+DIRECTORY = Path(__file__).resolve().parent.parent
 DEFAULT_PARAMS = DIRECTORY / "params.txt"
 DEFAULT_STATE = DIRECTORY / "state.json"
+DEFAULT_RUNTIME = DIRECTORY / ".runtime"
 
 # fastchess summary block: "Results of plus vs minus (...)" followed by
 # "Games: 4, Wins: 1, Losses: 1, Draws: 2, ..." (from plus's perspective).
@@ -123,9 +124,16 @@ def run_match(cfg, plus_opts, minus_opts):
     return (wins - losses) / max(games, 1), games
 
 
+def runtime_file(state_path: Path, suffix: str) -> Path:
+    if state_path.resolve() == DEFAULT_STATE.resolve():
+        DEFAULT_RUNTIME.mkdir(exist_ok=True)
+        return DEFAULT_RUNTIME / f"state{suffix}"
+    return state_path.with_suffix(suffix)
+
+
 def lock_state(state_path: Path):
     """Exclusively lock one tuner state until this process exits."""
-    lock_path = state_path.with_suffix(".lock")
+    lock_path = runtime_file(state_path, ".lock")
     lock_file = lock_path.open("a+")
     try:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -236,7 +244,7 @@ def main():
         raise SystemExit(f"error: {error}") from error
     # Keep the descriptor alive for the entire tuning run. The OS releases the
     # lock automatically after normal completion, Ctrl-C, or process failure.
-    log_path = state_path.with_suffix(".csv")
+    log_path = runtime_file(state_path, ".csv")
 
     current_k = 0
     saved = None

@@ -12,7 +12,7 @@ from pathlib import Path
 from sprt import load_parameters, load_theta
 
 
-DIRECTORY = Path(__file__).resolve().parent
+DIRECTORY = Path(__file__).resolve().parent.parent
 ROOT = DIRECTORY.parent
 DEFAULT_STATE = DIRECTORY / "state.json"
 DEFAULT_CONFIG = ROOT / "src/config.hpp"
