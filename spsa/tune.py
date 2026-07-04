@@ -156,7 +156,7 @@ def main():
         help="paired rounds per iteration; defaults to concurrency / 2",
     )
     ap.add_argument(
-        "--concurrency", type=int, default=available_processors(),
+        "--concurrency", type=int,
         help="concurrent games; defaults to available processors",
     )
     ap.add_argument(
@@ -170,12 +170,25 @@ def main():
     cfg = ap.parse_args()
     if cfg.iterations < 1:
         ap.error("--iterations must be positive")
+    concurrency_inferred = cfg.concurrency is None
+    if concurrency_inferred:
+        cfg.concurrency = available_processors()
     if cfg.concurrency < 1:
         ap.error("--concurrency must be positive")
+    rounds_inferred = cfg.rounds is None
     if cfg.rounds is None:
         cfg.rounds = max(1, cfg.concurrency // 2)
     elif cfg.rounds < 1:
         ap.error("--rounds must be positive")
+
+    concurrency_source = " (available processors)" if concurrency_inferred else ""
+    rounds_source = " (inferred)" if rounds_inferred else ""
+    print(
+        f"settings: concurrency={cfg.concurrency}{concurrency_source}, "
+        f"rounds={cfg.rounds}{rounds_source}, "
+        f"games/iteration={2 * cfg.rounds}, tc={cfg.tc}, hash={cfg.hash}",
+        flush=True,
+    )
 
     rng = random.Random(cfg.seed)
     params = parse_params(cfg.params.expanduser())
@@ -203,10 +216,13 @@ def main():
     if batch and not batch["complete"]:
         if current_k > batch["target_k"]:
             sys.exit("state file has an invalid unfinished SPSA batch")
-        if current_k < batch["target_k"] and cfg.iterations != batch["iterations"]:
+        remaining = batch["target_k"] - current_k
+        valid_iterations = {batch["iterations"], remaining}
+        if remaining and cfg.iterations not in valid_iterations:
             sys.exit(
                 "unfinished SPSA batch was started with "
-                f"--iterations {batch['iterations']}; resume with the same value"
+                f"--iterations {batch['iterations']}; resume with that value "
+                f"or the remaining iteration count, {remaining}"
             )
         print(
             f"resuming batch at iteration {current_k + 1} "

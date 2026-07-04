@@ -72,7 +72,9 @@ The SPSA tools, parameter definitions, and ignored run state are all kept in
 <code>./spsa</code>. Tuning resumes from <code>spsa/state.json</code> when it exists.
 By default, the local tuner uses every processor available to it and runs one
 paired round per two concurrent games. Use <code>--concurrency</code> or
-<code>--rounds</code> only to override those defaults.
+<code>--rounds</code> only to override those defaults. The resolved concurrency,
+round count, games per iteration, time control, and hash size are printed at
+startup.
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>

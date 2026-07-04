@@ -100,6 +100,28 @@ class SpsaTuneTest(unittest.TestCase):
         rows = self.state.with_suffix(".csv").read_text().splitlines()
         self.assertEqual(len(rows), 2)
 
+    def test_interrupted_batch_accepts_remaining_iteration_count(self):
+        self.state.write_text(json.dumps({
+            "k": 8,
+            "names": ["alpha"],
+            "theta": [1.0],
+            "batch": {
+                "start_k": 8,
+                "target_k": 9,
+                "iterations": 2,
+                "complete": False,
+            },
+        }))
+
+        subprocess.run(
+            self.command(iterations=1), check=True,
+            capture_output=True, text=True,
+        )
+
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state["k"], 9)
+        self.assertTrue(state["batch"]["complete"])
+
     def test_rejects_a_second_tuner_for_the_same_state(self):
         lock_path = self.state.with_suffix(".lock")
         with lock_path.open("a+") as lock_file:
@@ -123,7 +145,7 @@ class SpsaTuneTest(unittest.TestCase):
         environment = os.environ.copy()
         environment["FASTCHESS_ARGUMENTS"] = str(arguments)
 
-        subprocess.run(
+        result = subprocess.run(
             self.command(explicit_parallelism=False), check=True,
             capture_output=True, text=True, env=environment,
         )
@@ -136,6 +158,13 @@ class SpsaTuneTest(unittest.TestCase):
         self.assertEqual(args[args.index("-concurrency") + 1], str(concurrency))
         self.assertEqual(
             args[args.index("-rounds") + 1], str(max(1, concurrency // 2))
+        )
+        self.assertIn(
+            f"settings: concurrency={concurrency} (available processors), "
+            f"rounds={max(1, concurrency // 2)} (inferred), "
+            f"games/iteration={2 * max(1, concurrency // 2)}, "
+            "tc=5+0.05, hash=64",
+            result.stdout,
         )
 
 
