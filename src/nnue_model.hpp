@@ -34,6 +34,7 @@ inline constexpr int MAX_INPUT_CHANNELS = LEGACY_FEATURE_CHANNELS;
 inline constexpr int N_SQUARES      = 64;
 inline constexpr int N_FEATURES     = N_KING_BUCKETS * MAX_INPUT_CHANNELS * N_SQUARES;
 inline constexpr int N_HIDDEN       = 1024;
+inline constexpr std::array<int, 3> SUPPORTED_TRAINED_HIDDEN = {512, 768, 1024};
 inline constexpr int N_L1           = 2 * N_HIDDEN;     // 2048
 inline constexpr int N_L2           = 16;
 inline constexpr int N_L3           = 32;
@@ -54,6 +55,11 @@ inline constexpr int N_HEAD_FEATURES = N_MATERIAL_HEAD_FEATURES;
 inline constexpr int DEFAULT_OUTPUT_HEAD_FEATURES = 0;
 inline constexpr int MAX_OUTPUT_HEAD_FEATURES = N_EXTENDED_HEAD_FEATURES;
 inline constexpr int MAX_OUTPUT_WIDTH = N_L3 + MAX_OUTPUT_HEAD_FEATURES;
+inline constexpr std::array<uint8_t, 8> NETWORK_HEADER_MAGIC = {
+    'E', 'N', 'Y', 'O', 'N', 'N', '2', 0,
+};
+inline constexpr uint32_t NETWORK_FORMAT_VERSION = 2;
+inline constexpr size_t NETWORK_HEADER_SIZE = 64;
 
 // ---------------------------------------------------------------------
 // Network king buckets. Do not reshuffle this; feature indexing and
@@ -68,6 +74,17 @@ inline constexpr std::array<uint16_t, 64> KING_BUCKETS_16 = {
     11, 10,  9,  8,  8,  9, 10, 11,
      7,  6,  5,  4,  4,  5,  6,  7,
      3,  2,  1,  0,  0,  1,  2,  3,
+};
+
+inline constexpr std::array<uint16_t, 64> KING_BUCKETS_10 = {
+     9,  9,  8,  8,  8,  8,  9,  9,
+     9,  9,  8,  8,  8,  8,  9,  9,
+     8,  8,  7,  7,  7,  7,  8,  8,
+     8,  8,  7,  7,  7,  7,  8,  8,
+     6,  6,  5,  5,  5,  5,  6,  6,
+     6,  6,  5,  5,  5,  5,  6,  6,
+     4,  3,  3,  2,  2,  3,  3,  4,
+     1,  1,  0,  0,  0,  0,  1,  1,
 };
 
 inline constexpr std::array<uint16_t, 64> KING_BUCKETS_32 = {
@@ -122,6 +139,7 @@ inline constexpr bool IsSupportedInputBuckets(int input_buckets) {
         || input_buckets == 2
         || input_buckets == 4
         || input_buckets == 8
+        || input_buckets == 10
         || input_buckets == 16
         || input_buckets == 32;
 }
@@ -130,6 +148,8 @@ inline constexpr int KingBucketFor(int input_buckets, int oriented_net_sq) {
     const auto idx = static_cast<size_t>(oriented_net_sq);
     if (input_buckets == 32)
         return KING_BUCKETS_32[idx];
+    if (input_buckets == 10)
+        return KING_BUCKETS_10[idx];
     return KING_BUCKETS_16[idx] * input_buckets / 16;
 }
 
@@ -138,9 +158,10 @@ inline uint16_t KingBucket(int oriented_net_sq) {
 }
 
 inline constexpr bool IsSupportedFeatureLayout(int input_buckets, int feature_channels) {
-    return (IsSupportedInputBuckets(input_buckets)
-        && feature_channels == LEGACY_FEATURE_CHANNELS)
-        || (input_buckets == 32 && feature_channels == HALFKA_V2_FEATURE_CHANNELS);
+    return IsSupportedInputBuckets(input_buckets)
+        && (feature_channels == LEGACY_FEATURE_CHANNELS
+            || (feature_channels == HALFKA_V2_FEATURE_CHANNELS
+                && (input_buckets == 10 || input_buckets == 16 || input_buckets == 32)));
 }
 
 inline constexpr int FeatureChannel(int pt,
@@ -229,14 +250,22 @@ inline const auto FEATURE_IDX_TABLE_1_12 = MakeFeatureIdxTable(1, 12);
 inline const auto FEATURE_IDX_TABLE_2_12 = MakeFeatureIdxTable(2, 12);
 inline const auto FEATURE_IDX_TABLE_4_12 = MakeFeatureIdxTable(4, 12);
 inline const auto FEATURE_IDX_TABLE_8_12 = MakeFeatureIdxTable(8, 12);
+inline const auto FEATURE_IDX_TABLE_10_12 = MakeFeatureIdxTable(10, 12);
 inline const auto FEATURE_IDX_TABLE_16_12 = MakeFeatureIdxTable(16, 12);
 inline const auto FEATURE_IDX_TABLE_32_12 = MakeFeatureIdxTable(32, 12);
+inline const auto FEATURE_IDX_TABLE_10_11 = MakeFeatureIdxTable(10, 11);
+inline const auto FEATURE_IDX_TABLE_16_11 = MakeFeatureIdxTable(16, 11);
 inline const auto FEATURE_IDX_TABLE_32_11 = MakeFeatureIdxTable(32, 11);
 
 inline const std::array<int, FEATURE_IDX_TABLE_SIZE> & FeatureIdxTableForCurrentLayout()
 {
-    if (FEATURE_CHANNELS == HALFKA_V2_FEATURE_CHANNELS)
+    if (FEATURE_CHANNELS == HALFKA_V2_FEATURE_CHANNELS) {
+        if (INPUT_BUCKETS == 10)
+            return FEATURE_IDX_TABLE_10_11;
+        if (INPUT_BUCKETS == 16)
+            return FEATURE_IDX_TABLE_16_11;
         return FEATURE_IDX_TABLE_32_11;
+    }
 
     switch (INPUT_BUCKETS) {
     case 1:
@@ -247,6 +276,8 @@ inline const std::array<int, FEATURE_IDX_TABLE_SIZE> & FeatureIdxTableForCurrent
         return FEATURE_IDX_TABLE_4_12;
     case 8:
         return FEATURE_IDX_TABLE_8_12;
+    case 10:
+        return FEATURE_IDX_TABLE_10_12;
     case 32:
         return FEATURE_IDX_TABLE_32_12;
     case 16:
@@ -358,6 +389,7 @@ extern const float*   OUTPUT_BIASES;
 extern float          OUTPUT_BIAS;
 extern bool           INPUT_LAYOUT_SCRAMBLED;
 extern uint64_t       NETWORK_GENERATION;
+extern int            TRAINED_HIDDEN;
 extern int            OUTPUT_BUCKETS;
 extern int            OUTPUT_WIDTH;
 extern int            OUTPUT_HEAD_FEATURES;
@@ -400,16 +432,21 @@ struct NetworkLayout {
     int feature_channels = 0;
     int output_buckets = 0;
     int output_head_features = 0;
+    int trained_hidden = N_HIDDEN;
+    size_t header_size = 0;
 };
 
 inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
-    constexpr std::array<std::array<int, 2>, 7> layouts = {{
+    constexpr std::array<std::array<int, 2>, 10> layouts = {{
         {1, 12},
         {2, 12},
         {4, 12},
         {8, 12},
+        {10, 12},
         {16, 12},
         {32, 12},
+        {10, 11},
+        {16, 11},
         {32, 11},
     }};
     for (const auto & layout : layouts) {
@@ -426,27 +463,42 @@ inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
                         input_buckets,
                         feature_channels,
                         output_buckets,
-                        output_head_features};
+                        output_head_features,
+                        N_HIDDEN,
+                        0};
             }
         }
     }
     return {};
 }
 
+inline constexpr NetworkLayout DetectNetworkContainerSize(size_t size) {
+    if (const auto raw = DetectNetworkLayout(size); raw.input_buckets != 0)
+        return raw;
+    if (size >= NETWORK_HEADER_SIZE) {
+        auto headered = DetectNetworkLayout(size - NETWORK_HEADER_SIZE);
+        if (headered.input_buckets != 0) {
+            headered.header_size = NETWORK_HEADER_SIZE;
+            return headered;
+        }
+    }
+    return {};
+}
+
 inline constexpr int DetectInputBuckets(size_t size) {
-    return DetectNetworkLayout(size).input_buckets;
+    return DetectNetworkContainerSize(size).input_buckets;
 }
 
 inline constexpr int DetectOutputBuckets(size_t size) {
-    return DetectNetworkLayout(size).output_buckets;
+    return DetectNetworkContainerSize(size).output_buckets;
 }
 
 inline constexpr int DetectFeatureChannels(size_t size) {
-    return DetectNetworkLayout(size).feature_channels;
+    return DetectNetworkContainerSize(size).feature_channels;
 }
 
 inline constexpr int DetectOutputHeadFeatures(size_t size) {
-    return DetectNetworkLayout(size).output_head_features;
+    return DetectNetworkContainerSize(size).output_head_features;
 }
 
 inline constexpr int OutputBucketForPieceCount(int piece_count, int output_buckets) {
@@ -466,7 +518,7 @@ struct HeadFeatures {
 };
 
 inline constexpr bool IsSupportedNetworkSize(size_t size) {
-    return DetectNetworkLayout(size).input_buckets != 0;
+    return DetectNetworkContainerSize(size).input_buckets != 0;
 }
 
 // ---------------------------------------------------------------------

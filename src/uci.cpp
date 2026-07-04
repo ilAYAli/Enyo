@@ -226,7 +226,7 @@ bool load_eval_file(const std::string & value)
             Network::enabled = true;
             ucilog(
                 "info string evaluator=native-nnue path='{}' sha256={} hidden={} input_buckets={} feature_channels={} output_buckets={} head_features={}\n",
-                path, *sha256, Network::N_HIDDEN, Network::INPUT_BUCKETS,
+                path, *sha256, Network::TRAINED_HIDDEN, Network::INPUT_BUCKETS,
                 Network::FEATURE_CHANNELS, Network::OUTPUT_BUCKETS,
                 Network::OUTPUT_HEAD_FEATURES);
             return true;

@@ -32,6 +32,94 @@ alignas(64) float   s_l2_weights    [N_L2 * N_L3];
 alignas(64) float   s_l2_biases     [N_L3];
 alignas(64) float   s_output_weights[MAX_OUTPUT_BUCKETS * MAX_OUTPUT_WIDTH * N_OUTPUT];
 alignas(64) float   s_output_biases [MAX_OUTPUT_BUCKETS * N_OUTPUT];
+
+uint32_t ReadU32LE(const uint8_t* bytes) {
+    return static_cast<uint32_t>(bytes[0])
+        | (static_cast<uint32_t>(bytes[1]) << 8)
+        | (static_cast<uint32_t>(bytes[2]) << 16)
+        | (static_cast<uint32_t>(bytes[3]) << 24);
+}
+
+bool IsSupportedTrainedHidden(int hidden) {
+    for (const int supported : SUPPORTED_TRAINED_HIDDEN)
+        if (hidden == supported)
+            return true;
+    return false;
+}
+
+bool IsSupportedOutputBuckets(int buckets) {
+    return buckets == 1 || buckets == 2 || buckets == 4 || buckets == 8;
+}
+
+bool IsSupportedOutputHeadFeatures(int features) {
+    return features == 0 || features == N_HEAD_FEATURES
+        || features == N_EXTENDED_HEAD_FEATURES;
+}
+
+bool ReadNetworkLayout(std::FILE* fh, size_t size, NetworkLayout& layout) {
+    std::array<uint8_t, NETWORK_HEADER_SIZE> header{};
+    std::rewind(fh);
+    if (std::fread(header.data(), 1, NETWORK_HEADER_MAGIC.size(), fh)
+        != NETWORK_HEADER_MAGIC.size())
+        return false;
+
+    if (std::memcmp(
+            header.data(), NETWORK_HEADER_MAGIC.data(), NETWORK_HEADER_MAGIC.size()) != 0) {
+        layout = DetectNetworkLayout(size);
+        std::rewind(fh);
+        return layout.input_buckets != 0;
+    }
+
+    if (std::fread(
+            header.data() + NETWORK_HEADER_MAGIC.size(),
+            1,
+            NETWORK_HEADER_SIZE - NETWORK_HEADER_MAGIC.size(),
+            fh) != NETWORK_HEADER_SIZE - NETWORK_HEADER_MAGIC.size())
+        return false;
+
+    const uint32_t version = ReadU32LE(&header[8]);
+    const uint32_t header_size = ReadU32LE(&header[12]);
+    const int input_buckets = static_cast<int>(ReadU32LE(&header[16]));
+    const int feature_channels = static_cast<int>(ReadU32LE(&header[20]));
+    const int trained_hidden = static_cast<int>(ReadU32LE(&header[24]));
+    const int runtime_hidden = static_cast<int>(ReadU32LE(&header[28]));
+    const int l2_size = static_cast<int>(ReadU32LE(&header[32]));
+    const int l3_size = static_cast<int>(ReadU32LE(&header[36]));
+    const int output_buckets = static_cast<int>(ReadU32LE(&header[40]));
+    const int output_head_features = static_cast<int>(ReadU32LE(&header[44]));
+    const uint32_t flags = ReadU32LE(&header[48]);
+    const size_t payload_size = ReadU32LE(&header[52]);
+
+    if (version != NETWORK_FORMAT_VERSION
+        || header_size != NETWORK_HEADER_SIZE
+        || runtime_hidden != N_HIDDEN
+        || l2_size != N_L2
+        || l3_size != N_L3
+        || flags != 0
+        || !IsSupportedTrainedHidden(trained_hidden)
+        || !IsSupportedFeatureLayout(input_buckets, feature_channels)
+        || !IsSupportedOutputBuckets(output_buckets)
+        || !IsSupportedOutputHeadFeatures(output_head_features))
+        return false;
+
+    const size_t expected_payload = NetworkSize(
+        input_buckets,
+        output_buckets,
+        output_head_features,
+        feature_channels);
+    if (payload_size != expected_payload || size != NETWORK_HEADER_SIZE + expected_payload)
+        return false;
+
+    layout = {
+        input_buckets,
+        feature_channels,
+        output_buckets,
+        output_head_features,
+        trained_hidden,
+        NETWORK_HEADER_SIZE,
+    };
+    return true;
+}
 }
 
 // Weight-pointer definitions referenced from network.hpp. Start as nullptr;
@@ -52,6 +140,7 @@ bool          INPUT_LAYOUT_SCRAMBLED = false;
 uint64_t      NETWORK_GENERATION = 0;
 int           INPUT_BUCKETS = DEFAULT_INPUT_BUCKETS;
 int           FEATURE_CHANNELS = DEFAULT_FEATURE_CHANNELS;
+int           TRAINED_HIDDEN = N_HIDDEN;
 int           OUTPUT_BUCKETS = DEFAULT_OUTPUT_BUCKETS;
 int           OUTPUT_WIDTH = N_L3;
 int           OUTPUT_HEAD_FEATURES = DEFAULT_OUTPUT_HEAD_FEATURES;
@@ -165,6 +254,7 @@ void ShuffleInputLayout(int input_buckets, int feature_channels) {
 void SetWeights(const acc_t* weights, const acc_t* biases) {
     INPUT_BUCKETS = DEFAULT_INPUT_BUCKETS;
     FEATURE_CHANNELS = DEFAULT_FEATURE_CHANNELS;
+    TRAINED_HIDDEN = N_HIDDEN;
     OUTPUT_BUCKETS = DEFAULT_OUTPUT_BUCKETS;
     OUTPUT_WIDTH = N_L3;
     OUTPUT_HEAD_FEATURES = DEFAULT_OUTPUT_HEAD_FEATURES;
@@ -212,12 +302,13 @@ bool LoadNetwork(const char* path) {
     }
     const long sz = std::ftell(fh);
     if (sz < 0) { std::fclose(fh); return false; }
-    const NetworkLayout layout = DetectNetworkLayout(static_cast<size_t>(sz));
-    if (layout.input_buckets == 0) {
+    NetworkLayout layout;
+    if (!ReadNetworkLayout(fh, static_cast<size_t>(sz), layout)) {
         std::fprintf(stderr,
             "network: '%s' is %ld bytes, expected a supported Enyo NNUE size\n"
-            "  input buckets: 16 or 32\n"
-            "  feature channels: 12, or 11 with 32 input buckets\n"
+            "  input buckets: 1, 2, 4, 8, 10, 16, or 32\n"
+            "  feature channels: 12, or 11 with 10, 16, or 32 input buckets\n"
+            "  trained hidden width: 512, 768, or 1024 in enyo-native-v2\n"
             "  output buckets: 1, 2, 4, or 8\n"
             "  output head features: 0, %d, or %d\n",
             path, sz, N_HEAD_FEATURES, N_EXTENDED_HEAD_FEATURES);
@@ -226,10 +317,14 @@ bool LoadNetwork(const char* path) {
     }
     const int input_buckets = layout.input_buckets;
     const int feature_channels = layout.feature_channels;
+    const int trained_hidden = layout.trained_hidden;
     const int output_buckets = layout.output_buckets;
     const int output_head_features = layout.output_head_features;
     const int output_width = N_L3 + output_head_features;
-    std::rewind(fh);
+    if (std::fseek(fh, static_cast<long>(layout.header_size), SEEK_SET) != 0) {
+        std::fclose(fh);
+        return false;
+    }
 
     auto read = [&](void* dst, size_t n, const char* label) -> bool {
         if (std::fread(dst, 1, n, fh) != n) {
@@ -275,6 +370,7 @@ bool LoadNetwork(const char* path) {
         s_l1_weights_sparse[WeightIdxScrambled(i)] = s_l1_weights[i];
     INPUT_BUCKETS = input_buckets;
     FEATURE_CHANNELS = feature_channels;
+    TRAINED_HIDDEN = trained_hidden;
     OUTPUT_BUCKETS = output_buckets;
     OUTPUT_WIDTH = output_width;
     OUTPUT_HEAD_FEATURES = output_head_features;

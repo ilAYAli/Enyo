@@ -1751,6 +1751,44 @@ fs::path write_zero_network_blob(size_t size, std::string_view name) {
     return path;
 }
 
+void write_u32_le(std::vector<char> & bytes, size_t offset, uint32_t value) {
+    for (size_t i = 0; i < 4; ++i)
+        bytes[offset + i] = static_cast<char>((value >> (8 * i)) & 0xff);
+}
+
+fs::path write_zero_v2_network_blob(
+    int input_buckets,
+    int feature_channels,
+    int trained_hidden,
+    int output_buckets,
+    std::string_view name)
+{
+    const size_t payload_size = Network::NetworkSize(
+        input_buckets, output_buckets, 0, feature_channels);
+    std::vector<char> bytes(Network::NETWORK_HEADER_SIZE + payload_size, 0);
+    std::copy(
+        Network::NETWORK_HEADER_MAGIC.begin(),
+        Network::NETWORK_HEADER_MAGIC.end(),
+        bytes.begin());
+    write_u32_le(bytes, 8, Network::NETWORK_FORMAT_VERSION);
+    write_u32_le(bytes, 12, Network::NETWORK_HEADER_SIZE);
+    write_u32_le(bytes, 16, input_buckets);
+    write_u32_le(bytes, 20, feature_channels);
+    write_u32_le(bytes, 24, trained_hidden);
+    write_u32_le(bytes, 28, Network::N_HIDDEN);
+    write_u32_le(bytes, 32, Network::N_L2);
+    write_u32_le(bytes, 36, Network::N_L3);
+    write_u32_le(bytes, 40, output_buckets);
+    write_u32_le(bytes, 44, 0);
+    write_u32_le(bytes, 48, 0);
+    write_u32_le(bytes, 52, static_cast<uint32_t>(payload_size));
+
+    const auto path = fs::temp_directory_path() / std::string(name);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return path;
+}
+
 bool network_accumulators_match(const Network::Accumulator & a,
                               const Network::Accumulator & b) {
     for (int view = 0; view < 2; ++view) {
@@ -1883,7 +1921,18 @@ TEST(network_model, smaller_input_buckets_coarsen_16_bucket_layout) {
             Network::KingBucketFor(16, oriented_sq) / 2);
     }
 
-    for (const int input_buckets : {1, 2, 4, 8, 16}) {
+    std::array<bool, 10> used_10{};
+    for (int oriented_sq = 0; oriented_sq < 64; ++oriented_sq) {
+        const int bucket = Network::KingBucketFor(10, oriented_sq);
+        EXPECT_EQ(bucket, Network::KING_BUCKETS_10[oriented_sq]);
+        ASSERT_GE(bucket, 0);
+        ASSERT_LT(bucket, 10);
+        used_10[static_cast<size_t>(bucket)] = true;
+    }
+    for (const bool used : used_10)
+        EXPECT_TRUE(used);
+
+    for (const int input_buckets : {1, 2, 4, 8, 10, 16}) {
         for (int pt = static_cast<int>(pawn); pt <= static_cast<int>(king); ++pt) {
             const int idx = Network::FeatureIdxFormula(
                 pt, white, 9, 3, white, input_buckets, 12);
@@ -1925,7 +1974,7 @@ TEST(network_model, halfka_v2_hm_matches_stockfish_under_enyo_row_order) {
 }
 
 TEST(network_model, detects_supported_bucket_counts) {
-    for (const int input_buckets : {1, 2, 4, 8, 16, 32}) {
+    for (const int input_buckets : {1, 2, 4, 8, 10, 16, 32}) {
         EXPECT_EQ(
             Network::DetectInputBuckets(Network::NetworkSize(input_buckets)),
             input_buckets);
@@ -1955,6 +2004,8 @@ TEST(network_model, detects_supported_bucket_counts) {
             Network::N_EXTENDED_HEAD_FEATURES)),
         Network::N_EXTENDED_HEAD_FEATURES);
     EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(32, 1, 0, 11)));
+    EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(10, 1, 0, 11)));
+    EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(16, 1, 0, 11)));
     EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(16, 4)));
     EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(16, 4, Network::N_HEAD_FEATURES)));
     EXPECT_TRUE(Network::IsSupportedNetworkSize(Network::NetworkSize(
@@ -1964,6 +2015,25 @@ TEST(network_model, detects_supported_bucket_counts) {
     EXPECT_EQ(Network::DetectInputBuckets(Network::NetworkSize(16) + 1), 0);
     EXPECT_EQ(Network::DetectOutputBuckets(Network::NetworkSize(16) + 1), 0);
     EXPECT_LT(Network::NetworkSize(16), Network::NetworkSize(32));
+}
+
+TEST(network_model, loads_versioned_narrow_hidden_network_blob) {
+    const auto path = write_zero_v2_network_blob(
+        10,
+        Network::HALFKA_V2_FEATURE_CHANNELS,
+        512,
+        8,
+        "enyo_zero_v2_10x11x512_o8.nn");
+    const auto path_string = path.string();
+    ASSERT_TRUE(Network::IsSupportedNetworkSize(fs::file_size(path)));
+    ASSERT_TRUE(Network::LoadNetwork(path_string.c_str()));
+    EXPECT_EQ(Network::INPUT_BUCKETS, 10);
+    EXPECT_EQ(Network::FEATURE_CHANNELS, 11);
+    EXPECT_EQ(Network::TRAINED_HIDDEN, 512);
+    EXPECT_EQ(Network::OUTPUT_BUCKETS, 8);
+    EXPECT_NE(Network::INPUT_WEIGHTS, nullptr);
+    fs::remove(path);
+    ensure_network_mock_weights();
 }
 
 TEST(network_model, loads_1_bucket_network_blob) {
