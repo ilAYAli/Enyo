@@ -76,7 +76,7 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
 
     def test_runs_forge_from_home_with_default_and_tuned_options(self):
         result = subprocess.run(
-            self.command("--games", "1000"),
+            self.command(),
             cwd=self.root,
             env=self.environment(),
             check=True,
@@ -89,7 +89,7 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
         self.assertEqual(Path(capture["cwd"]).resolve(), self.home.resolve())
         arguments = capture["args"]
         self.assertEqual(arguments[0], "sprt")
-        self.assertIn("--wait", arguments)
+        self.assertNotIn("--wait", arguments)
         self.assertEqual(arguments[arguments.index("--games") + 1], "1000")
         reference = [
             arguments[index + 1]
@@ -107,6 +107,19 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
         self.assertIn("beta=4", candidate)
         self.assertIn(f"nnue_file={self.net}", reference)
         self.assertIn(f"nnue_file={self.net}", candidate)
+
+    def test_wait_is_explicit(self):
+        subprocess.run(
+            self.command("--wait"),
+            cwd=self.root,
+            env=self.environment(),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        arguments = json.loads(self.capture.read_text())["args"]
+        self.assertIn("--wait", arguments)
 
     def test_dry_run_prints_command_without_starting_forge(self):
         result = subprocess.run(
@@ -156,6 +169,24 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("names do not match", result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_rejects_identical_parameter_sets(self):
+        state = json.loads(self.state.read_text())
+        state["theta"] = [1.0, 2.0]
+        self.state.write_text(json.dumps(state))
+
+        result = subprocess.run(
+            self.command(),
+            cwd=self.root,
+            env=self.environment(),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("matches the reference defaults", result.stderr)
         self.assertFalse(self.capture.exists())
 
 

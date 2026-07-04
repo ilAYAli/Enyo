@@ -64,8 +64,7 @@ on both sides, then promote it into both the engine and the next tuner's
 defaults:
 <pre>
 ./spsa/tune.py
-./spsa/sprt.py --games 300
-./spsa/sprt.py --games 1000
+./spsa/sprt.py
 ./spsa/promote.py
 </pre>
 The SPSA tools, parameter definitions, and ignored run state are all kept in
@@ -78,6 +77,8 @@ startup. Progress lines include an ETA derived from the average duration of the
 iterations completed by the current process.
 When resuming an unfinished batch, its stored target is authoritative and a new
 <code>--iterations</code> value is ignored.
+The SPSA SPRT defaults to 1000 games and returns after launching the Forge run;
+use <code>--wait</code> only when foreground waiting is desired.
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>
