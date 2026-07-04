@@ -76,6 +76,8 @@ paired round per two concurrent games. Use <code>--concurrency</code> or
 round count, games per iteration, time control, and hash size are printed at
 startup. Progress lines include an ETA derived from the average duration of the
 iterations completed by the current process.
+When resuming an unfinished batch, its stored target is authoritative and a new
+<code>--iterations</code> value is ignored.
 
 <h3>Search</h3>
 <a href="https://www.chessprogramming.org/Negamax" rel="nofollow">Negamax</a><br>

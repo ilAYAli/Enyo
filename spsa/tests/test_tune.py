@@ -101,7 +101,7 @@ class SpsaTuneTest(unittest.TestCase):
         rows = self.state.with_suffix(".csv").read_text().splitlines()
         self.assertEqual(len(rows), 2)
 
-    def test_interrupted_batch_accepts_remaining_iteration_count(self):
+    def test_interrupted_batch_ignores_new_iteration_count(self):
         self.state.write_text(json.dumps({
             "k": 8,
             "names": ["alpha"],
@@ -114,14 +114,15 @@ class SpsaTuneTest(unittest.TestCase):
             },
         }))
 
-        subprocess.run(
-            self.command(iterations=1), check=True,
+        result = subprocess.run(
+            self.command(iterations=17), check=True,
             capture_output=True, text=True,
         )
 
         state = json.loads(self.state.read_text())
         self.assertEqual(state["k"], 9)
         self.assertTrue(state["batch"]["complete"])
+        self.assertIn("1 remaining; --iterations ignored", result.stdout)
 
     def test_rejects_a_second_tuner_for_the_same_state(self):
         lock_path = self.state.with_suffix(".lock")

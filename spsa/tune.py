@@ -173,7 +173,7 @@ def main():
     )
     ap.add_argument(
         "--iterations", type=int, default=1500,
-        help="new iterations to run; interrupted batches resume automatically",
+        help="new iterations to run; ignored when resuming an unfinished batch",
     )
     ap.add_argument("--match-timeout", type=int, default=3600)
     ap.add_argument("--uci", action="append", default=[],
@@ -229,16 +229,10 @@ def main():
         if current_k > batch["target_k"]:
             sys.exit("state file has an invalid unfinished SPSA batch")
         remaining = batch["target_k"] - current_k
-        valid_iterations = {batch["iterations"], remaining}
-        if remaining and cfg.iterations not in valid_iterations:
-            sys.exit(
-                "unfinished SPSA batch was started with "
-                f"--iterations {batch['iterations']}; resume with that value "
-                f"or the remaining iteration count, {remaining}"
-            )
         print(
             f"resuming batch at iteration {current_k + 1} "
-            f"(target {batch['target_k']})"
+            f"(target {batch['target_k']}; {remaining} remaining; "
+            "--iterations ignored)"
         )
     else:
         batch = {
