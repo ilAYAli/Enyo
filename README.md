@@ -67,8 +67,11 @@ defaults:
 ./spsa/sprt.py
 ./spsa/promote.py
 </pre>
-The SPSA tools, parameter definitions, and ignored run state are all kept in
-<code>./spsa</code>. Tuning resumes from <code>spsa/state.json</code> when it exists.
+The SPSA tools, parameter definitions, and canonical checkpoint are all kept in
+<code>./spsa</code>. Tuning resumes from the tracked
+<code>spsa/state.json</code>; commit it after a completed tuning session so Git
+synchronizes the checkpoint across hosts. CSV history, locks, and logs remain
+local run artifacts.
 By default, the local tuner uses every processor available to it and runs one
 paired round per two concurrent games. Use <code>--concurrency</code> or
 <code>--rounds</code> only to override those defaults. The resolved concurrency,
