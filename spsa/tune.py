@@ -6,9 +6,10 @@ the same binary against itself (option-set theta+ vs theta-), and steps
 every parameter toward the winning side. Classic SPSA with fishtest-style
 per-parameter c_end / r_end schedules.
 
-State is saved to --state after every iteration; rerunning the same
-command resumes where it left off. A per-iteration CSV log goes next to
-the state file.
+Each invocation runs the number of new iterations given by --iterations.
+State is saved to --state after every iteration; rerunning an interrupted
+command resumes its unfinished batch instead of adding another batch. A
+per-iteration CSV log goes next to the state file.
 
 Example (smoke test):
   ./spsa/tune.py --iterations 4 --rounds 2 --tc 1+0.01 --concurrency 4
@@ -124,6 +125,15 @@ def write_state(path: Path, state: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def state_data(k, params, batch):
+    return {
+        "k": k,
+        "names": [p["name"] for p in params],
+        "theta": [p["theta"] for p in params],
+        "batch": batch,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -137,12 +147,17 @@ def main():
     ap.add_argument("--rounds", type=int, default=16,
                     help="rounds per iteration; games = 2x rounds")
     ap.add_argument("--concurrency", type=int, default=8)
-    ap.add_argument("--iterations", type=int, default=1500)
+    ap.add_argument(
+        "--iterations", type=int, default=1500,
+        help="new iterations to run; interrupted batches resume automatically",
+    )
     ap.add_argument("--match-timeout", type=int, default=3600)
     ap.add_argument("--uci", action="append", default=[],
                     help="extra option for both engines, e.g. --uci nnue_file=/path/net.nn")
     ap.add_argument("--seed", type=int, default=None)
     cfg = ap.parse_args()
+    if cfg.iterations < 1:
+        ap.error("--iterations must be positive")
 
     rng = random.Random(cfg.seed)
     params = parse_params(cfg.params.expanduser())
@@ -156,25 +171,54 @@ def main():
     # lock automatically after normal completion, Ctrl-C, or process failure.
     log_path = state_path.with_suffix(".csv")
 
-    start_k = 1
+    current_k = 0
+    saved = None
     if state_path.exists():
         saved = json.loads(state_path.read_text())
         if saved["names"] != [p["name"] for p in params]:
             sys.exit("state file does not match params file; delete it to restart")
         for p, theta in zip(params, saved["theta"]):
             p["theta"] = theta
-        start_k = saved["k"] + 1
-        print(f"resuming at iteration {start_k}")
+        current_k = saved["k"]
+
+    batch = saved.get("batch") if saved else None
+    if batch and not batch["complete"]:
+        if current_k > batch["target_k"]:
+            sys.exit("state file has an invalid unfinished SPSA batch")
+        if current_k < batch["target_k"] and cfg.iterations != batch["iterations"]:
+            sys.exit(
+                "unfinished SPSA batch was started with "
+                f"--iterations {batch['iterations']}; resume with the same value"
+            )
+        print(
+            f"resuming batch at iteration {current_k + 1} "
+            f"(target {batch['target_k']})"
+        )
+    else:
+        batch = {
+            "start_k": current_k + 1,
+            "target_k": current_k + cfg.iterations,
+            "iterations": cfg.iterations,
+            "complete": False,
+        }
+        write_state(state_path, state_data(current_k, params, batch))
+        print(
+            f"starting {cfg.iterations} new iterations "
+            f"({batch['start_k']}-{batch['target_k']})"
+        )
+
+    start_k = current_k + 1
+    target_k = batch["target_k"]
 
     if not log_path.exists():
         with open(log_path, "w", newline="") as f:
             csv.writer(f).writerow(["iter", "result", "games"]
                                    + [p["name"] for p in params])
 
-    for k in range(start_k, cfg.iterations + 1):
+    for k in range(start_k, target_k + 1):
         flips, plus_opts, minus_opts = [], {}, {}
         for p in params:
-            _, c_k = schedules(p, k, cfg.iterations)
+            _, c_k = schedules(p, k, target_k)
             flip = rng.choice((-1, 1))
             flips.append(flip)
             lo, hi = p["min"], p["max"]
@@ -184,15 +228,11 @@ def main():
         result, games = run_match(cfg, plus_opts, minus_opts)
 
         for p, flip in zip(params, flips):
-            a_k, c_k = schedules(p, k, cfg.iterations)
+            a_k, c_k = schedules(p, k, target_k)
             p["theta"] += (a_k / c_k) * flip * result
             p["theta"] = min(p["max"], max(p["min"], p["theta"]))
 
-        write_state(state_path, {
-            "k": k,
-            "names": [p["name"] for p in params],
-            "theta": [p["theta"] for p in params],
-        })
+        write_state(state_path, state_data(k, params, batch))
         with open(log_path, "a", newline="") as f:
             csv.writer(f).writerow([k, f"{result:+.3f}", games]
                                    + [f"{p['theta']:.2f}" for p in params])
@@ -202,8 +242,15 @@ def main():
         drift = ", ".join(f"{p['name']}={p['theta']:.1f}" for p in moved)
         # flush: with stdout redirected to a log file Python block-buffers,
         # and a SIGTERM discards the buffer — the log must stream.
-        print(f"[{k}/{cfg.iterations}] result={result:+.3f} ({games} games)  {drift}",
-              flush=True)
+        batch_k = k - batch["start_k"] + 1
+        print(
+            f"[{batch_k}/{batch['iterations']}; total {k}] "
+            f"result={result:+.3f} ({games} games)  {drift}",
+            flush=True,
+        )
+
+    batch["complete"] = True
+    write_state(state_path, state_data(target_k, params, batch))
 
     print("\nfinal values:")
     for p in params:

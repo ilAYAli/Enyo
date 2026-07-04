@@ -34,13 +34,13 @@ class SpsaTuneTest(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def command(self):
+    def command(self, iterations=1):
         return [
             str(SCRIPT),
             "--params", str(self.params),
             "--state", str(self.state),
             "--fastchess", str(self.fastchess),
-            "--iterations", "1",
+            "--iterations", str(iterations),
             "--rounds", "1",
             "--concurrency", "1",
             "--seed", "1",
@@ -54,8 +54,49 @@ class SpsaTuneTest(unittest.TestCase):
         state = json.loads(self.state.read_text())
         self.assertEqual(state["k"], 1)
         self.assertEqual(state["names"], ["alpha"])
+        self.assertEqual(state["batch"]["iterations"], 1)
+        self.assertTrue(state["batch"]["complete"])
         self.assertTrue(self.state.with_suffix(".csv").is_file())
         self.assertIn("final values:", result.stdout)
+
+    def test_iterations_are_added_to_existing_state(self):
+        self.state.write_text(json.dumps({
+            "k": 7,
+            "names": ["alpha"],
+            "theta": [1.0],
+        }))
+
+        subprocess.run(
+            self.command(iterations=2), check=True, capture_output=True, text=True
+        )
+
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state["k"], 9)
+        self.assertEqual(state["batch"]["start_k"], 8)
+        self.assertEqual(state["batch"]["target_k"], 9)
+
+    def test_interrupted_batch_resumes_its_original_target(self):
+        self.state.write_text(json.dumps({
+            "k": 8,
+            "names": ["alpha"],
+            "theta": [1.0],
+            "batch": {
+                "start_k": 8,
+                "target_k": 9,
+                "iterations": 2,
+                "complete": False,
+            },
+        }))
+
+        subprocess.run(
+            self.command(iterations=2), check=True, capture_output=True, text=True
+        )
+
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state["k"], 9)
+        self.assertTrue(state["batch"]["complete"])
+        rows = self.state.with_suffix(".csv").read_text().splitlines()
+        self.assertEqual(len(rows), 2)
 
     def test_rejects_a_second_tuner_for_the_same_state(self):
         lock_path = self.state.with_suffix(".lock")
