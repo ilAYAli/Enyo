@@ -182,15 +182,15 @@ endif()
 add_custom_target(update_version_info
     COMMAND ${CMAKE_COMMAND}
         -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
-        -DINPUT_FILE=${CMAKE_SOURCE_DIR}/version_info.hpp.in
-        -DOUTPUT_FILE=${CMAKE_BINARY_DIR}/version_info.hpp
+        -DINPUT_FILE=${CMAKE_SOURCE_DIR}/src/version_info.hpp.in
+        -DOUTPUT_FILE=${CMAKE_BINARY_DIR}/src/version_info.hpp
         -DBUILD_DATE_VALUE=${BUILD_DATE}
         -DBUILD_TYPE_VALUE=${CMAKE_BUILD_TYPE}
         -DENYO_GIT_HASH=${ENYO_GIT_HASH}
         -DENYO_GIT_DIRTY=${ENYO_GIT_DIRTY}
         -P ${CMAKE_SOURCE_DIR}/cmake/update_version_info.cmake
-    BYPRODUCTS ${CMAKE_BINARY_DIR}/version_info.hpp
-    DEPENDS ${CMAKE_SOURCE_DIR}/version_info.hpp.in
+    BYPRODUCTS ${CMAKE_BINARY_DIR}/src/version_info.hpp
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/version_info.hpp.in
             ${CMAKE_SOURCE_DIR}/cmake/update_version_info.cmake
     COMMENT "Generating version_info.hpp"
 )
