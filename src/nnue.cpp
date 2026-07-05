@@ -1109,9 +1109,21 @@ void Net::Benchmark()
 // between the embedded-blob and on-disk paths.
 static void ReadBinFromMemory(const unsigned char * data, size_t size)
 {
-    if (size < LEGACY_NETWORK_SIZE) {
-        fmt::print("nnue: net blob too small ({} < {} bytes); aborting load\n",
-                   size, LEGACY_NETWORK_SIZE);
+    if (!IsSupportedLegacyNetworkSize(size)) {
+        fmt::print(
+            "nnue: unsupported legacy net size {} (expected {} or {} bytes); aborting load\n",
+            size,
+            LEGACY_NETWORK_SIZE,
+            LEGACY_NETWORK_FILE_SIZE);
+        std::exit(EXIT_FAILURE);
+    }
+
+    if (size == LEGACY_NETWORK_FILE_SIZE
+        && std::memcmp(
+            data + LEGACY_NETWORK_SIZE,
+            LEGACY_NETWORK_TRAILER.data(),
+            LEGACY_NETWORK_TRAILER.size()) != 0) {
+        fmt::print("nnue: invalid legacy net trailer; aborting load\n");
         std::exit(EXIT_FAILURE);
     }
 

@@ -41,6 +41,16 @@ inline constexpr size_t LEGACY_NETWORK_SIZE =
     + HIDDEN_SIZE * sizeof(int16_t)
     + HIDDEN_DSIZE * OUTPUT_SIZE * sizeof(int16_t)
     + OUTPUT_SIZE * sizeof(int32_t);
+inline constexpr std::array<unsigned char, 3> LEGACY_NETWORK_TRAILER = {
+    0x0a, 0xff, 0x0a,
+};
+inline constexpr size_t LEGACY_NETWORK_FILE_SIZE =
+    LEGACY_NETWORK_SIZE + LEGACY_NETWORK_TRAILER.size();
+
+inline constexpr bool IsSupportedLegacyNetworkSize(size_t size)
+{
+    return size == LEGACY_NETWORK_SIZE || size == LEGACY_NETWORK_FILE_SIZE;
+}
 
 inline constexpr std::array<int, 64> KING_BUCKET {
     0,  1,  2,  3,  3,  2,  1,  0,

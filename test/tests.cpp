@@ -2027,6 +2027,14 @@ TEST(network_model, detects_supported_bucket_counts) {
     EXPECT_LT(Network::NetworkSize(16), Network::NetworkSize(32));
 }
 
+TEST(network_model, rejects_oversized_legacy_networks) {
+    EXPECT_TRUE(NNUE::IsSupportedLegacyNetworkSize(NNUE::LEGACY_NETWORK_SIZE));
+    EXPECT_TRUE(NNUE::IsSupportedLegacyNetworkSize(NNUE::LEGACY_NETWORK_FILE_SIZE));
+    EXPECT_FALSE(NNUE::IsSupportedLegacyNetworkSize(NNUE::LEGACY_NETWORK_SIZE - 1));
+    EXPECT_FALSE(NNUE::IsSupportedLegacyNetworkSize(NNUE::LEGACY_NETWORK_FILE_SIZE + 1));
+    EXPECT_FALSE(NNUE::IsSupportedLegacyNetworkSize(25201924));
+}
+
 TEST(network_model, loads_versioned_narrow_hidden_network_blob) {
     const auto path = write_zero_v2_network_blob(
         10,

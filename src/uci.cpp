@@ -234,7 +234,7 @@ bool load_eval_file(const std::string & value)
         fail_eval_file(path, "matched native network size but failed to load");
     }
 
-    if (size >= NNUE::LEGACY_NETWORK_SIZE) {
+    if (NNUE::IsSupportedLegacyNetworkSize(size)) {
         Network::enabled = false;
         if (!NNUE::Init(path))
             fail_eval_file(path, "matched legacy network size but failed to load");
