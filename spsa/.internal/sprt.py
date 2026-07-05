@@ -16,7 +16,7 @@ DIRECTORY = Path(__file__).resolve().parent.parent
 DEFAULT_STATE = DIRECTORY / "state.json"
 DEFAULT_PARAMS = DIRECTORY / "params.txt"
 DEFAULT_ENGINE = "~/assets/engines/candidate"
-DEFAULT_NET = "~/code/cpp/chess/enyo/net/berserk-9b84c340af7e.nn"
+DEFAULT_NET = "~/code/cpp/chess/enyo/net/default.net"
 DEFAULT_BOOK = (
     "~/assets/books/AntiDraw_V2.1/WOMP_Openings_V1/"
     "WOMP_V1_+150_+159/WOMP_V1_6mvs_big_+140_+169.epd"
