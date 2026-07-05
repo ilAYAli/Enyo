@@ -90,6 +90,16 @@ TEST(tt, packed_entry_round_trips_search_fields)
     }
 }
 
+TEST(tt, hash_size_matches_allocated_entry_capacity)
+{
+    constexpr size_t bytes_per_megabyte = 1024ULL * 1024ULL;
+    const auto & table = tt::ttable;
+
+    EXPECT_EQ(
+        table.buckets * sizeof(tt::SMPentry),
+        static_cast<size_t>(table.size_mb()) * bytes_per_megabyte);
+}
+
 TEST(tt, packed_table_preserves_replacement_contract)
 {
     auto & table = tt::ttable;

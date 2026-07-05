@@ -73,20 +73,12 @@ struct HashEntry {
     int depth {};
 };
 
-struct LegacySMPentryLayout {
-    uint8_t age {};
-    uint64_t key {};
-    HashEntry entry {};
-    bool occupied {};
-};
-
 struct alignas(16) SMPentry {
     uint64_t key {};
     uint64_t data {};
 };
 
 static_assert(sizeof(SMPentry) == 16);
-static_assert(sizeof(SMPentry) < sizeof(LegacySMPentryLayout));
 
 constexpr inline uint32_t pack_move(Move move)
 {
@@ -344,7 +336,7 @@ private:
     }
 
     static size_t bucket_count_for(int megabytes) {
-        return byte_count_for(megabytes) / sizeof(LegacySMPentryLayout);
+        return byte_count_for(megabytes) / sizeof(SMPentry);
     }
 
     static void release_table(SMPentry * table) {
