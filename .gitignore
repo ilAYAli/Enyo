@@ -16,6 +16,7 @@ misc/*
 logs/*
 books/*
 bugs/*
+net/*.nn
 releases/*
 scripts/logs/*
 linux/
