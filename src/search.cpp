@@ -985,9 +985,13 @@ moves_loop:
                     const int h = worker.history[Us][move.src_sq()][move.dst_sq()];
                     R -= std::clamp(h / cfgmgr.lmr_hist_div, -2, 2);
                 }
-                if constexpr (NT == NodeType::Root)
-                    if (is_quiet && move.src_piece() == queen)
+                if constexpr (NT == NodeType::Root) {
+                    const bool advanced_pawn_push =
+                        move.src_piece() == pawn
+                        && !(frtab[move.src_sq()][1] & (Us == white ? rank_2 : rank_7));
+                    if (is_quiet && (move.src_piece() == queen || advanced_pawn_push))
                         R = std::min(R, 1);
+                }
                 R = std::clamp(new_depth - R, 1, new_depth + 1);
 
                 if (worker.time_expired()) {
