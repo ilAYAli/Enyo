@@ -846,21 +846,8 @@ void Uci::setoption(std::istringstream& iss)
         eval_loaded = load_eval_file(cfgmgr.nnue_file);
     if (lower_name == "move_policy_file")
         load_move_policy_file(cfgmgr.move_policy_file);
-    if (lower_name == "hash") {
-        // setoption previously just updated cfgmgr.hash_size; the TT
-        // was allocated once at Transposition singleton construction
-        // from the default, so the requested size never took effect.
-        // Now we resize in-place. UCI spec requires setoption only
-        // between go commands, so this is always idle-time safe.
-        if (tt::ttable.set_size(cfgmgr.hash_size)) {
-            ucilog("info string hash table resized to {} MB\n", tt::ttable.size_mb());
-        } else {
-            ucilog("info string WARNING: failed to resize hash table to {} MB; keeping {} MB\n",
-                cfgmgr.hash_size,
-                tt::ttable.size_mb());
-            cfgmgr.hash_size = tt::ttable.size_mb();
-        }
-    }
+    if (lower_name == "hash")
+        ensure_hash_size();
 #if ENYO_USE_SYZYGY
     if (lower_name == "use_syzygy") {
         ucilog("info string Syzygy probing {}\n", cfgmgr.use_syzygy ? "enabled" : "disabled");
@@ -896,7 +883,22 @@ void Uci::debug(std::istringstream& iss)
 
 void Uci::isready()
 {
+    ensure_hash_size();
     ucilog("readyok\n");
+}
+
+void Uci::ensure_hash_size()
+{
+    if (tt::ttable.size_mb() == cfgmgr.hash_size)
+        return;
+    if (tt::ttable.set_size(cfgmgr.hash_size)) {
+        ucilog("info string hash table resized to {} MB\n", tt::ttable.size_mb());
+        return;
+    }
+    ucilog("info string WARNING: failed to resize hash table to {} MB; keeping {} MB\n",
+        cfgmgr.hash_size,
+        tt::ttable.size_mb());
+    cfgmgr.hash_size = tt::ttable.size_mb();
 }
 
 void Uci::newgame()
@@ -1025,6 +1027,8 @@ void Uci::go(std::istringstream & iss)
             break;
         }
     }
+
+    ensure_hash_size();
 
     const auto legal = b.side == white
         ? generate_legal_moves<white>(b)

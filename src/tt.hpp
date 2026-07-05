@@ -280,7 +280,7 @@ public:
 
 private:
     Transposition() {
-        const int requested = enyo::cfgmgr.hash_size;
+        constexpr int requested = 16;
         if (replace_table(requested))
             return;
 
@@ -322,7 +322,7 @@ private:
     }
 
     static constexpr size_t bytes_in_megabyte = 1024ULL * 1024ULL;
-    static constexpr int fallback_sizes[] = { 1024, 512, 256, 128, 64, 16 };
+    static constexpr int fallback_sizes[] = { 4, 1 };
 
     struct TableAllocation {
         SMPentry * table {};

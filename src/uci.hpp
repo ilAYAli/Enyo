@@ -49,6 +49,7 @@ private:
     void stop();
     void quit();
     void ensure_eval_loaded();
+    void ensure_hash_size();
 
     bool eval_loaded = false;
 };
