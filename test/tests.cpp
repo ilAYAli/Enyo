@@ -1766,6 +1766,35 @@ void write_u32_le(std::vector<char> & bytes, size_t offset, uint32_t value) {
         bytes[offset + i] = static_cast<char>((value >> (8 * i)) & 0xff);
 }
 
+void write_i16_le(std::vector<char> & bytes, size_t offset, int16_t value) {
+    const auto encoded = static_cast<uint16_t>(value);
+    bytes[offset] = static_cast<char>(encoded & 0xff);
+    bytes[offset + 1] = static_cast<char>((encoded >> 8) & 0xff);
+}
+
+fs::path write_quantized_test_network_blob(std::string_view name) {
+    std::vector<char> bytes(Network::QuantizedNetworkSize(), 0);
+    const size_t l1_bias_offset =
+        sizeof(int16_t) * Network::FeatureCount(16, 12) * Network::N_HIDDEN
+        + sizeof(int16_t) * Network::N_HIDDEN
+        + sizeof(int8_t) * Network::N_L1 * Network::N_L2;
+    const size_t l2_weight_offset =
+        l1_bias_offset + sizeof(int32_t) * Network::N_L2;
+    const size_t output_weight_offset =
+        l2_weight_offset
+        + sizeof(int16_t) * Network::N_L2 * Network::N_L3
+        + sizeof(int32_t) * Network::N_L3;
+
+    write_u32_le(bytes, l1_bias_offset, 64);
+    write_i16_le(bytes, l2_weight_offset, 32);
+    write_i16_le(bytes, output_weight_offset, 4096);
+
+    const auto path = fs::temp_directory_path() / std::string(name);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return path;
+}
+
 fs::path write_zero_v2_network_blob(
     int input_buckets,
     int feature_channels,
@@ -2033,6 +2062,26 @@ TEST(network_model, rejects_oversized_legacy_networks) {
     EXPECT_FALSE(NNUE::IsSupportedLegacyNetworkSize(NNUE::LEGACY_NETWORK_SIZE - 1));
     EXPECT_FALSE(NNUE::IsSupportedLegacyNetworkSize(NNUE::LEGACY_NETWORK_FILE_SIZE + 1));
     EXPECT_FALSE(NNUE::IsSupportedLegacyNetworkSize(25201924));
+}
+
+TEST(network_model, loads_quantized_dense_network_blob) {
+    EXPECT_EQ(Network::QuantizedNetworkSize(), 25201924U);
+    const auto path = write_quantized_test_network_blob(
+        "enyo_quantized_dense.nn");
+    const auto path_string = path.string();
+
+    ASSERT_TRUE(Network::IsSupportedQuantizedNetworkSize(fs::file_size(path)));
+    ASSERT_TRUE(Network::LoadNetwork(path_string.c_str()));
+    EXPECT_EQ(Network::DENSE_LAYER_FORMAT, Network::DenseLayerFormat::Quantized);
+    EXPECT_EQ(Network::INPUT_BUCKETS, 16);
+    EXPECT_EQ(Network::FEATURE_CHANNELS, 12);
+    EXPECT_EQ(Network::OUTPUT_BUCKETS, 1);
+
+    Network::Accumulator accumulator{};
+    EXPECT_EQ(Network::Propagate(&accumulator, 0), 2);
+
+    fs::remove(path);
+    ensure_network_mock_weights();
 }
 
 TEST(network_model, loads_versioned_narrow_hidden_network_blob) {

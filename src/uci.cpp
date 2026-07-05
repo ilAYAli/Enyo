@@ -221,17 +221,21 @@ bool load_eval_file(const std::string & value)
     if (!sha256)
         fail_eval_file(path, "sha256 read failed");
 
-    if (Network::IsSupportedNetworkSize(size)) {
+    if (Network::IsSupportedNetworkSize(size)
+        || Network::IsSupportedQuantizedNetworkSize(size)) {
         if (Network::LoadNetwork(path.c_str())) {
             Network::enabled = true;
             ucilog(
-                "info string evaluator=native-nnue path='{}' sha256={} hidden={} input_buckets={} feature_channels={} output_buckets={} head_features={}\n",
+                "info string evaluator=native-nnue path='{}' sha256={} hidden={} input_buckets={} feature_channels={} output_buckets={} head_features={} dense_format={}\n",
                 path, *sha256, Network::TRAINED_HIDDEN, Network::INPUT_BUCKETS,
                 Network::FEATURE_CHANNELS, Network::OUTPUT_BUCKETS,
-                Network::OUTPUT_HEAD_FEATURES);
+                Network::OUTPUT_HEAD_FEATURES,
+                Network::DENSE_LAYER_FORMAT == Network::DenseLayerFormat::Quantized
+                    ? "quantized"
+                    : "float");
             return true;
         }
-        fail_eval_file(path, "matched native network size but failed to load");
+        fail_eval_file(path, "matched supported network size but failed to load");
     }
 
     if (NNUE::IsSupportedLegacyNetworkSize(size)) {

@@ -1,6 +1,6 @@
 // Network weight storage and network loading.
 // Defines the extern storage for weight pointers declared in network.hpp
-// and implements LoadNetwork for the v13-compatible .nn binary layout.
+// and implements LoadNetwork for the float and quantized .nn layouts.
 //
 // This TU is intentionally independent of the engine's Board type so
 // Phase 2/3 parity tests can compile it directly. The Board-aware bits
@@ -32,6 +32,10 @@ alignas(64) float   s_l2_weights    [N_L2 * N_L3];
 alignas(64) float   s_l2_biases     [N_L3];
 alignas(64) float   s_output_weights[MAX_OUTPUT_BUCKETS * MAX_OUTPUT_WIDTH * N_OUTPUT];
 alignas(64) float   s_output_biases [MAX_OUTPUT_BUCKETS * N_OUTPUT];
+alignas(64) int16_t s_quantized_l2_weights[N_L2 * N_L3];
+alignas(64) int32_t s_quantized_l2_biases[N_L3];
+alignas(64) int16_t s_quantized_output_weights[N_L3 * N_OUTPUT];
+alignas(64) int32_t s_quantized_output_bias;
 
 uint32_t ReadU32LE(const uint8_t* bytes) {
     return static_cast<uint32_t>(bytes[0])
@@ -136,6 +140,11 @@ const float*  L2_BIASES      = nullptr;
 const float*  OUTPUT_WEIGHTS = nullptr;
 const float*  OUTPUT_BIASES  = nullptr;
 float         OUTPUT_BIAS    = 0.0f;
+const int16_t* QUANTIZED_L2_WEIGHTS = nullptr;
+const int32_t* QUANTIZED_L2_BIASES = nullptr;
+const int16_t* QUANTIZED_OUTPUT_WEIGHTS = nullptr;
+int32_t        QUANTIZED_OUTPUT_BIAS = 0;
+DenseLayerFormat DENSE_LAYER_FORMAT = DenseLayerFormat::Float;
 bool          INPUT_LAYOUT_SCRAMBLED = false;
 uint64_t      NETWORK_GENERATION = 0;
 int           INPUT_BUCKETS = DEFAULT_INPUT_BUCKETS;
@@ -264,13 +273,18 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
     L1_WEIGHTS_SPARSE = nullptr;
     OUTPUT_BIASES = nullptr;
     OUTPUT_BIAS = 0.0f;
+    QUANTIZED_L2_WEIGHTS = nullptr;
+    QUANTIZED_L2_BIASES = nullptr;
+    QUANTIZED_OUTPUT_WEIGHTS = nullptr;
+    QUANTIZED_OUTPUT_BIAS = 0;
+    DENSE_LAYER_FORMAT = DenseLayerFormat::Float;
     INPUT_LAYOUT_SCRAMBLED = false;
     ++NETWORK_GENERATION;
 }
 
 // ---------------------------------------------------------------------
-// LoadNetwork — parse a v13-compatible .nn file into the internal
-// weight arrays and repoint the externs.
+// LoadNetwork — parse a supported .nn file into the internal weight
+// arrays and repoint the externs.
 //
 // File layout (tightly packed, little-endian; total NETWORK_SIZE bytes):
 //   [N_FEATURES * N_HIDDEN] int16  INPUT_WEIGHTS  (row-major, feature-major)
@@ -302,8 +316,11 @@ bool LoadNetwork(const char* path) {
     }
     const long sz = std::ftell(fh);
     if (sz < 0) { std::fclose(fh); return false; }
-    NetworkLayout layout;
-    if (!ReadNetworkLayout(fh, static_cast<size_t>(sz), layout)) {
+    const bool quantized = IsSupportedQuantizedNetworkSize(static_cast<size_t>(sz));
+    NetworkLayout layout = quantized
+        ? NetworkLayout{16, LEGACY_FEATURE_CHANNELS, 1, 0, N_HIDDEN, 0}
+        : NetworkLayout{};
+    if (!quantized && !ReadNetworkLayout(fh, static_cast<size_t>(sz), layout)) {
         std::fprintf(stderr,
             "network: '%s' is %ld bytes, expected a supported Enyo NNUE size\n"
             "  input buckets: 1, 2, 4, 8, 10, 16, or 32\n"
@@ -337,6 +354,10 @@ bool LoadNetwork(const char* path) {
     std::memset(s_input_weights, 0, sizeof(s_input_weights));
     std::memset(s_output_weights, 0, sizeof(s_output_weights));
     std::memset(s_output_biases, 0, sizeof(s_output_biases));
+    std::memset(s_quantized_l2_weights, 0, sizeof(s_quantized_l2_weights));
+    std::memset(s_quantized_l2_biases, 0, sizeof(s_quantized_l2_biases));
+    std::memset(s_quantized_output_weights, 0, sizeof(s_quantized_output_weights));
+    s_quantized_output_bias = 0;
     const size_t input_weight_bytes =
         sizeof(acc_t) * static_cast<size_t>(FeatureCount(input_buckets, feature_channels)) * N_HIDDEN;
     const size_t output_weight_bytes =
@@ -348,10 +369,47 @@ bool LoadNetwork(const char* path) {
     if (!read(s_input_biases,   sizeof(s_input_biases),   "INPUT_BIASES"))  { std::fclose(fh); return false; }
     if (!read(s_l1_weights,     sizeof(s_l1_weights),     "L1_WEIGHTS"))    { std::fclose(fh); return false; }
     if (!read(s_l1_biases,      sizeof(s_l1_biases),      "L1_BIASES"))     { std::fclose(fh); return false; }
-    if (!read(s_l2_weights,     sizeof(s_l2_weights),     "L2_WEIGHTS"))    { std::fclose(fh); return false; }
-    if (!read(s_l2_biases,      sizeof(s_l2_biases),      "L2_BIASES"))     { std::fclose(fh); return false; }
-    if (!read(s_output_weights, output_weight_bytes,      "OUTPUT_WEIGHTS")){ std::fclose(fh); return false; }
-    if (!read(s_output_biases,  output_bias_bytes,        "OUTPUT_BIASES")) { std::fclose(fh); return false; }
+    if (quantized) {
+        if (!read(s_quantized_l2_weights, sizeof(s_quantized_l2_weights), "L2_WEIGHTS")) {
+            std::fclose(fh);
+            return false;
+        }
+        if (!read(s_quantized_l2_biases, sizeof(s_quantized_l2_biases), "L2_BIASES")) {
+            std::fclose(fh);
+            return false;
+        }
+        if (!read(
+                s_quantized_output_weights,
+                sizeof(s_quantized_output_weights),
+                "OUTPUT_WEIGHTS")) {
+            std::fclose(fh);
+            return false;
+        }
+        if (!read(
+                &s_quantized_output_bias,
+                sizeof(s_quantized_output_bias),
+                "OUTPUT_BIAS")) {
+            std::fclose(fh);
+            return false;
+        }
+    } else {
+        if (!read(s_l2_weights, sizeof(s_l2_weights), "L2_WEIGHTS")) {
+            std::fclose(fh);
+            return false;
+        }
+        if (!read(s_l2_biases, sizeof(s_l2_biases), "L2_BIASES")) {
+            std::fclose(fh);
+            return false;
+        }
+        if (!read(s_output_weights, output_weight_bytes, "OUTPUT_WEIGHTS")) {
+            std::fclose(fh);
+            return false;
+        }
+        if (!read(s_output_biases, output_bias_bytes, "OUTPUT_BIASES")) {
+            std::fclose(fh);
+            return false;
+        }
+    }
 
     // Sanity: trailing-byte check (should be exactly EOF now).
     unsigned char probe;
@@ -382,11 +440,18 @@ bool LoadNetwork(const char* path) {
     L1_WEIGHTS_T   = s_l1_weights_t;
     L1_WEIGHTS_SPARSE = s_l1_weights_sparse;
     L1_BIASES      = s_l1_biases;
-    L2_WEIGHTS     = s_l2_weights;
-    L2_BIASES      = s_l2_biases;
-    OUTPUT_WEIGHTS = s_output_weights;
-    OUTPUT_BIASES  = s_output_biases;
-    OUTPUT_BIAS    = s_output_biases[0];
+    DENSE_LAYER_FORMAT = quantized
+        ? DenseLayerFormat::Quantized
+        : DenseLayerFormat::Float;
+    L2_WEIGHTS = quantized ? nullptr : s_l2_weights;
+    L2_BIASES = quantized ? nullptr : s_l2_biases;
+    OUTPUT_WEIGHTS = quantized ? nullptr : s_output_weights;
+    OUTPUT_BIASES = quantized ? nullptr : s_output_biases;
+    OUTPUT_BIAS = quantized ? 0.0f : s_output_biases[0];
+    QUANTIZED_L2_WEIGHTS = quantized ? s_quantized_l2_weights : nullptr;
+    QUANTIZED_L2_BIASES = quantized ? s_quantized_l2_biases : nullptr;
+    QUANTIZED_OUTPUT_WEIGHTS = quantized ? s_quantized_output_weights : nullptr;
+    QUANTIZED_OUTPUT_BIAS = quantized ? s_quantized_output_bias : 0;
     ++NETWORK_GENERATION;
 
     return true;

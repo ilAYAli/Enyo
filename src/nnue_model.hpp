@@ -55,6 +55,10 @@ inline constexpr int N_HEAD_FEATURES = N_MATERIAL_HEAD_FEATURES;
 inline constexpr int DEFAULT_OUTPUT_HEAD_FEATURES = 0;
 inline constexpr int MAX_OUTPUT_HEAD_FEATURES = N_EXTENDED_HEAD_FEATURES;
 inline constexpr int MAX_OUTPUT_WIDTH = N_L3 + MAX_OUTPUT_HEAD_FEATURES;
+enum class DenseLayerFormat {
+    Float,
+    Quantized,
+};
 inline constexpr std::array<uint8_t, 8> NETWORK_HEADER_MAGIC = {
     'E', 'N', 'Y', 'O', 'N', 'N', '2', 0,
 };
@@ -387,6 +391,11 @@ extern const float*   L2_BIASES;
 extern const float*   OUTPUT_WEIGHTS;
 extern const float*   OUTPUT_BIASES;
 extern float          OUTPUT_BIAS;
+extern const int16_t* QUANTIZED_L2_WEIGHTS;
+extern const int32_t* QUANTIZED_L2_BIASES;
+extern const int16_t* QUANTIZED_OUTPUT_WEIGHTS;
+extern int32_t        QUANTIZED_OUTPUT_BIAS;
+extern DenseLayerFormat DENSE_LAYER_FORMAT;
 extern bool           INPUT_LAYOUT_SCRAMBLED;
 extern uint64_t       NETWORK_GENERATION;
 extern int            TRAINED_HIDDEN;
@@ -399,8 +408,7 @@ extern int            OUTPUT_HEAD_FEATURES;
 // accumulator calls.
 void SetWeights(const acc_t* weights, const acc_t* biases);
 
-// Load a full `.nn` blob from disk. Returns true on success.
-// The blob layout must match NETWORK_SIZE below. Weight
+// Load a supported `.nn` blob from disk. Returns true on success. Weight
 // pointers are updated to reference internal storage owned by nnue_model.cpp.
 bool LoadNetwork(const char* path);
 
@@ -421,6 +429,20 @@ inline constexpr size_t NetworkSize(
     + sizeof(float)   * static_cast<size_t>(output_buckets)
         * static_cast<size_t>(N_L3 + output_head_features) * N_OUTPUT
     + sizeof(float)   * static_cast<size_t>(output_buckets) * N_OUTPUT;
+}
+
+inline constexpr size_t QuantizedNetworkSize()
+{
+    return sizeof(int16_t)
+        * static_cast<size_t>(FeatureCount(16, LEGACY_FEATURE_CHANNELS))
+        * static_cast<size_t>(N_HIDDEN)
+    + sizeof(int16_t) * N_HIDDEN
+    + sizeof(int8_t)  * N_L1 * N_L2
+    + sizeof(int32_t) * N_L2
+    + sizeof(int16_t) * N_L2 * N_L3
+    + sizeof(int32_t) * N_L3
+    + sizeof(int16_t) * N_L3 * N_OUTPUT
+    + sizeof(int32_t) * N_OUTPUT;
 }
 
 inline constexpr size_t NETWORK_SIZE = NetworkSize(DEFAULT_INPUT_BUCKETS);
@@ -519,6 +541,11 @@ struct HeadFeatures {
 
 inline constexpr bool IsSupportedNetworkSize(size_t size) {
     return DetectNetworkContainerSize(size).input_buckets != 0;
+}
+
+inline constexpr bool IsSupportedQuantizedNetworkSize(size_t size)
+{
+    return size == QuantizedNetworkSize();
 }
 
 // ---------------------------------------------------------------------
@@ -805,6 +832,7 @@ extern bool enabled;
 // then right-shifts by 5 to fit int8.
 // ---------------------------------------------------------------------
 inline constexpr int QUANT1_BITS = 5;
+inline constexpr int QUANT2_BITS = 12;
 inline constexpr int SPARSE_CHUNK_SIZE = 4;
 
 inline constexpr size_t WeightIdxScrambled(size_t idx) {
@@ -1453,6 +1481,41 @@ inline float L3Transform(
 #endif
 }
 
+inline int PropagateQuantizedDense(const Accumulator* acc, int stm)
+{
+    alignas(64) float l1_output[N_L2];
+    alignas(64) int16_t l2_input[N_L2];
+    alignas(64) int16_t l3_input[N_L3];
+
+#if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__ARM_FEATURE_DOTPROD)
+    L1AffineReLUFromAccumulator(l1_output, acc, stm);
+#else
+    alignas(64) int8_t l1_input[N_L1];
+    InputReLU(l1_input, acc, stm);
+    L1AffineReLU(l1_output, l1_input);
+#endif
+
+    for (size_t i = 0; i < N_L2; ++i)
+        l2_input[i] = static_cast<int16_t>(
+            static_cast<int32_t>(l1_output[i]) >> QUANT1_BITS);
+
+    for (size_t i = 0; i < N_L3; ++i) {
+        int32_t value = QUANTIZED_L2_BIASES[i];
+        const size_t offset = i * N_L2;
+        for (size_t j = 0; j < N_L2; ++j)
+            value += static_cast<int32_t>(l2_input[j])
+                * static_cast<int32_t>(QUANTIZED_L2_WEIGHTS[offset + j]);
+        value >>= QUANT1_BITS;
+        l3_input[i] = static_cast<int16_t>(value < 0 ? 0 : value);
+    }
+
+    int32_t value = QUANTIZED_OUTPUT_BIAS;
+    for (size_t i = 0; i < N_L3; ++i)
+        value += static_cast<int32_t>(l3_input[i])
+            * static_cast<int32_t>(QUANTIZED_OUTPUT_WEIGHTS[i]);
+    return value >> QUANT2_BITS;
+}
+
 // Full forward pass, scalar only. Returns eval in centipawns (stm-relative).
 inline int Propagate(
     const Accumulator* acc,
@@ -1460,6 +1523,9 @@ inline int Propagate(
     int output_bucket = 0,
     const HeadFeatures* head_features = nullptr)
 {
+    if (DENSE_LAYER_FORMAT == DenseLayerFormat::Quantized)
+        return PropagateQuantizedDense(acc, stm);
+
 #if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__ARM_FEATURE_DOTPROD)
     alignas(64) float l2_input[N_L2];
     alignas(64) float l3_input[N_L3];
