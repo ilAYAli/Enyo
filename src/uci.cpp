@@ -31,7 +31,10 @@
 #include "eventlog.hpp"
 #include "probe.hpp"
 #include "nnue.hpp"
+#include "nnue/enyo/berserk_nn_loader.hpp"
 #include "nnue/enyo/enyo_halfka_model.hpp"
+#include "nnue/enyo/enyo_nn_loader.hpp"
+#include "nnue/stockfish/stockfish_nnue.hpp"
 #include "move_policy.hpp"
 #include "pgn.hpp"
 
@@ -202,6 +205,7 @@ bool load_eval_file(const std::string & value)
 {
     if (value.empty()) {
         Network::enabled = false;
+        NNUE::Stockfish::Disable();
         NNUE::Init("");
         log_legacy_evaluator("embedded-default");
         return true;
@@ -221,25 +225,47 @@ bool load_eval_file(const std::string & value)
     if (!sha256)
         fail_eval_file(path, "sha256 read failed");
 
-    if (Network::IsSupportedNetworkSize(size)
-        || Network::IsSupportedQuantizedNetworkSize(size)) {
-        if (Network::LoadNetwork(path.c_str())) {
-            Network::enabled = true;
-            ucilog(
-                "info string evaluator=native-nnue path='{}' sha256={} hidden={} input_buckets={} feature_channels={} output_buckets={} head_features={} dense_format={}\n",
-                path, *sha256, Network::TRAINED_HIDDEN, Network::INPUT_BUCKETS,
-                Network::FEATURE_CHANNELS, Network::OUTPUT_BUCKETS,
-                Network::OUTPUT_HEAD_FEATURES,
-                Network::DENSE_LAYER_FORMAT == Network::DenseLayerFormat::Quantized
-                    ? "quantized"
-                    : "float");
-            return true;
-        }
-        fail_eval_file(path, "matched supported network size but failed to load");
+    const auto enyo = Network::LoadEnyoNetwork(path.c_str());
+    if (enyo.status == NNUE::LoadStatus::loaded) {
+        NNUE::Stockfish::Disable();
+        Network::enabled = true;
+        ucilog(
+            "info string evaluator=enyo-nnue path='{}' sha256={} hidden={} input_buckets={} feature_channels={} output_buckets={} head_features={} dense_format=float\n",
+            path, *sha256, Network::TRAINED_HIDDEN, Network::INPUT_BUCKETS,
+            Network::FEATURE_CHANNELS, Network::OUTPUT_BUCKETS,
+            Network::OUTPUT_HEAD_FEATURES);
+        return true;
     }
+    if (enyo.status == NNUE::LoadStatus::invalid)
+        fail_eval_file(path, enyo.error);
+
+    const auto stockfish = NNUE::Stockfish::LoadNetwork(path.c_str());
+    if (stockfish.status == NNUE::LoadStatus::loaded) {
+        Network::enabled = false;
+        ucilog(
+            "info string evaluator=stockfish-nnue path='{}' sha256={} feature_set=HalfKAv2_hm+FullThreats hidden=1024 output_buckets=8 description='{}'\n",
+            path, *sha256, NNUE::Stockfish::Description());
+        return true;
+    }
+    if (stockfish.status == NNUE::LoadStatus::invalid)
+        fail_eval_file(path, stockfish.error);
+
+    const auto berserk = Network::LoadBerserkNetwork(path.c_str());
+    if (berserk.status == NNUE::LoadStatus::loaded) {
+        NNUE::Stockfish::Disable();
+        Network::enabled = true;
+        ucilog(
+            "info string evaluator=berserk-nnue path='{}' sha256={} hidden={} input_buckets={} feature_channels={} output_buckets={} dense_format=quantized\n",
+            path, *sha256, Network::TRAINED_HIDDEN, Network::INPUT_BUCKETS,
+            Network::FEATURE_CHANNELS, Network::OUTPUT_BUCKETS);
+        return true;
+    }
+    if (berserk.status == NNUE::LoadStatus::invalid)
+        fail_eval_file(path, berserk.error);
 
     if (NNUE::IsSupportedLegacyNetworkSize(size)) {
         Network::enabled = false;
+        NNUE::Stockfish::Disable();
         if (!NNUE::Init(path))
             fail_eval_file(path, "matched legacy network size but failed to load");
         log_legacy_evaluator("file", path, *sha256);
@@ -630,7 +656,9 @@ int Uci::operator()(const std::string& command)
                 : side_token == "black"
                     ? black
                     : b.side;
-            const auto score = static_cast<Value>(si.nnue.Evaluate(side));
+            const auto score = static_cast<Value>(NNUE::Stockfish::Enabled()
+                ? si.nnue.EvaluateStockfish(b)
+                : si.nnue.Evaluate(side));
             fmt::print("eval {}\n", score);
         } else if (token == "nnuecheck") {
             SearchInfo si(b, 1);

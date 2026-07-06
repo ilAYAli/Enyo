@@ -11,6 +11,7 @@
 #include "zobrist.hpp"
 #include "see.hpp"
 #include "nnue.hpp"
+#include "nnue/stockfish/stockfish_nnue_model.hpp"
 #include "probe.hpp"
 #include "search.hpp"
 #include "movepicker.hpp"
@@ -2253,6 +2254,210 @@ TEST(network_model, material_head_features_are_normalized) {
     EXPECT_FLOAT_EQ(features.values[Network::HEAD_QUEEN_COUNT], 0.0f);
     EXPECT_FLOAT_EQ(features.values[Network::HEAD_NON_PAWN_COUNT], 0.0f);
     EXPECT_FLOAT_EQ(features.values[Network::HEAD_PAWN_PHASE], 0.0f);
+}
+
+TEST(stockfish_nnue, current_architecture_hash) {
+    EXPECT_EQ(NNUE::Stockfish::FeatureTransformerHash(), 0x6165ddc9U);
+    EXPECT_EQ(NNUE::Stockfish::ArchitectureHash(), 0x63337116U);
+    EXPECT_EQ(NNUE::Stockfish::NetworkHash(), 0x0256acdfU);
+}
+
+TEST(stockfish_nnue, format_probe_distinguishes_invalid_from_unknown) {
+    const auto path = fs::temp_directory_path() / "enyo_stockfish_probe.nnue";
+    std::vector<char> bytes(12, 0);
+    write_u32_le(bytes, 0, NNUE::Stockfish::format_version);
+    write_u32_le(bytes, 4, NNUE::Stockfish::NetworkHash() ^ 1U);
+    write_u32_le(bytes, 8, 0);
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+
+    auto result = NNUE::Stockfish::LoadNetwork(path.c_str());
+    EXPECT_EQ(result.status, NNUE::LoadStatus::invalid);
+    EXPECT_EQ(result.error, "unsupported Stockfish NNUE architecture hash");
+
+    write_u32_le(bytes, 0, NNUE::Stockfish::format_version ^ 1U);
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+    result = NNUE::Stockfish::LoadNetwork(path.c_str());
+    EXPECT_EQ(result.status, NNUE::LoadStatus::not_recognized);
+    fs::remove(path);
+}
+
+TEST(stockfish_nnue, production_net_matches_reference_evaluations) {
+    const char * path = std::getenv("ENYO_STOCKFISH_NNUE_TEST_FILE");
+    if (!path || !fs::exists(path))
+        GTEST_SKIP() << "ENYO_STOCKFISH_NNUE_TEST_FILE is not available";
+
+    const auto loaded = NNUE::Stockfish::LoadNetwork(path);
+    ASSERT_EQ(loaded.status, NNUE::LoadStatus::loaded) << loaded.error;
+    Network::enabled = false;
+
+    struct PositionCase {
+        const char * fen;
+        int expected;
+    };
+    constexpr PositionCase cases[] = {
+        {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 6},
+        {"r3k2r/p1ppqpb1/bn2pnp1/2pP4/1p2P3/2N2N2/PPP1BPPP/R2Q1RK1 w kq - 0 10", -541},
+        {"rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 1 2", 50},
+        {"8/2p5/3p4/1P1Pp1k1/4P3/5K2/8/8 w - - 0 40", -242},
+    };
+
+    for (const auto & test : cases) {
+        Board board(test.fen);
+        NNUE::Stockfish::State state;
+        EXPECT_EQ(state.Evaluate(board, 0), test.expected) << test.fen;
+    }
+    NNUE::Stockfish::Disable();
+}
+
+TEST(stockfish_nnue, current_net_matches_reference_evaluations) {
+    const char * path = std::getenv("ENYO_STOCKFISH_NNUE_V15_TEST_FILE");
+    if (!path || !fs::exists(path))
+        GTEST_SKIP() << "ENYO_STOCKFISH_NNUE_V15_TEST_FILE is not available";
+
+    const auto loaded = NNUE::Stockfish::LoadNetwork(path);
+    ASSERT_EQ(loaded.status, NNUE::LoadStatus::loaded) << loaded.error;
+    Network::enabled = false;
+
+    constexpr std::pair<const char *, int> cases[] = {
+        {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 5},
+        {"r3k2r/p1ppqpb1/bn2pnp1/2pP4/1p2P3/2N2N2/PPP1BPPP/R2Q1RK1 w kq - 0 10", -461},
+        {"rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 1 2", 83},
+        {"8/2p5/3p4/1P1Pp1k1/4P3/5K2/8/8 w - - 0 40", -204},
+    };
+
+    for (const auto & [fen, expected] : cases) {
+        Board board(fen);
+        NNUE::Stockfish::State state;
+        EXPECT_EQ(state.Evaluate(board, 0), expected) << fen;
+    }
+    NNUE::Stockfish::Disable();
+}
+
+template<Color Us>
+void expect_stockfish_move_matches_refresh(Board & board, Move move) {
+    NNUE::Net live;
+    live.refresh(board);
+    (void)live.EvaluateStockfish(board);
+
+    apply_move<Us, true, true>(board, move, &live);
+    const int incremental = live.EvaluateStockfish(board);
+
+    NNUE::Net fresh;
+    fresh.refresh(board);
+    EXPECT_EQ(incremental, fresh.EvaluateStockfish(board))
+        << board.fen() << " after " << fmt::format("{}", move);
+}
+
+TEST(stockfish_nnue, special_moves_match_fresh_accumulators) {
+    const char * path = std::getenv("ENYO_STOCKFISH_NNUE_TEST_FILE");
+    if (!path || !fs::exists(path))
+        GTEST_SKIP() << "ENYO_STOCKFISH_NNUE_TEST_FILE is not available";
+
+    const auto loaded = NNUE::Stockfish::LoadNetwork(path);
+    ASSERT_EQ(loaded.status, NNUE::LoadStatus::loaded) << loaded.error;
+    Network::enabled = false;
+
+    {
+        Board board{"r3k2r/pppqppbp/2np1np1/8/8/2NP1NP1/PPPQPPBP/R3K2R w KQkq - 0 1"};
+        expect_stockfish_move_matches_refresh<white>(
+            board, resolve_move<white>(board, king, e1, g1));
+    }
+    {
+        Board board{"rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3"};
+        expect_stockfish_move_matches_refresh<white>(
+            board, resolve_move<white>(board, pawn, e5, f6));
+    }
+    {
+        Board board{"1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1"};
+        Move promotion{};
+        for (const Move move : generate_legal_moves<white>(board))
+            if (move.flags() == Move::Flags::promote
+                && move.dst_sq() == b8
+                && move.promo_piece() == queen) {
+                promotion = move;
+                break;
+            }
+        ASSERT_TRUE(promotion);
+        expect_stockfish_move_matches_refresh<white>(board, promotion);
+    }
+
+    NNUE::Stockfish::Disable();
+}
+
+TEST(stockfish_nnue, null_move_preserves_parent_accumulator) {
+    const char * path = std::getenv("ENYO_STOCKFISH_NNUE_TEST_FILE");
+    if (!path || !fs::exists(path))
+        GTEST_SKIP() << "ENYO_STOCKFISH_NNUE_TEST_FILE is not available";
+
+    const auto loaded = NNUE::Stockfish::LoadNetwork(path);
+    ASSERT_EQ(loaded.status, NNUE::LoadStatus::loaded) << loaded.error;
+    Network::enabled = false;
+
+    Board board{"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"};
+    NNUE::Net live;
+    live.refresh(board);
+    (void)live.EvaluateStockfish(board);
+    live.push(board);
+    apply_null_move<white>(board);
+    (void)live.EvaluateStockfish(board);
+    revert_null_move<white>(board);
+    live.pop();
+
+    const Move move = resolve_move<white>(board, pawn, e2, e4);
+    apply_move<white, true, true>(board, move, &live);
+    const int incremental = live.EvaluateStockfish(board);
+    NNUE::Net fresh;
+    fresh.refresh(board);
+    EXPECT_EQ(incremental, fresh.EvaluateStockfish(board));
+    NNUE::Stockfish::Disable();
+}
+
+TEST(stockfish_nnue, incremental_accumulator_matches_refresh) {
+    const char * path = std::getenv("ENYO_STOCKFISH_NNUE_TEST_FILE");
+    if (!path || !fs::exists(path))
+        GTEST_SKIP() << "ENYO_STOCKFISH_NNUE_TEST_FILE is not available";
+
+    const auto loaded = NNUE::Stockfish::LoadNetwork(path);
+    ASSERT_EQ(loaded.status, NNUE::LoadStatus::loaded) << loaded.error;
+    Network::enabled = false;
+
+    Board board("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    NNUE::Net live;
+    live.refresh(board);
+    EXPECT_EQ(live.EvaluateStockfish(board), 6);
+
+    const auto verify = [&] {
+        NNUE::Net refreshed;
+        refreshed.refresh(board);
+        EXPECT_EQ(live.EvaluateStockfish(board), refreshed.EvaluateStockfish(board));
+    };
+
+    apply_move<white, true, true>(
+        board, resolve_move<white>(board, pawn, e2, e4), &live);
+    verify();
+    apply_move<black, true, true>(
+        board, resolve_move<black>(board, pawn, c7, c5), &live);
+    verify();
+    apply_move<white, true, true>(
+        board, resolve_move<white>(board, knight, g1, f3), &live);
+    verify();
+    apply_move<black, true, true>(
+        board, resolve_move<black>(board, pawn, d7, d6), &live);
+    verify();
+    apply_move<white, true, true>(
+        board, resolve_move<white>(board, pawn, d2, d4), &live);
+    verify();
+    apply_move<black, true, true>(
+        board, resolve_move<black>(board, pawn, c5, d4), &live);
+    verify();
+
+    NNUE::Stockfish::Disable();
 }
 
 void materialize_network(Board & b, NNUE::Net & net) {

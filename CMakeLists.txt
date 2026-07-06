@@ -160,6 +160,10 @@ set(ENYO_NNUE_MODEL_SOURCES
     src/nnue/enyo/enyo_nn_loader.cpp
     src/nnue/enyo/berserk_nn_loader.cpp
     src/nnue/enyo/enyo_network_loader.cpp
+    src/nnue/stockfish/halfka_v2_hm.cpp
+    src/nnue/stockfish/full_threats.cpp
+    src/nnue/stockfish/stockfish_nnue_model.cpp
+    src/nnue/stockfish/stockfish_nnue.cpp
 )
 
 set(ENYO_ENGINE_SOURCES

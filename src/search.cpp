@@ -193,6 +193,8 @@ Value evaluate(Board & b, NNUE::Net * nnue)
             fmt::print("<{}> move: {}, score2: {}\n", Us, b.history[b.histply -1].move, score);
         return score;
     }
+    if (NNUE::Stockfish::Enabled())
+        return static_cast<Value>(nnue->EvaluateStockfish(b));
     auto const score = static_cast<Value>(nnue->Evaluate(Us));
     if constexpr (Constexpr::debug_eval)
         fmt::print("<{}> move: {}, score: {}\n", Us, b.history[b.histply -1].move, score);
@@ -720,10 +722,14 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
             int R = cfgmgr.nmp_base
                   + std::min(4, depth / cfgmgr.nmp_depth_div)
                   + std::min(Value(3), (ss->eval - beta) / cfgmgr.nmp_eval_div);
+            if (NNUE::Stockfish::Enabled())
+                worker.si.nnue.push(b);
             apply_null_move<Us>(b);
             auto nullscore = -negamax<Them, NodeType::NonPV>(depth -R, worker, ss + 1, -beta, -beta + 1);
             ss->move = Move{};
             revert_null_move<Us>(b);
+            if (NNUE::Stockfish::Enabled())
+                worker.si.nnue.pop();
 
             if (nullscore >= beta) {
                 // Unproven mate scores from the reduced null search are

@@ -823,10 +823,12 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
     assert((src_piece != PieceType::no_piece_type) && "error, source position not specified");
 
     bool network_active = false;
+    bool stockfish_network_active = false;
     if constexpr (UpdateNNUE) {
         assert(nnue && "apply_move: nnue is null");
         network_active = Network::enabled && Network::INPUT_WEIGHTS != nullptr;
-        nnue->push(!network_active);
+        stockfish_network_active = NNUE::Stockfish::Enabled();
+        nnue->push(b, !network_active);
     }
 
     auto & undo = b.history[b.histply++] = Undo{
@@ -853,6 +855,11 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
                         apply_castle<Us, CastleSide::Queenside, UpdateZobrist, false>(b, nnue);
                     nnue->mark_network_lazy_move(
                         move, nosquare, network_w_ksq, network_b_ksq);
+                } else if (stockfish_network_active) {
+                    if (move.dst_sq() < move.src_sq())
+                        apply_castle<Us, CastleSide::Kingside, UpdateZobrist, false>(b, nnue);
+                    else
+                        apply_castle<Us, CastleSide::Queenside, UpdateZobrist, false>(b, nnue);
                 } else {
                     if (move.dst_sq() < move.src_sq())
                         apply_castle<Us, CastleSide::Kingside, UpdateZobrist, UpdateNNUE>(b, nnue);
@@ -881,6 +888,8 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
                     apply_promotion<Us, UpdateZobrist, false>(b, move, nnue);
                     nnue->mark_network_lazy_move(
                         move, nosquare, network_w_ksq, network_b_ksq);
+                } else if (stockfish_network_active) {
+                    apply_promotion<Us, UpdateZobrist, false>(b, move, nnue);
                 } else {
                     apply_promotion<Us, UpdateZobrist, UpdateNNUE>(b, move, nnue);
                 }
@@ -900,6 +909,9 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
                         b, move, undo.gamestate.enpassant_square, nnue);
                     nnue->mark_network_lazy_move(
                         move, target, network_w_ksq, network_b_ksq);
+                } else if (stockfish_network_active) {
+                    apply_enpassant<Us, UpdateZobrist, false>(
+                        b, move, undo.gamestate.enpassant_square, nnue);
                 } else {
                     apply_enpassant<Us, UpdateZobrist, UpdateNNUE>(
                         b, move, undo.gamestate.enpassant_square, nnue);
@@ -911,7 +923,14 @@ inline void apply_move(Board & b, Move move, [[maybe_unused]] NNUE::Net * nnue =
             reset_halfmove_clock(b);
             break;
         default:
-            apply_move_generic<Us, UpdateZobrist, UpdateNNUE>(b, move, nnue);
+            if constexpr (UpdateNNUE) {
+                if (stockfish_network_active)
+                    apply_move_generic<Us, UpdateZobrist, false>(b, move, nnue);
+                else
+                    apply_move_generic<Us, UpdateZobrist, true>(b, move, nnue);
+            } else {
+                apply_move_generic<Us, UpdateZobrist, false>(b, move, nnue);
+            }
             if (dst_piece != no_piece_type) {
                 reset_halfmove_clock(b);
             } else {

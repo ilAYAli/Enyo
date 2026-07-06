@@ -3,6 +3,7 @@
 #include "simd.h"
 #include "types.hpp"
 #include "nnue/enyo/enyo_halfka_model.hpp"
+#include "nnue/stockfish/stockfish_nnue.hpp"
 
 #include <array>
 #include <cstddef>
@@ -182,12 +183,14 @@ struct Net {
     std::vector<Network::Accumulator> network_accumulator_stack;
     std::array<Network::AccumulatorKingState, 2 * 2 * Network::N_KING_BUCKETS> network_refresh_table;
     std::vector<NetworkEvalCacheEntry> network_eval_cache;
+    Stockfish::State stockfish_state;
     uint64_t network_refresh_generation = 0;
     uint64_t network_eval_cache_generation = 0;
     AccumulatorCache cache;
 
     Net();
 
+    void push(const enyo::Board & board, bool copy_active_network = true);
     inline void push(bool copy_active_network = true) {
         if (Network::enabled && Network::INPUT_WEIGHTS != nullptr) {
             if (copy_active_network) {
@@ -195,7 +198,7 @@ struct Net {
                             &network_accumulator_stack[currentAccumulator],
                             sizeof(Network::Accumulator));
             }
-        } else {
+        } else if (!Stockfish::Enabled()) {
             accumulator_stack[currentAccumulator + 1].copy(accumulator_stack[currentAccumulator]);
             if (Network::INPUT_WEIGHTS != nullptr) {
                 std::memcpy(&network_accumulator_stack[currentAccumulator + 1],
@@ -213,6 +216,8 @@ struct Net {
     }
     inline void reset_accumulators() {
         currentAccumulator = 0;
+        if (Stockfish::Enabled())
+            stockfish_state.Clear();
     }
 
     void refresh(enyo::Board &board);
@@ -274,6 +279,7 @@ struct Net {
 
     int Evaluate(enyo::Color side);
     int Evaluate2(enyo::Board &board, enyo::Color side);
+    int EvaluateStockfish(const enyo::Board & board);
 
     void Benchmark();
 

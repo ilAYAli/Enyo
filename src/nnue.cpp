@@ -43,6 +43,12 @@ Net::Net() {
                 network_accumulator_stack.size() * sizeof(Network::Accumulator));
 }
 
+void Net::push(const enyo::Board & board, bool copy_active_network) {
+    if (Stockfish::Enabled())
+        stockfish_state.Prepare(board, currentAccumulator);
+    push(copy_active_network);
+}
+
 namespace {
 
 bool use_network() {
@@ -796,6 +802,11 @@ void Net::ensure_network(enyo::Board &board)
 }
 
 void Net::refresh(enyo::Board &board) {
+    if (Stockfish::Enabled()) {
+        stockfish_state.Clear();
+        return;
+    }
+
     if (use_network()) {
         refresh_network(board);
         return;
@@ -997,6 +1008,10 @@ int32_t Net::Evaluate2(enyo::Board &board, enyo::Color side) {
     entry.eval = eval;
     entry.valid = 1;
     return eval;
+}
+
+int32_t Net::EvaluateStockfish(const enyo::Board & board) {
+    return stockfish_state.Evaluate(board, currentAccumulator);
 }
 
 void Net::print_indexes(
