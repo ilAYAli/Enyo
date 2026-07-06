@@ -154,6 +154,14 @@ set(ENYO_CHESS_SOURCES
     src/zobrist.cpp
 )
 
+set(ENYO_NNUE_MODEL_SOURCES
+    src/nnue/enyo/enyo_halfka_model.cpp
+    src/nnue/enyo/enyo_halfka_board.cpp
+    src/nnue/enyo/enyo_nn_loader.cpp
+    src/nnue/enyo/berserk_nn_loader.cpp
+    src/nnue/enyo/enyo_network_loader.cpp
+)
+
 set(ENYO_ENGINE_SOURCES
     src/main.cpp
     src/benchmark.cpp
@@ -161,8 +169,7 @@ set(ENYO_ENGINE_SOURCES
     src/thread.cpp
     src/uci.cpp
     src/nnue.cpp
-    src/nnue/enyo/enyo_halfka_model.cpp
-    src/nnue/enyo/enyo_halfka_board.cpp
+    ${ENYO_NNUE_MODEL_SOURCES}
     src/move_policy.cpp
     src/search.cpp
     src/probe.cpp
@@ -294,8 +301,7 @@ if(ENYO_ENABLE_STOCKFISH_STATIC_DATAGEN)
 
     add_executable(enyo_sf_static_datagen
         tools/sf_static_datagen.cpp
-        src/nnue/enyo/enyo_halfka_model.cpp
-        src/nnue/enyo/enyo_halfka_board.cpp
+        ${ENYO_NNUE_MODEL_SOURCES}
     )
     target_compile_features(enyo_sf_static_datagen PRIVATE cxx_std_23)
     set_source_files_properties(tools/sf_static_datagen.cpp PROPERTIES
@@ -340,8 +346,7 @@ if(BUILD_TESTS)
         src/thread.cpp
         src/uci.cpp
         src/nnue.cpp
-        src/nnue/enyo/enyo_halfka_model.cpp
-        src/nnue/enyo/enyo_halfka_board.cpp
+        ${ENYO_NNUE_MODEL_SOURCES}
         src/move_policy.cpp
         src/search.cpp
         src/probe.cpp
