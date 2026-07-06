@@ -197,7 +197,7 @@ add_custom_target(update_version_info
 
 add_library(version_lib OBJECT src/version.cpp)
 add_dependencies(version_lib update_version_info)
-target_include_directories(version_lib PRIVATE ${CMAKE_BINARY_DIR})
+target_include_directories(version_lib PRIVATE ${CMAKE_BINARY_DIR}/src)
 
 add_library(enyo_chess STATIC
     ${ENYO_CHESS_SOURCES}
