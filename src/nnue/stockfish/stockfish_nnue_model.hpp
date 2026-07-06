@@ -37,6 +37,17 @@ enum class ArchitectureVariant {
     sfnnv15,
 };
 
+// One node's accumulator changes for one feature family.
+struct FeatureDeltaList {
+    std::array<FeatureIndex, 128> added{};
+    std::array<FeatureIndex, 128> removed{};
+    size_t added_size = 0;
+    size_t removed_size = 0;
+
+    void add(FeatureIndex index) { added[added_size++] = index; }
+    void remove(FeatureIndex index) { removed[removed_size++] = index; }
+};
+
 class Model {
 public:
     LoadResult Load(const char * path);
@@ -46,6 +57,13 @@ public:
         PerspectiveAccumulator & accumulator, FeatureIndex index, int sign) const;
     void UpdateThreat(
         PerspectiveAccumulator & accumulator, FeatureIndex index, int sign) const;
+    // Applies all of a node's row updates in one pass over the accumulator
+    // (parent == nullptr starts from the bias row, i.e. a full refresh).
+    void ApplyDeltas(
+        const PerspectiveAccumulator * parent,
+        PerspectiveAccumulator & result,
+        const FeatureDeltaList & halfka,
+        const FeatureDeltaList & threats) const;
     NetworkOutput Evaluate(
         const std::array<PerspectiveAccumulator, 2> & accumulators,
         enyo::Color side,

@@ -3,6 +3,8 @@
 #include "full_threats.hpp"
 
 #include "board.hpp"
+#include "magic/magic.hpp"
+#include "precalc/knight_attacks.hpp"
 #include "util.hpp"
 
 #include <array>
@@ -182,38 +184,6 @@ const IndexTables & Tables() {
     return tables;
 }
 
-struct PositionView {
-    std::array<uint8_t, square_count> piece_at{};
-    std::array<uint64_t, piece_count> pieces{};
-    uint64_t occupied = 0;
-};
-
-PositionView MakePositionView(const enyo::Board & board) {
-    PositionView view;
-    for (int color = enyo::white; color <= enyo::black; ++color) {
-        for (int piece = enyo::pawn; piece <= static_cast<int>(enyo::king); ++piece) {
-            uint64_t pieces = board.pt_bb[color][piece];
-            while (pieces) {
-                const int enyo_square = enyo::pop_lsb(pieces);
-                const int square = enyo_square ^ 7;
-                const uint8_t encoded = ToStockfishPiece(
-                    static_cast<enyo::Color>(color), static_cast<enyo::PieceType>(piece));
-                view.piece_at[square] = encoded;
-                view.pieces[encoded] |= uint64_t{1} << square;
-                view.occupied |= uint64_t{1} << square;
-            }
-        }
-    }
-    return view;
-}
-
-uint64_t PiecesOfTypes(const PositionView & view, std::initializer_list<int> types) {
-    uint64_t result = 0;
-    for (const int type : types)
-        result |= view.pieces[type] | view.pieces[type + 8];
-    return result;
-}
-
 } // namespace
 
 FeatureIndex MakeIndex(
@@ -242,53 +212,66 @@ FeatureIndex MakeIndex(
         + tables.attack_offsets[oriented_attacker][oriented_from][oriented_to]);
 }
 
-ActiveFeatures GetActiveFeatures(const enyo::Board & board, enyo::Color perspective) {
-    const PositionView position = MakePositionView(board);
-    const int king_square = ToStockfishSquare(static_cast<enyo::square_t>(
-        enyo::lsb(board.pt_bb[perspective][enyo::king])));
-    const uint64_t pawn_targets = PiecesOfTypes(
-        position, {enyo::pawn, enyo::knight, enyo::rook});
-    const uint64_t minor_slider_targets = PiecesOfTypes(
-        position, {enyo::pawn, enyo::knight, enyo::bishop, enyo::rook});
-    const uint64_t queen_targets = PiecesOfTypes(
-        position, {enyo::pawn, enyo::knight, enyo::bishop, enyo::rook, enyo::queen});
+std::array<ActiveFeatures, 2> GetActiveFeatures(const enyo::Board & board) {
+    // Enumerates in enyo square space (engine attack tables) and flips to
+    // the Stockfish orientation only at MakeIndex; one pass feeds both
+    // perspectives since attacks are perspective-independent.
+    const uint64_t occupied =
+        board.color_bb[enyo::white] | board.color_bb[enyo::black];
+    const auto both = [&](enyo::PieceType piece) {
+        return board.pt_bb[enyo::white][piece] | board.pt_bb[enyo::black][piece];
+    };
+    const uint64_t pawn_targets =
+        both(enyo::pawn) | both(enyo::knight) | both(enyo::rook);
+    const uint64_t minor_slider_targets = pawn_targets | both(enyo::bishop);
+    const uint64_t queen_targets = minor_slider_targets | both(enyo::queen);
 
-    ActiveFeatures features;
-    for (const int relative_color : {enyo::white, enyo::black}) {
-        const int color = static_cast<int>(perspective) ^ relative_color;
+    const int king_square[2] = {
+        ToStockfishSquare(static_cast<enyo::square_t>(
+            enyo::lsb(board.pt_bb[enyo::white][enyo::king]))),
+        ToStockfishSquare(static_cast<enyo::square_t>(
+            enyo::lsb(board.pt_bb[enyo::black][enyo::king]))),
+    };
+
+    std::array<ActiveFeatures, 2> features;
+    const auto emit = [&](uint8_t attacker, int from, int to) {
+        const auto attacked_color =
+            (board.color_bb[enyo::black] >> to) & 1 ? enyo::black : enyo::white;
+        const uint8_t attacked = ToStockfishPiece(attacked_color, board.pt_mb[to]);
+        const int from_sf = from ^ 7;
+        const int to_sf = to ^ 7;
+        for (int perspective = enyo::white; perspective <= enyo::black; ++perspective) {
+            const FeatureIndex index = MakeIndex(
+                static_cast<enyo::Color>(perspective),
+                attacker, from_sf, to_sf, attacked, king_square[perspective]);
+            if (index < dimensions)
+                features[perspective].push(index);
+        }
+    };
+
+    for (int color = enyo::white; color <= enyo::black; ++color) {
+        const int rank_delta = color == enyo::white ? 1 : -1;
         const uint8_t pawn = ToStockfishPiece(
             static_cast<enyo::Color>(color), enyo::pawn);
-        uint64_t pawns = position.pieces[pawn];
+        uint64_t pawns = board.pt_bb[color][enyo::pawn];
         while (pawns) {
-            const int from = std::countr_zero(pawns);
-            pawns &= pawns - 1;
+            const int from = enyo::pop_lsb(pawns);
             const int file = from % 8;
-            const int rank = from / 8;
-            const int rank_delta = color == enyo::white ? 1 : -1;
+            const int target_rank = from / 8 + rank_delta;
 
             for (const int file_delta : {-1, 1}) {
                 const int target_file = file + file_delta;
-                const int target_rank = rank + rank_delta;
                 if (!on_board(target_file, target_rank))
                     continue;
                 const int to = target_rank * 8 + target_file;
-                if ((pawn_targets & (uint64_t{1} << to)) == 0)
-                    continue;
-                const FeatureIndex index = MakeIndex(
-                    perspective, pawn, from, to, position.piece_at[to], king_square);
-                if (index < dimensions)
-                    features.push(index);
+                if (pawn_targets & (uint64_t{1} << to))
+                    emit(pawn, from, to);
             }
 
-            const int target_rank = rank + rank_delta;
             if (on_board(file, target_rank)) {
                 const int to = target_rank * 8 + file;
-                if (PieceType(position.piece_at[to]) == enyo::pawn) {
-                    const FeatureIndex index = MakeIndex(
-                        perspective, pawn, from, to, position.piece_at[to], king_square);
-                    if (index < dimensions)
-                        features.push(index);
-                }
+                if (board.pt_mb[to] == enyo::pawn)
+                    emit(pawn, from, to);
             }
         }
 
@@ -297,29 +280,37 @@ ActiveFeatures GetActiveFeatures(const enyo::Board & board, enyo::Color perspect
              ++piece_type) {
             const uint8_t attacker = ToStockfishPiece(
                 static_cast<enyo::Color>(color), static_cast<enyo::PieceType>(piece_type));
-            uint64_t attackers = position.pieces[attacker];
+            const uint64_t targets = piece_type == enyo::knight || piece_type == enyo::queen
+                ? queen_targets
+                : minor_slider_targets;
+            uint64_t attackers = board.pt_bb[color][piece_type];
             while (attackers) {
-                const int from = std::countr_zero(attackers);
-                attackers &= attackers - 1;
-                const uint64_t targets = piece_type == enyo::knight || piece_type == enyo::queen
-                    ? queen_targets
-                    : minor_slider_targets;
-                uint64_t attacks = (piece_type == enyo::knight
-                    ? LeaperAttacks(piece_type, from)
-                    : SliderAttacks(piece_type, from, position.occupied)) & targets;
-                while (attacks) {
-                    const int to = std::countr_zero(attacks);
-                    attacks &= attacks - 1;
-                    const FeatureIndex index = MakeIndex(
-                        perspective, attacker, from, to, position.piece_at[to], king_square);
-                    if (index < dimensions)
-                        features.push(index);
+                const int from = enyo::pop_lsb(attackers);
+                uint64_t attacks = 0;
+                switch (piece_type) {
+                case enyo::knight:
+                    attacks = enyo::knight_attack_table[from];
+                    break;
+                case enyo::bishop:
+                    attacks = enyo::get_bishop_attacks(from, occupied);
+                    break;
+                case enyo::rook:
+                    attacks = enyo::get_rook_attacks(from, occupied);
+                    break;
+                default:
+                    attacks = enyo::get_bishop_attacks(from, occupied)
+                            | enyo::get_rook_attacks(from, occupied);
+                    break;
                 }
+                attacks &= targets;
+                while (attacks)
+                    emit(attacker, from, enyo::pop_lsb(attacks));
             }
         }
     }
 
-    features.sort();
+    features[enyo::white].sort();
+    features[enyo::black].sort();
     return features;
 }
 

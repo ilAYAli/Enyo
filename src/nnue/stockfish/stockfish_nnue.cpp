@@ -58,14 +58,15 @@ void ApplyFeatureDifference(
     }
 }
 
-std::array<PerspectiveFeatures, 2> GetFeatures(const enyo::Board & board) {
-    std::array<PerspectiveFeatures, 2> features;
+void GetFeatures(
+    const enyo::Board & board, std::array<PerspectiveFeatures, 2> & features)
+{
+    auto threats = FullThreats::GetActiveFeatures(board);
     for (int perspective = enyo::white; perspective <= enyo::black; ++perspective) {
         const auto color = static_cast<enyo::Color>(perspective);
         features[color].halfka = HalfKAv2Hm::GetActiveFeatures(board, color);
-        features[color].threats = FullThreats::GetActiveFeatures(board, color);
+        features[color].threats = threats[color];
     }
-    return features;
 }
 
 void Refresh(
@@ -73,14 +74,14 @@ void Refresh(
     const std::array<PerspectiveFeatures, 2> & features)
 {
     for (int perspective = enyo::white; perspective <= enyo::black; ++perspective) {
-        auto & accumulator = state.accumulators[perspective];
-        active_model->Reset(accumulator);
+        FeatureDeltaList halfka;
+        FeatureDeltaList threats;
         for (size_t i = 0; i < features[perspective].halfka.size; ++i)
-            active_model->UpdateHalfKa(
-                accumulator, features[perspective].halfka.values[i], 1);
+            halfka.add(features[perspective].halfka.values[i]);
         for (size_t i = 0; i < features[perspective].threats.size; ++i)
-            active_model->UpdateThreat(
-                accumulator, features[perspective].threats.values[i], 1);
+            threats.add(features[perspective].threats.values[i]);
+        active_model->ApplyDeltas(
+            nullptr, state.accumulators[perspective], halfka, threats);
     }
 }
 
@@ -89,21 +90,25 @@ void UpdateFromParent(
     const PlyState & parent,
     const std::array<PerspectiveFeatures, 2> & features)
 {
-    state.accumulators = parent.accumulators;
     for (int perspective = enyo::white; perspective <= enyo::black; ++perspective) {
-        auto & accumulator = state.accumulators[perspective];
+        FeatureDeltaList halfka;
+        FeatureDeltaList threats;
         ApplyFeatureDifference(
             parent.features[perspective].halfka,
             features[perspective].halfka,
             [&](FeatureIndex index, int sign) {
-                active_model->UpdateHalfKa(accumulator, index, sign);
+                sign > 0 ? halfka.add(index) : halfka.remove(index);
             });
         ApplyFeatureDifference(
             parent.features[perspective].threats,
             features[perspective].threats,
             [&](FeatureIndex index, int sign) {
-                active_model->UpdateThreat(accumulator, index, sign);
+                sign > 0 ? threats.add(index) : threats.remove(index);
             });
+        active_model->ApplyDeltas(
+            &parent.accumulators[perspective],
+            state.accumulators[perspective],
+            halfka, threats);
     }
 }
 
@@ -177,7 +182,7 @@ void State::Prepare(const enyo::Board & board, size_t ply) {
     if (state.valid && state.generation == model_generation && state.hash == board.hash)
         return;
 
-    const auto features = GetFeatures(board);
+    GetFeatures(board, state.features);
     bool updated = false;
     if (ply > 0) {
         const PlyState & parent = impl_->plies[ply - 1];
@@ -185,14 +190,13 @@ void State::Prepare(const enyo::Board & board, size_t ply) {
         if (parent.valid
             && parent.generation == model_generation
             && parent.hash == ExpectedParentHash(board, root)) {
-            UpdateFromParent(state, parent, features);
+            UpdateFromParent(state, parent, state.features);
             updated = true;
         }
     }
     if (!updated)
-        Refresh(state, features);
+        Refresh(state, state.features);
 
-    state.features = features;
     state.hash = board.hash;
     state.generation = model_generation;
     state.valid = true;

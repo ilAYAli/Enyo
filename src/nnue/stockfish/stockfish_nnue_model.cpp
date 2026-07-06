@@ -523,6 +523,86 @@ void Model::UpdateThreat(
         accumulator.psqt[bucket] += sign * threat_psqt_weights_[psqt_base + bucket];
 }
 
+void Model::ApplyDeltas(
+    const PerspectiveAccumulator * parent,
+    PerspectiveAccumulator & result,
+    const FeatureDeltaList & halfka,
+    const FeatureDeltaList & threats) const
+{
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    const int16_t * source = parent ? parent->values.data() : biases_.data();
+    constexpr size_t chunk = 64;
+    for (size_t i = 0; i < hidden_size; i += chunk) {
+        int16x8_t v[chunk / 8];
+        for (size_t k = 0; k < chunk / 8; ++k)
+            v[k] = vld1q_s16(source + i + 8 * k);
+
+        for (size_t f = 0; f < halfka.added_size; ++f) {
+            const int16_t * row =
+                halfka_weights_.data() + size_t{halfka.added[f]} * hidden_size + i;
+            for (size_t k = 0; k < chunk / 8; ++k)
+                v[k] = vaddq_s16(v[k], vld1q_s16(row + 8 * k));
+        }
+        for (size_t f = 0; f < halfka.removed_size; ++f) {
+            const int16_t * row =
+                halfka_weights_.data() + size_t{halfka.removed[f]} * hidden_size + i;
+            for (size_t k = 0; k < chunk / 8; ++k)
+                v[k] = vsubq_s16(v[k], vld1q_s16(row + 8 * k));
+        }
+        for (size_t f = 0; f < threats.added_size; ++f) {
+            const int8_t * row =
+                threat_weights_.data() + size_t{threats.added[f]} * hidden_size + i;
+            for (size_t k = 0; k < chunk / 8; ++k)
+                v[k] = vaddq_s16(v[k], vmovl_s8(vld1_s8(row + 8 * k)));
+        }
+        for (size_t f = 0; f < threats.removed_size; ++f) {
+            const int8_t * row =
+                threat_weights_.data() + size_t{threats.removed[f]} * hidden_size + i;
+            for (size_t k = 0; k < chunk / 8; ++k)
+                v[k] = vsubq_s16(v[k], vmovl_s8(vld1_s8(row + 8 * k)));
+        }
+
+        for (size_t k = 0; k < chunk / 8; ++k)
+            vst1q_s16(result.values.data() + i + 8 * k, v[k]);
+    }
+
+    int32x4_t psqt_lo = parent ? vld1q_s32(parent->psqt.data()) : vdupq_n_s32(0);
+    int32x4_t psqt_hi = parent ? vld1q_s32(parent->psqt.data() + 4) : vdupq_n_s32(0);
+    const auto apply_psqt = [&](const std::vector<int32_t> & weights,
+                                const FeatureDeltaList & deltas) {
+        for (size_t f = 0; f < deltas.added_size; ++f) {
+            const int32_t * row = weights.data() + size_t{deltas.added[f]} * output_buckets;
+            psqt_lo = vaddq_s32(psqt_lo, vld1q_s32(row));
+            psqt_hi = vaddq_s32(psqt_hi, vld1q_s32(row + 4));
+        }
+        for (size_t f = 0; f < deltas.removed_size; ++f) {
+            const int32_t * row = weights.data() + size_t{deltas.removed[f]} * output_buckets;
+            psqt_lo = vsubq_s32(psqt_lo, vld1q_s32(row));
+            psqt_hi = vsubq_s32(psqt_hi, vld1q_s32(row + 4));
+        }
+    };
+    apply_psqt(halfka_psqt_weights_, halfka);
+    apply_psqt(threat_psqt_weights_, threats);
+    vst1q_s32(result.psqt.data(), psqt_lo);
+    vst1q_s32(result.psqt.data() + 4, psqt_hi);
+#else
+    if (parent) {
+        if (&result != parent)
+            result = *parent;
+    } else {
+        Reset(result);
+    }
+    for (size_t f = 0; f < halfka.added_size; ++f)
+        UpdateHalfKa(result, halfka.added[f], 1);
+    for (size_t f = 0; f < halfka.removed_size; ++f)
+        UpdateHalfKa(result, halfka.removed[f], -1);
+    for (size_t f = 0; f < threats.added_size; ++f)
+        UpdateThreat(result, threats.added[f], 1);
+    for (size_t f = 0; f < threats.removed_size; ++f)
+        UpdateThreat(result, threats.removed[f], -1);
+#endif
+}
+
 NetworkOutput Model::Evaluate(
     const std::array<PerspectiveAccumulator, 2> & accumulators,
     enyo::Color side,
@@ -534,11 +614,27 @@ NetworkOutput Model::Evaluate(
         const size_t color = static_cast<size_t>(perspectives[perspective]);
         const auto & values = accumulators[color].values;
         const size_t offset = perspective * hidden_size / 2;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+        const int16x8_t zero = vdupq_n_s16(0);
+        const int16x8_t clip = vdupq_n_s16(255);
+        for (size_t i = 0; i < hidden_size / 2; i += 8) {
+            const int16x8_t first = vminq_s16(
+                vmaxq_s16(vld1q_s16(values.data() + i), zero), clip);
+            const int16x8_t second = vminq_s16(
+                vmaxq_s16(vld1q_s16(values.data() + i + hidden_size / 2), zero), clip);
+            // products are at most 255*255, which fits u16
+            const uint16x8_t product = vmulq_u16(
+                vreinterpretq_u16_s16(first), vreinterpretq_u16_s16(second));
+            vst1_u8(transformed.data() + offset + i,
+                    vmovn_u16(vshrq_n_u16(product, 9)));
+        }
+#else
         for (size_t i = 0; i < hidden_size / 2; ++i) {
             const int first = std::clamp<int>(values[i], 0, 255);
             const int second = std::clamp<int>(values[i + hidden_size / 2], 0, 255);
             transformed[offset + i] = static_cast<uint8_t>((first * second) / 512);
         }
+#endif
     }
 
     const size_t bucket = static_cast<size_t>(

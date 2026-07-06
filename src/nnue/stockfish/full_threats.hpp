@@ -2,6 +2,8 @@
 
 #include "stockfish_types.hpp"
 
+#include <array>
+
 namespace enyo {
 class Board;
 }
@@ -21,6 +23,6 @@ FeatureIndex MakeIndex(
     uint8_t attacked,
     int king_square);
 
-ActiveFeatures GetActiveFeatures(const enyo::Board & board, enyo::Color perspective);
+std::array<ActiveFeatures, 2> GetActiveFeatures(const enyo::Board & board);
 
 } // namespace NNUE::Stockfish::FullThreats
