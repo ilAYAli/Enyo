@@ -102,43 +102,43 @@ public:
     int root_repetition_contempt = 24;
     // Score swing (cp) between iterations that counts as instability for
     // the soft-time extension. TODO Track 1: SPRT 60/80/150 variants.
-    int tm_volatility_threshold = 104;
+    int tm_volatility_threshold = 106;
     // LMR formula constants used by init_search() to precompute the
     // [depth][move_count] reduction table. Stored *100 so UCI spin can
     // express fractions (e.g. lmr_base 125 -> 1.25). Changing either
     // forces a rebuild of the table via init_search().
-    int lmr_base = 137;
-    int lmr_divisor = 109;
+    int lmr_base = 142;
+    int lmr_divisor = 106;
     // Set when either lmr_* knob is touched at runtime; consumers must
     // re-run init_search() and clear it. Kept out of setopt's return so
     // callers don't have to special-case the recompute.
     bool lmr_dirty = false;
     // Search defaults promoted from SPSA; UCI options may override them.
     int razor_depth = 3;
-    int razor_margin = 52;
-    int razor_depth_factor = 191;
+    int razor_margin = 53;
+    int razor_depth_factor = 194;
     int rfp_depth = 7;
     int rfp_margin = 64;
     int rfp_improving = 71;
     int nmp_base = 7;
     int nmp_depth_div = 4;
-    int nmp_eval_div = 197;
-    int probcut_margin = 145;
+    int nmp_eval_div = 195;
+    int probcut_margin = 140;
     int futility_depth = 6;
-    int futility_margin = 144;
+    int futility_margin = 136;
     int lmp_depth = 5;
     int lmp_base = 5;
     int lmp_improving_base = 8;
     int se_depth = 11;
-    int se_margin_mult = 2;
-    int se_entry_slack = 3;
-    int se_double_margin = 33;
+    int se_margin_mult = 4;
+    int se_entry_slack = 2;
+    int se_double_margin = 32;
     int se_double_cap = 4;
     int lmr_cutoff_cnt = 4;
-    int lmr_hist_div = 6693;
-    int hist_bonus_cap = 1690;
-    int hist_bonus_scale = 34;
-    int asp_delta = 9;
+    int lmr_hist_div = 6929;
+    int hist_bonus_cap = 1656;
+    int hist_bonus_scale = 33;
+    int asp_delta = 16;
     int asp_depth = 5;
     bool use_chess_960      = false;
     bool use_syzygy         = true;
