@@ -1122,15 +1122,15 @@ void Net::Benchmark()
 // Unpack a contiguous net blob (int16 input weights + int16 input bias
 // + int16 hidden weights + int32 hidden bias) from memory. Shared
 // between the embedded-blob and on-disk paths.
-static void ReadBinFromMemory(const unsigned char * data, size_t size)
+static bool ReadBinFromMemory(const unsigned char * data, size_t size)
 {
     if (!IsSupportedLegacyNetworkSize(size)) {
         fmt::print(
-            "nnue: unsupported legacy net size {} (expected {} or {} bytes); aborting load\n",
+            "nnue: unsupported legacy net size {} (expected {} or {} bytes); rejecting load\n",
             size,
             LEGACY_NETWORK_SIZE,
             LEGACY_NETWORK_FILE_SIZE);
-        std::exit(EXIT_FAILURE);
+        return false;
     }
 
     if (size == LEGACY_NETWORK_FILE_SIZE
@@ -1138,8 +1138,8 @@ static void ReadBinFromMemory(const unsigned char * data, size_t size)
             data + LEGACY_NETWORK_SIZE,
             LEGACY_NETWORK_TRAILER.data(),
             LEGACY_NETWORK_TRAILER.size()) != 0) {
-        fmt::print("nnue: invalid legacy net trailer; aborting load\n");
-        std::exit(EXIT_FAILURE);
+        fmt::print("nnue: invalid legacy net trailer; rejecting load\n");
+        return false;
     }
 
     size_t memoryIndex = 0;
@@ -1162,10 +1162,19 @@ static void ReadBinFromMemory(const unsigned char * data, size_t size)
     std::cout << "Bias: " << hiddenBias[0] / INPUT_QUANTIZATION / HIDDEN_QUANTIZATON << std::endl;
     std::cout << std::endl;
 #endif
+    return true;
 }
 
-void ReadBin() {
-    ReadBinFromMemory(gEVALData, gEVALSize);
+bool ReadBin() {
+    return ReadBinFromMemory(gEVALData, gEVALSize);
+}
+
+const unsigned char * EmbeddedNetworkData() {
+    return gEVALData;
+}
+
+size_t EmbeddedNetworkSize() {
+    return gEVALSize;
 }
 
 // Load a .net file from disk into the module-level weight arrays.
@@ -1194,8 +1203,7 @@ static bool LoadFromDisk(const std::string & path)
         fmt::print("nnue: empty file '{}'\n", path);
         return false;
     }
-    ReadBinFromMemory(buf.data(), buf.size());
-    return true;
+    return ReadBinFromMemory(buf.data(), buf.size());
 }
 
 bool Init(const std::string & file_name)
@@ -1207,8 +1215,7 @@ bool Init(const std::string & file_name)
         fmt::print("nnue: loaded network from '{}'\n", file_name);
         return true;
     }
-    ReadBin();
-    return file_name.empty();
+    return ReadBin() && file_name.empty();
 }
 
 void feature_indices(const enyo::Board & board,

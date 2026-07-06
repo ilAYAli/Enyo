@@ -306,6 +306,10 @@ struct Net {
 
 bool Init(const std::string &file_name);
 
+// The build-time INCBIN blob; callers must format-detect it.
+const unsigned char * EmbeddedNetworkData();
+size_t EmbeddedNetworkSize();
+
 // Enumerate active feature indices for a given perspective (view).
 // Indices are in the same space the accumulator uses — each one is
 // in [0, INPUT_SIZE) and corresponds to a row of inputWeights. Order

@@ -35,6 +35,8 @@ public:
     std::string white_player = "?";
     std::string black_player = "?";
     bool quitting = false;
+    // nnue_file lazy-load latch; tests pre-set it to pin an evaluator.
+    bool eval_loaded = false;
 
 private:
     void uci();
@@ -50,8 +52,6 @@ private:
     void quit();
     void ensure_eval_loaded();
     void ensure_hash_size();
-
-    bool eval_loaded = false;
 };
 
 }

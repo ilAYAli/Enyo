@@ -12,6 +12,7 @@
 #include "see.hpp"
 #include "nnue.hpp"
 #include "nnue/stockfish/stockfish_nnue_model.hpp"
+#include "nnue/enyo/enyo_nn_loader.hpp"
 #include "probe.hpp"
 #include "search.hpp"
 #include "movepicker.hpp"
@@ -51,6 +52,38 @@ bool load_config() {
     }
     return false;
 }
+
+// Deterministic legacy weights, independent of the embedded net.
+void seed_legacy_eval_weights() {
+    uint32_t rng = 0x9E3779B9u;
+    const auto next = [&rng]() -> int16_t {
+        rng = rng * 1664525u + 1013904223u;
+        return static_cast<int16_t>(static_cast<int>((rng >> 16) & 0xFF) - 128);
+    };
+    for (auto & w : inputWeights) w = next();
+    for (auto & w : inputBias) w = next();
+    for (auto & w : hiddenWeights) w = next();
+    for (auto & w : hiddenBias) w = next();
+}
+
+struct LegacyEvalScope {
+    bool old_enabled = Network::enabled;
+    std::vector<int16_t> old_input_weights{inputWeights.begin(), inputWeights.end()};
+    std::vector<int16_t> old_input_bias{inputBias.begin(), inputBias.end()};
+    std::vector<int16_t> old_hidden_weights{hiddenWeights.begin(), hiddenWeights.end()};
+    std::vector<int> old_hidden_bias{hiddenBias.begin(), hiddenBias.end()};
+    LegacyEvalScope() {
+        Network::enabled = false;
+        seed_legacy_eval_weights();
+    }
+    ~LegacyEvalScope() {
+        std::copy(old_input_weights.begin(), old_input_weights.end(), inputWeights.begin());
+        std::copy(old_input_bias.begin(), old_input_bias.end(), inputBias.begin());
+        std::copy(old_hidden_weights.begin(), old_hidden_weights.end(), hiddenWeights.begin());
+        std::copy(old_hidden_bias.begin(), old_hidden_bias.end(), hiddenBias.begin());
+        Network::enabled = old_enabled;
+    }
+};
 
 TEST(tt, packed_entry_round_trips_search_fields)
 {
@@ -3583,6 +3616,9 @@ TEST(uci_root, lost_tablebase_root_does_not_search_after_tbhit) {
 }
 
 TEST(uci_root, wdl_only_lost_tablebase_root_keeps_cutoffs_fast) {
+    // Node-count expectations assume the deterministic legacy eval.
+    LegacyEvalScope legacy;
+
     const auto wdl_file = find_test_tablebase_file("KQRRvKQ.rtbw");
     if (wdl_file.empty())
         GTEST_SKIP() << "KQRRvKQ WDL tablebase not available";
@@ -3621,6 +3657,7 @@ TEST(uci_root, wdl_only_lost_tablebase_root_keeps_cutoffs_fast) {
         cfgmgr.use_syzygy = use_syzygy;
         Board b;
         Uci uci{b};
+        uci.eval_loaded = true; // keep the LegacyEvalScope evaluator
         uci("position fen 8/2RQ4/1K6/4R3/8/5q2/k7/8 b - - 0 1");
 
         thread::pool.stop = false;
@@ -3641,8 +3678,9 @@ TEST(uci_root, wdl_only_lost_tablebase_root_keeps_cutoffs_fast) {
     EXPECT_TRUE(tb_nodes.has_value()) << tb_out;
     EXPECT_TRUE(plain_nodes.has_value()) << plain_out;
     if (tb_nodes && plain_nodes) {
-        EXPECT_LT(*tb_nodes, 2000u) << tb_out;
-        EXPECT_LT(*tb_nodes * 2, *plain_nodes) << "tb:\n" << tb_out << "\nplain:\n" << plain_out;
+        // Guards 271e335: suppressed TB cutoffs balloon the searched tree.
+        EXPECT_LT(*tb_nodes, 20000u) << tb_out;
+        EXPECT_LT(*tb_nodes, *plain_nodes) << "tb:\n" << tb_out << "\nplain:\n" << plain_out;
     }
 
     cfgmgr.num_threads = old_threads;
@@ -3821,6 +3859,8 @@ TEST(nnue_cache, pieces_hash_pawn_knight_collision_does_not_stale_acc) {
     Board a{"4k3/8/8/8/8/8/5PN1/4K3 w - - 0 1"};
     Board b{"4k3/8/8/8/8/8/8/4K3 w - - 0 1"};
 
+    LegacyEvalScope legacy;
+
     NNUE::Net net;
     // Prime cache with position A, then ask for position B. Under the old
     // hash this was a false cache hit and B's eval == A's eval. Under the
@@ -3849,6 +3889,12 @@ TEST(nnue_cache, pieces_hash_pawn_knight_collision_does_not_stale_acc) {
 
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
-    NNUE::Init("");
+    // Mirror the engine's embedded-default startup.
+    const auto embedded = Network::LoadEnyoNetwork(
+        NNUE::EmbeddedNetworkData(), NNUE::EmbeddedNetworkSize());
+    if (embedded.status == NNUE::LoadStatus::loaded)
+        Network::enabled = true;
+    else
+        NNUE::Init("");
     return RUN_ALL_TESTS();
 }

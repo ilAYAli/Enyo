@@ -103,8 +103,7 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
 
 } // namespace
 
-NNUE::LoadResult LoadEnyoNetwork(const char * path) {
-    NNUE::BinaryReader reader(path);
+static NNUE::LoadResult LoadEnyoNetwork(NNUE::BinaryReader & reader) {
     if (!reader)
         return {NNUE::LoadStatus::invalid, reader.error()};
 
@@ -139,6 +138,16 @@ NNUE::LoadResult LoadEnyoNetwork(const char * path) {
 
     EnyoStorage::Activate(layout, DenseLayerFormat::Float);
     return {NNUE::LoadStatus::loaded, {}};
+}
+
+NNUE::LoadResult LoadEnyoNetwork(const char * path) {
+    NNUE::BinaryReader reader(path);
+    return LoadEnyoNetwork(reader);
+}
+
+NNUE::LoadResult LoadEnyoNetwork(const unsigned char * data, size_t size) {
+    NNUE::BinaryReader reader(data, size);
+    return LoadEnyoNetwork(reader);
 }
 
 } // namespace Network

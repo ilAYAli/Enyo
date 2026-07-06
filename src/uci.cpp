@@ -175,15 +175,6 @@ std::string proven_path(const fs::path & path)
     return ec ? path.string() : result.lexically_normal().string();
 }
 
-[[noreturn]] void fail_eval_file(const std::string & path, std::string_view reason)
-{
-    const auto msg = fmt::format("info string ERROR: nnue_file '{}' {}\n", path, reason);
-    fmt::print("{}", msg);
-    std::fflush(stdout);
-    eventlog::log<eventlog::Log::error>("{}", msg);
-    std::exit(EXIT_FAILURE);
-}
-
 void log_legacy_evaluator(
     const char * source,
     const std::string & path = {},
@@ -201,13 +192,62 @@ void log_legacy_evaluator(
         source, path, sha256, HIDDEN_SIZE, BUCKETS);
 }
 
+// Lets failed nnue_file retries skip re-parsing the embedded blob.
+bool embedded_eval_active = false;
+
+void load_embedded_default_eval()
+{
+    embedded_eval_active = true;
+    const auto enyo = Network::LoadEnyoNetwork(
+        NNUE::EmbeddedNetworkData(), NNUE::EmbeddedNetworkSize());
+    if (enyo.status == NNUE::LoadStatus::loaded) {
+        NNUE::Stockfish::Disable();
+        Network::enabled = true;
+        ucilog(
+            "info string evaluator=enyo-nnue source=embedded hidden={} input_buckets={} feature_channels={} output_buckets={} head_features={} dense_format=float\n",
+            Network::TRAINED_HIDDEN, Network::INPUT_BUCKETS,
+            Network::FEATURE_CHANNELS, Network::OUTPUT_BUCKETS,
+            Network::OUTPUT_HEAD_FEATURES);
+        return;
+    }
+
+    Network::enabled = false;
+    NNUE::Stockfish::Disable();
+    if (NNUE::Init("")) {
+        log_legacy_evaluator("embedded-default");
+        return;
+    }
+
+    // INCBIN blob matches no known format: build defect, exit is correct.
+    const auto msg = fmt::format(
+        "info string ERROR: embedded default net is not a recognized format\n");
+    fmt::print("{}", msg);
+    std::fflush(stdout);
+    eventlog::log<eventlog::Log::error>("{}", msg);
+    std::exit(EXIT_FAILURE);
+}
+
+// Never exit() on a bad nnue_file: supervisors turn that into a crash loop.
+// Falls back to the embedded net and returns false so each search retries.
+// eval_state_dirty: the failing loader clobbered evaluator state first.
+bool reject_eval_file(
+    const std::string & path, std::string_view reason, bool eval_state_dirty = true)
+{
+    const auto msg = fmt::format(
+        "info string ERROR: nnue_file '{}' {}; falling back to embedded default net\n",
+        path, reason);
+    fmt::print("{}", msg);
+    std::fflush(stdout);
+    eventlog::log<eventlog::Log::error>("{}", msg);
+    if (eval_state_dirty || !embedded_eval_active)
+        load_embedded_default_eval();
+    return false;
+}
+
 bool load_eval_file(const std::string & value)
 {
     if (value.empty()) {
-        Network::enabled = false;
-        NNUE::Stockfish::Disable();
-        NNUE::Init("");
-        log_legacy_evaluator("embedded-default");
+        load_embedded_default_eval();
         return true;
     }
 
@@ -215,18 +255,19 @@ bool load_eval_file(const std::string & value)
     const auto path = proven_path(raw_path);
     std::error_code ec;
     if (!fs::exists(raw_path, ec) || ec)
-        fail_eval_file(path, "not found/readable");
+        return reject_eval_file(path, "not found/readable", false);
 
     const auto size = fs::file_size(raw_path, ec);
     if (ec)
-        fail_eval_file(path, "size check failed");
+        return reject_eval_file(path, "size check failed", false);
 
     const auto sha256 = sha256_file(raw_path);
     if (!sha256)
-        fail_eval_file(path, "sha256 read failed");
+        return reject_eval_file(path, "sha256 read failed", false);
 
     const auto enyo = Network::LoadEnyoNetwork(path.c_str());
     if (enyo.status == NNUE::LoadStatus::loaded) {
+        embedded_eval_active = false;
         NNUE::Stockfish::Disable();
         Network::enabled = true;
         ucilog(
@@ -237,10 +278,11 @@ bool load_eval_file(const std::string & value)
         return true;
     }
     if (enyo.status == NNUE::LoadStatus::invalid)
-        fail_eval_file(path, enyo.error);
+        return reject_eval_file(path, enyo.error);
 
     const auto stockfish = NNUE::Stockfish::LoadNetwork(path.c_str());
     if (stockfish.status == NNUE::LoadStatus::loaded) {
+        embedded_eval_active = false;
         Network::enabled = false;
         ucilog(
             "info string evaluator=stockfish-nnue path='{}' sha256={} feature_set=HalfKAv2_hm+FullThreats hidden=1024 output_buckets=8 description='{}'\n",
@@ -248,10 +290,11 @@ bool load_eval_file(const std::string & value)
         return true;
     }
     if (stockfish.status == NNUE::LoadStatus::invalid)
-        fail_eval_file(path, stockfish.error);
+        return reject_eval_file(path, stockfish.error);
 
     const auto berserk = Network::LoadBerserkNetwork(path.c_str());
     if (berserk.status == NNUE::LoadStatus::loaded) {
+        embedded_eval_active = false;
         NNUE::Stockfish::Disable();
         Network::enabled = true;
         ucilog(
@@ -261,18 +304,19 @@ bool load_eval_file(const std::string & value)
         return true;
     }
     if (berserk.status == NNUE::LoadStatus::invalid)
-        fail_eval_file(path, berserk.error);
+        return reject_eval_file(path, berserk.error);
 
     if (NNUE::IsSupportedLegacyNetworkSize(size)) {
         Network::enabled = false;
         NNUE::Stockfish::Disable();
         if (!NNUE::Init(path))
-            fail_eval_file(path, "matched legacy network size but failed to load");
+            return reject_eval_file(path, "matched legacy network size but failed to load");
+        embedded_eval_active = false;
         log_legacy_evaluator("file", path, *sha256);
         return true;
     }
 
-    fail_eval_file(path, fmt::format("has invalid size {} bytes", size));
+    return reject_eval_file(path, fmt::format("has invalid size {} bytes", size), false);
 }
 
 bool load_move_policy_file(const std::string & value)
