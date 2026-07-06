@@ -15,7 +15,7 @@ from pathlib import Path
 DEFAULT_STATE = Path("~/spsa/spsa_state.json")
 DEFAULT_PARAMS = Path(__file__).with_name("spsa_params.txt")
 DEFAULT_ENGINE = "~/assets/engines/candidate"
-DEFAULT_NET = "~/code/cpp/chess/enyo/net/default.net"
+DEFAULT_NET = "~/assets/nets/candidate.net"
 DEFAULT_BOOK = (
     "~/assets/books/AntiDraw_V2.1/WOMP_Openings_V1/"
     "WOMP_V1_+150_+159/WOMP_V1_6mvs_big_+140_+169.epd"

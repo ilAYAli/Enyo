@@ -1,4 +1,3 @@
-net/enyo-native-*
 lichess-bot
 CMakeCache.txt
 CMakeFiles
@@ -16,8 +15,6 @@ misc/*
 logs/*
 books/*
 bugs/*
-net/*.nn
-net/*.nnue
 releases/*
 scripts/logs/*
 linux/

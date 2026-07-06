@@ -2,7 +2,7 @@
   "uci_options": {
     "Threads": 4,
     "Hash": 1024,
-    "nnue_file": "~/code/cpp/chess/enyo/net/default.net",
+    "nnue_file": "~/code/cpp/chess/enyo/net/enyo-1.0.0-rc1.nn",
     "logfile": "/tmp/enyo.log",
     "use_syzygy": true,
     "SyzygyPath": "~/code/cpp/chess/assets/tablebases"

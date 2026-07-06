@@ -16,11 +16,11 @@ forge sprt \
     --comment "sprt $CANDIDATE vs $REFERENCE" \
     --book ~/assets/books/AntiDraw_V2.1/WOMP_Openings_V1/WOMP_V1_+150_+159/WOMP_V1_6mvs_big_+140_+169.epd \
     --candidate "$CANDIDATE" \
-    --candidate-uci nnue_file=~/assets/nets/default.net \
+    --candidate-uci nnue_file=~/assets/nets/candidate.net \
     --concurrency 1 \
     --games 1000 \
     --reference "$REFERENCE" \
-    --reference-uci nnue_file=~/assets/nets/default.net \
+    --reference-uci nnue_file=~/assets/nets/candidate.net \
     --restart on \
     --shards 24 \
     --tc 10+0.1 \

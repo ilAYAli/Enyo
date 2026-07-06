@@ -40,7 +40,7 @@ Enyo reads <code>~/.config/enyo/settings.json</code>.<br>
 The file contains one <code>uci_options</code> object; every entry is validated and applied through the same <code>setoption</code><br>
 path used by a UCI client.<br>
 Options absent from the file keep their compiled defaults, and later UCI commands take precedence.<br>
-It is of course also possible to issue UCI commands directly, like e.g <code>setoption name nnue_file value ~/code/cpp/chess/enyo/net/default.net</code>
+It is of course also possible to issue UCI commands directly, like e.g <code>setoption name nnue_file value ~/code/cpp/chess/enyo/net/enyo-1.0.0-rc1.nn</code>
 </pre>
 
 
