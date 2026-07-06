@@ -24,6 +24,7 @@ profiling/
 .cache
 .state
 gmon.out
+AGENTS.md
 syzygy/
 .claude/settings.local.json
 
