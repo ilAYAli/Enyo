@@ -2,7 +2,7 @@
 //#include "board.hpp"
 #include "simd.h"
 #include "types.hpp"
-#include "nnue_model.hpp"
+#include "nnue/enyo/enyo_halfka_model.hpp"
 
 #include <array>
 #include <cstddef>

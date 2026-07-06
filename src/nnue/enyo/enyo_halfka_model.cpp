@@ -1,12 +1,12 @@
 // Network weight storage and network loading.
-// Defines the extern storage for weight pointers declared in network.hpp
-// and implements LoadNetwork for the float and quantized .nn layouts.
+// Defines the extern storage for the Enyo HalfKA model.
+// The format-specific loaders are split out after the model move is verified.
 //
 // This TU is intentionally independent of the engine's Board type so
 // Phase 2/3 parity tests can compile it directly. The Board-aware bits
-// live in nnue_model_board.cpp.
+// live in enyo_halfka_board.cpp.
 
-#include "nnue_model.hpp"
+#include "enyo_halfka_model.hpp"
 
 #include <cstdio>
 #include <cstdint>

@@ -31,7 +31,7 @@
 #include "eventlog.hpp"
 #include "probe.hpp"
 #include "nnue.hpp"
-#include "nnue_model.hpp"
+#include "nnue/enyo/enyo_halfka_model.hpp"
 #include "move_policy.hpp"
 #include "pgn.hpp"
 

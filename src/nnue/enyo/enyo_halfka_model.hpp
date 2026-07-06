@@ -409,7 +409,7 @@ extern int            OUTPUT_HEAD_FEATURES;
 void SetWeights(const acc_t* weights, const acc_t* biases);
 
 // Load a supported `.nn` blob from disk. Returns true on success. Weight
-// pointers are updated to reference internal storage owned by nnue_model.cpp.
+// pointers are updated to reference internal storage owned by enyo_halfka_model.cpp.
 bool LoadNetwork(const char* path);
 
 inline constexpr size_t NetworkSize(
@@ -787,7 +787,7 @@ inline void ResetAccumulator(Accumulator* dest, enyo::Color view,
 // ---------------------------------------------------------------------
 // Integration helper: walk a Board and emit the (piece, sq)
 // entries that ResetAccumulator expects. Forward-declared here so the
-// header stays decoupled from board.hpp; implemented in nnue_model.cpp.
+// header stays decoupled from board.hpp; implemented in enyo_halfka_board.cpp.
 //
 // Writes up to 32 entries to `out`, returns the number written.
 // ---------------------------------------------------------------------

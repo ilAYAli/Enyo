@@ -9,7 +9,7 @@
 #include "fmt/format.h"
 
 #include "nnue.hpp"
-#include "nnue_model.hpp"
+#include "nnue/enyo/enyo_halfka_model.hpp"
 #include "precalc/knight_attacks.hpp"
 #include "probe.hpp"
 #include "types.hpp"

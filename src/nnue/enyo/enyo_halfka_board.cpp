@@ -1,9 +1,9 @@
 // Engine integration for Network.
 // Links network's forward-pass primitives to enyo::Board. Kept in a
-// separate TU so tests can compile nnue_model.cpp without
+// separate TU so tests can compile enyo_halfka_model.cpp without
 // pulling in board.hpp / fmt / etc.
 
-#include "nnue_model.hpp"
+#include "enyo_halfka_model.hpp"
 #include "board.hpp"
 #include "util.hpp"
 
