@@ -186,6 +186,8 @@ struct Net {
     Stockfish::State stockfish_state;
     uint64_t network_refresh_generation = 0;
     uint64_t network_eval_cache_generation = 0;
+    uint64_t stockfish_eval_cache_generation = 0;
+    void ensure_eval_cache_current();
     AccumulatorCache cache;
 
     Net();

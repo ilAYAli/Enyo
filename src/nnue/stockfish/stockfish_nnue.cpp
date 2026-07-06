@@ -150,6 +150,10 @@ bool Enabled() {
     return active_model != nullptr;
 }
 
+uint64_t Generation() {
+    return model_generation;
+}
+
 std::string_view Description() {
     return active_model ? active_model->description() : std::string_view{};
 }

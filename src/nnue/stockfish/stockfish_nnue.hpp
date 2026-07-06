@@ -15,6 +15,7 @@ namespace NNUE::Stockfish {
 LoadResult LoadNetwork(const char * path);
 void Disable();
 bool Enabled();
+uint64_t Generation();
 std::string_view Description();
 
 class State {

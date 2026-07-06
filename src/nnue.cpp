@@ -972,13 +972,7 @@ int32_t Net::Evaluate2(enyo::Board &board, enyo::Color side) {
     if (accumulator.eval_correct[side])
         return accumulator.eval[side];
 
-    if (network_eval_cache_generation != Network::NETWORK_GENERATION) {
-        for (auto & entry : network_eval_cache) {
-            entry.hash = 0;
-            entry.valid = 0;
-        }
-        network_eval_cache_generation = Network::NETWORK_GENERATION;
-    }
+    ensure_eval_cache_current();
 
     auto & entry = network_eval_cache[
         board.hash & (network_eval_cache_size - 1)];
@@ -1010,8 +1004,36 @@ int32_t Net::Evaluate2(enyo::Board &board, enyo::Color side) {
     return eval;
 }
 
+void Net::ensure_eval_cache_current() {
+    const uint64_t native_generation = Network::NETWORK_GENERATION;
+    const uint64_t stockfish_generation = Stockfish::Generation();
+    if (network_eval_cache_generation == native_generation
+        && stockfish_eval_cache_generation == stockfish_generation)
+        return;
+    for (auto & entry : network_eval_cache) {
+        entry.hash = 0;
+        entry.valid = 0;
+    }
+    network_eval_cache_generation = native_generation;
+    stockfish_eval_cache_generation = stockfish_generation;
+}
+
 int32_t Net::EvaluateStockfish(const enyo::Board & board) {
-    return stockfish_state.Evaluate(board, currentAccumulator);
+    ensure_eval_cache_current();
+
+    auto & entry = network_eval_cache[
+        board.hash & (network_eval_cache_size - 1)];
+    if (entry.hash == board.hash && entry.valid)
+        return entry.eval;
+
+    const int32_t eval = stockfish_state.Evaluate(board, currentAccumulator);
+    if (entry.hash != board.hash) {
+        entry.hash = board.hash;
+        entry.valid = 0;
+    }
+    entry.eval = eval;
+    entry.valid = 1;
+    return eval;
 }
 
 void Net::print_indexes(
