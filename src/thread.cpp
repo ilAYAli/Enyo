@@ -39,6 +39,23 @@ void Worker::start()
 namespace thread {
 Pool pool;
 
+namespace {
+
+// Persisted statistics carry over between moves at half strength so a
+// fresh search outweighs scores saturated many moves ago; the gravity
+// in update_history_score only corrects entries the new search touches.
+template <typename T>
+void halve_scores(T & value)
+{
+    if constexpr (std::is_same_v<T, int16_t>)
+        value = static_cast<int16_t>(value / 2);
+    else
+        for (auto & element : value)
+            halve_scores(element);
+}
+
+}
+
 uint64_t Pool::get_nps() const
 {
     using namespace std::chrono;
@@ -141,6 +158,9 @@ void Pool::init_threads(const SearchInfo & si, int num_threads)
             worker->countermove = saved.countermove;
             worker->cmh = saved.cmh;
             worker->corr_history = saved.corr_history;
+            halve_scores(worker->history);
+            halve_scores(worker->cmh);
+            halve_scores(worker->corr_history);
         }
         pool_.emplace_back(std::move(worker));
     }
