@@ -978,6 +978,7 @@ void Uci::newgame()
     b.set();
     tt::ttable.clear();
     thread::pool.kill();
+    thread::pool.reset_saved_stats();
 }
 
 void Uci::position(std::istringstream& iss)

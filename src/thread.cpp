@@ -86,9 +86,29 @@ uint64_t Pool::wait_and_get_nodes()
         }
     });
     const uint64_t nodes = pool_.empty() ? 0 : get_nodes();
+    save_stats();
     pool_.clear();
     threads_.clear();
     return nodes;
+}
+
+void Pool::save_stats()
+{
+    for (const auto & worker : pool_) {
+        const auto id = static_cast<size_t>(worker->id);
+        if (saved_stats_.size() <= id)
+            saved_stats_.resize(id + 1);
+        if (!saved_stats_[id])
+            saved_stats_[id] = std::make_unique<WorkerStats>();
+        saved_stats_[id]->history = worker->history;
+        saved_stats_[id]->countermove = worker->countermove;
+        saved_stats_[id]->cmh = worker->cmh;
+    }
+}
+
+void Pool::reset_saved_stats()
+{
+    saved_stats_.clear();
 }
 
 void Pool::kill()
@@ -113,7 +133,14 @@ void Pool::init_threads(const SearchInfo & si, int num_threads)
 
     // init pool:
     for (int i = 0; i < num_threads; ++i) {
-        pool_.emplace_back(std::make_unique<enyo::Worker>(si, i));
+        auto worker = std::make_unique<enyo::Worker>(si, i);
+        if (static_cast<size_t>(i) < saved_stats_.size() && saved_stats_[static_cast<size_t>(i)]) {
+            const auto & saved = *saved_stats_[static_cast<size_t>(i)];
+            worker->history = saved.history;
+            worker->countermove = saved.countermove;
+            worker->cmh = saved.cmh;
+        }
+        pool_.emplace_back(std::move(worker));
     }
 
     // start workers:
