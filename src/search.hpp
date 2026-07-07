@@ -153,8 +153,6 @@ struct Worker {
     std::array<std::array<std::array<Move, square_nb>, square_nb>, color_nb> countermove{};
     using CmhPieceTable = std::array<std::array<int16_t, square_nb>, piece_type_nb>;
     std::array<std::array<std::array<CmhPieceTable, square_nb>, piece_type_nb>, color_nb> cmh{};
-    // capture history: [color][moving piece][to square][captured piece]
-    std::array<std::array<std::array<std::array<int16_t, piece_type_nb>, square_nb>, piece_type_nb>, color_nb> capture_history{};
     int id { };
 };
 
