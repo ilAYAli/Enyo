@@ -229,13 +229,17 @@ int main(int argc, char **argv)
             fmt::print("Using config file: '{}'\n", config_file_path);
     }
 
+    eventlog::init();
+    eventlog::log<eventlog::Log::info>(
+        "loaded engine: {}\n", get_resolved_exe_name());
+    eventlog::log<eventlog::Log::info>("id {}\n", g_version);
+
     if (run_mode == RunMode::search_benchmark) {
         if (!fen.empty()) {
             fmt::print(stderr, "error: --fen is only valid with 'bench perft'\n");
             return 1;
         }
 
-        eventlog::init();
         for (const auto& [name, value] : cfgmgr.configured_uci_options()) {
             const auto lower_name = lowercase(name);
             if (lower_name != "threads"
@@ -274,9 +278,6 @@ int main(int argc, char **argv)
     if (!pgnfile.empty()) {
         load_pgn(b, pgnfile);
     }
-
-    eventlog::init();
-    eventlog::log<eventlog::Log::info>("id {}\n", g_version);
 
     if (!fen.empty())
         uci(fmt::format("position fen {}", fen));

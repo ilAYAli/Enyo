@@ -1,5 +1,6 @@
 #include <string>
 #include <filesystem>
+#include <system_error>
 
 #if defined(_WIN32)
     #include <windows.h>
@@ -12,7 +13,7 @@
 
 
 std::string get_exe_path() {
-    char path[4096];
+    char path[4096]{};
 
 #if defined(_WIN32)
     GetModuleFileNameA(nullptr, path, MAX_PATH);
@@ -25,6 +26,17 @@ std::string get_exe_path() {
 #endif
 
     return std::string(path);
+}
+
+std::string get_resolved_exe_name()
+{
+    const std::filesystem::path executable{get_exe_path()};
+    if (executable.empty())
+        return "unknown";
+
+    std::error_code error;
+    const auto resolved = std::filesystem::canonical(executable, error);
+    return (error ? executable : resolved).filename().string();
 }
 
 std::filesystem::path recursively_find_file(
@@ -47,4 +59,3 @@ std::filesystem::path recursively_find_file(
     }
     return {};
 }
-
