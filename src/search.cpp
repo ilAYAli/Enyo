@@ -1061,6 +1061,34 @@ moves_loop:
 
                 if (value >= beta) {
                     ss->cutoffCnt++;
+                    const int bonus = std::min(
+                        cfgmgr.hist_bonus_cap,
+                        depth * depth * cfgmgr.hist_bonus_scale);
+
+                    if (is_capture) {
+                        update_history_score(
+                            worker.capture_history
+                                [Us]
+                                [static_cast<size_t>(move.src_piece())]
+                                [move.dst_sq()]
+                                [static_cast<size_t>(move.dst_piece())],
+                            bonus);
+                    }
+                    // Tried captures that failed to cut off are penalised no
+                    // matter what kind of move finally cut off.
+                    for (int i = 0; i < ss->move_count - 1; ++i) {
+                        const auto prev = mp[static_cast<size_t>(i)];
+                        if (prev.dst_piece() == no_piece_type)
+                            continue;
+                        update_history_score(
+                            worker.capture_history
+                                [Us]
+                                [static_cast<size_t>(prev.src_piece())]
+                                [prev.dst_sq()]
+                                [static_cast<size_t>(prev.dst_piece())],
+                            -bonus / 2);
+                    }
+
                     if (is_quiet) {
                         if (move != ss->killers[0]) {
                             ss->killers[1] = ss->killers[0];
@@ -1071,9 +1099,6 @@ moves_loop:
                             worker.countermove[Us][prev_move.src_sq()][prev_move.dst_sq()] = move;
                         }
 
-                        const int bonus = std::min(
-                            cfgmgr.hist_bonus_cap,
-                            depth * depth * cfgmgr.hist_bonus_scale);
                         update_history_score(worker.history[Us][move.src_sq()][move.dst_sq()], bonus);
 
                         Worker::CmhPieceTable * cmh_update = prev_move
