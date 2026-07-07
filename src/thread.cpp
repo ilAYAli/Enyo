@@ -103,6 +103,7 @@ void Pool::save_stats()
         saved_stats_[id]->history = worker->history;
         saved_stats_[id]->countermove = worker->countermove;
         saved_stats_[id]->cmh = worker->cmh;
+        saved_stats_[id]->corr_history = worker->corr_history;
     }
 }
 
@@ -139,6 +140,7 @@ void Pool::init_threads(const SearchInfo & si, int num_threads)
             worker->history = saved.history;
             worker->countermove = saved.countermove;
             worker->cmh = saved.cmh;
+            worker->corr_history = saved.corr_history;
         }
         pool_.emplace_back(std::move(worker));
     }
