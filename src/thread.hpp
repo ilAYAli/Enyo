@@ -35,7 +35,6 @@ private:
         decltype(enyo::Worker::history) history;
         decltype(enyo::Worker::countermove) countermove;
         decltype(enyo::Worker::cmh) cmh;
-        decltype(enyo::Worker::corr_history) corr_history;
     };
 
     void save_stats();

@@ -36,13 +36,6 @@ void update_history_score(int16_t & entry, int bonus)
     entry += static_cast<int16_t>(bonus - (entry * std::abs(bonus)) / max_history);
 }
 
-size_t pawn_corr_index(const Board & b)
-{
-    uint64_t key = b.pt_bb[white][pawn] * 0x9E3779B97F4A7C15ULL;
-    key ^= b.pt_bb[black][pawn] + 0xD1B54A32D192ED03ULL + (key << 6) + (key >> 2);
-    return key & (Worker::corr_size - 1);
-}
-
 // Returns a ply-aware draw score incorporating contempt. At even ply (engine's
 // move) draws are penalised; at odd ply the penalty is mirrored so the parent
 // node (engine) also sees draws as slightly negative after negation.
@@ -372,9 +365,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
         if (lm.empty())
             return mated_in(ss->ply);
     } else {
-        best_value = ss->eval = static_cast<Value>(
-            evaluate<Us>(b, &si.nnue)
-            + worker.corr_history[Us][pawn_corr_index(b)] / 128);
+        best_value = ss->eval = evaluate<Us>(b, &si.nnue);
         if (best_value >= beta) {
             // No TT store here. A stand-pat cutoff is a static eval, not a
             // search result; now that the TT accepts move-less bound entries
@@ -614,7 +605,6 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     if (ss->in_check) {
         improving = false;
         ss->eval = Value::draw;
-        ss->static_eval = Value::none;
         depth++;
         goto moves_loop;
     }
@@ -648,10 +638,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     //   - UpperBound with tt_value < raw: tighter upper bound.
     //   - LowerBound with tt_value > raw: tighter lower bound.
     // Other combinations would widen, not tighten, so raw wins.
-    ss->eval = static_cast<Value>(
-        evaluate<Us>(b, &si.nnue)
-        + worker.corr_history[Us][pawn_corr_index(b)] / 128);
-    ss->static_eval = ss->eval;
+    ss->eval = evaluate<Us>(b, &si.nnue);
     if (ss->tthit && tt_value != Value::none) {
         const int b_ = tt::bound_of(tte->flag);
         if (b_ == tt::type::ExactBound
@@ -845,35 +832,6 @@ moves_loop:
 
     bool do_fullsearch = false;
     ss->move_count = 0;
-
-    // Learn the eval's systematic error for this pawn structure from the
-    // search result. Skip when the bound direction cannot say anything
-    // about the static eval, when a tactical best move explains the gap,
-    // or near mate/TB scores.
-    const auto update_corr_history = [&](Value best) {
-        if (ss->in_check
-            || ss->excluded_move != Move{}
-            || ss->static_eval == Value::none
-            || std::abs(static_cast<int>(best)) >= Value::mate_in_max_ply)
-            return;
-        // A tactical best move explains the eval gap; nothing to learn.
-        if (best_move && (best_move.dst_piece() != no_piece_type
-                       || (best_move.flags() & Move::Flags::promote) != 0))
-            return;
-        // Bound direction must be able to say something about the eval:
-        // a fail-high at or below static eval / a fail-low at or above it
-        // only bounds the score on the side the eval already satisfies.
-        if (best >= beta && best <= ss->static_eval)
-            return;
-        if (!best_move && best >= ss->static_eval)
-            return;
-        const int bonus = std::clamp(
-            (static_cast<int>(best) - static_cast<int>(ss->static_eval)) * depth / 8,
-            -256, 256);
-        update_history_score(
-            worker.corr_history[Us][pawn_corr_index(b)], bonus);
-    };
-
     while (const auto move = mp.next()) {
         // Inside a singular verification search: the whole point is to ask
         // "how good is this position without the TT move?".
@@ -1149,7 +1107,6 @@ moves_loop:
                     }
                     // Fail-soft: return the real score, not beta. The
                     // parent gets the same bound the TT just stored.
-                    update_corr_history(best_value);
                     return best_value;
                 }
             }
@@ -1180,7 +1137,6 @@ moves_loop:
     // search proved (== what the TT stores) instead of clamping to alpha,
     // so parents and the aspiration loop re-search less. qsearch already
     // returns best_value; negamax was the odd one out.
-    update_corr_history(best_value);
     return best_value;
 }
 

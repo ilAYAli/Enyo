@@ -20,7 +20,6 @@ struct Stack {
     Move excluded_move {};
     Move killers[2] {};
     Value eval {};
-    Value static_eval {};
     int move_count {};
     bool in_check {};
     bool ttPv {};
@@ -154,9 +153,6 @@ struct Worker {
     std::array<std::array<std::array<Move, square_nb>, square_nb>, color_nb> countermove{};
     using CmhPieceTable = std::array<std::array<int16_t, square_nb>, piece_type_nb>;
     std::array<std::array<std::array<CmhPieceTable, square_nb>, piece_type_nb>, color_nb> cmh{};
-    // static-eval correction, indexed by side to move and pawn-structure key
-    static constexpr size_t corr_size = 16384;
-    std::array<std::array<int16_t, corr_size>, color_nb> corr_history{};
     int id { };
 };
 
