@@ -374,7 +374,7 @@ Value qsearch(Board & b, Worker & worker, Stack * ss, int depth, int alpha, int 
     } else {
         best_value = ss->eval = static_cast<Value>(
             evaluate<Us>(b, &si.nnue)
-            + worker.corr_history[Us][pawn_corr_index(b)] / 64);
+            + worker.corr_history[Us][pawn_corr_index(b)] / 128);
         if (best_value >= beta) {
             // No TT store here. A stand-pat cutoff is a static eval, not a
             // search result; now that the TT accepts move-less bound entries
@@ -656,7 +656,7 @@ Value negamax(int depth, Worker & worker, Stack * ss, Value alpha, Value beta)
     // Other combinations would widen, not tighten, so raw wins.
     ss->eval = static_cast<Value>(
         evaluate<Us>(b, &si.nnue)
-        + worker.corr_history[Us][pawn_corr_index(b)] / 64);
+        + worker.corr_history[Us][pawn_corr_index(b)] / 128);
     ss->static_eval = ss->eval;
     if (ss->tthit && tt_value != Value::none) {
         const int b_ = tt::bound_of(tte->flag);
@@ -875,7 +875,7 @@ moves_loop:
             return;
         const int bonus = std::clamp(
             (static_cast<int>(best) - static_cast<int>(ss->static_eval)) * depth / 8,
-            -512, 512);
+            -256, 256);
         update_history_score(
             worker.corr_history[Us][pawn_corr_index(b)], bonus);
     };
