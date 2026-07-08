@@ -1,12 +1,41 @@
 #! /bin/bash
 
-if (( $# != 2 )); then
-    echo "usage: $0 REFERENCE_ENGINE CANDIDATE_ENGINE" >&2
+resolve_path() {
+    local path="$1"
+    if [[ "$path" =~ ^(/|\./|\.\./) ]]; then
+        echo "$path"
+    else
+        echo "$HOME/assets/engines/$path"
+    fi
+}
+
+REFERENCE=reference
+CANDIDATE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --reference)
+            REFERENCE="$2"
+            shift 2
+            ;;
+        --candidate)
+            CANDIDATE="$2"
+            shift 2
+            ;;
+        *)
+            echo "Error: Invalid argument '$1'. Only --candidate and --reference flags are allowed." >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ -z "$CANDIDATE" ]]; then
+    echo "usage: $0 --candidate CANDIDATE_ENGINE [--reference REFERENCE_ENGINE]" >&2
     exit 2
 fi
 
-REFERENCE=$1
-CANDIDATE=$2
+REFERENCE=$(resolve_path "$REFERENCE")
+CANDIDATE=$(resolve_path "$CANDIDATE")
 RUN="sprt-$(basename "$CANDIDATE")-vs-$(basename "$REFERENCE")-$(date +%Y%m%d-%H%M%S)"
 
 set +x

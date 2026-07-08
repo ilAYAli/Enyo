@@ -5,15 +5,15 @@ set -euo pipefail
 usage()
 {
     cat >&2 <<'EOF'
-usage: ./scripts/sprt_tag.sh START_COMMIT
+usage: ./scripts/sprt_tag.sh --candidate COMMIT --reference COMMIT
 
-Run distributed SPRTs for each first-parent commit after START_COMMIT through
-the current branch tip. Each candidate commit is recreated with its aggregate
-Elo and LLR appended to the subject. Worker-local engine binaries are moved
-from the old commit hash to the rewritten hash, and the branch is force-pushed
-with an exact lease only after the complete chain succeeds. If a candidate's
-upper 95% Elo bound is below zero, later commits are replayed without SPRT or
-result labels.
+Run a distributed SPRT for CANDIDATE against REFERENCE, then continue with each
+subsequent first-parent commit through the current branch tip. CANDIDATE must be
+the first engine-changing commit after REFERENCE; non-engine commits may appear
+between them. Each candidate commit is recreated with its aggregate Elo and LLR
+appended to the subject. Worker-local engine binaries are moved from the old
+commit hash to the rewritten hash, and the branch is force-pushed with an exact
+lease only after the complete chain succeeds.
 EOF
 }
 
@@ -72,6 +72,17 @@ read_value()
     sed -n '1p' "$path"
 }
 
+read_state_candidate()
+{
+    local state_dir=$1
+
+    if test -f "$state_dir/candidate"; then
+        sed -n '1p' "$state_dir/candidate"
+    elif test -f "$state_dir/commits"; then
+        sed -n '1p' "$state_dir/commits"
+    fi
+}
+
 short_hash()
 {
     git rev-parse "$1^{commit}" | cut -c1-7
@@ -80,6 +91,15 @@ short_hash()
 commit_tree()
 {
     git rev-parse "$1^{tree}"
+}
+
+is_first_parent_ancestor()
+{
+    local ancestor=$1
+    local descendant=$2
+
+    git rev-list --first-parent "$descendant" |
+        awk -v ancestor="$ancestor" '$0 == ancestor { found=1 } END { exit !found }'
 }
 
 changes_engine()
@@ -472,16 +492,50 @@ restore_worktree()
     git worktree add --detach "$WORKTREE" "$restore_commit" >/dev/null
 }
 
-if (( $# != 1 )); then
-    usage
-    exit 2
-fi
-
-START_ARG=$1
+REFERENCE_ARG=
+CANDIDATE_ARG=
+while (( $# > 0 )); do
+    case "$1" in
+        --reference)
+            (( $# >= 2 )) || die "--reference requires a commit"
+            test -z "$REFERENCE_ARG" || die "--reference was specified more than once"
+            REFERENCE_ARG=$2
+            shift 2
+            ;;
+        --reference=*)
+            test -z "$REFERENCE_ARG" || die "--reference was specified more than once"
+            REFERENCE_ARG=${1#*=}
+            test -n "$REFERENCE_ARG" || die "--reference requires a commit"
+            shift
+            ;;
+        --candidate)
+            (( $# >= 2 )) || die "--candidate requires a commit"
+            test -z "$CANDIDATE_ARG" || die "--candidate was specified more than once"
+            CANDIDATE_ARG=$2
+            shift 2
+            ;;
+        --candidate=*)
+            test -z "$CANDIDATE_ARG" || die "--candidate was specified more than once"
+            CANDIDATE_ARG=${1#*=}
+            test -n "$CANDIDATE_ARG" || die "--candidate requires a commit"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            die "unexpected argument: $1"
+            ;;
+    esac
+done
+test -n "$REFERENCE_ARG" || die "--reference is required"
+test -n "$CANDIDATE_ARG" || die "--candidate is required"
 
 interrupted()
 {
-    printf '\nInterrupted. Nothing needs cleanup; resume with:\n  ./scripts/sprt_tag.sh %s\n' "$START_ARG" >&2
+    printf '\nInterrupted. Nothing needs cleanup; resume with:\n  ./scripts/sprt_tag.sh --candidate %q --reference %q\n' \
+        "$CANDIDATE_ARG" "$REFERENCE_ARG" >&2
     exit 130
 }
 
@@ -508,15 +562,20 @@ acquire_lock "$EARLY_GIT_DIR/sprt-tag.lock"
 
 BRANCH=$(git symbolic-ref --quiet --short HEAD || true)
 if test -z "$BRANCH"; then
-    DETACHED_START=$(git rev-parse --verify "$START_ARG^{commit}") || die "invalid start commit: $START_ARG"
+    DETACHED_REFERENCE=$(git rev-parse --verify "$REFERENCE_ARG^{commit}") ||
+        die "invalid reference commit: $REFERENCE_ARG"
+    DETACHED_CANDIDATE=$(git rev-parse --verify "$CANDIDATE_ARG^{commit}") ||
+        die "invalid candidate commit: $CANDIDATE_ARG"
     DETACHED_GIT_DIR=$(git rev-parse --absolute-git-dir)
     DETACHED_STATE_ROOT=${SPRT_TAG_STATE_ROOT:-$DETACHED_GIT_DIR/sprt-tag}
     SAVED_BRANCH=
     for saved_state in "$DETACHED_STATE_ROOT"/*; do
         test -d "$saved_state" || continue
         test -f "$saved_state/start" || continue
-        test "$(sed -n '1p' "$saved_state/start")" = "$DETACHED_START" || continue
-        test -z "$SAVED_BRANCH" || die "multiple resumable states match $START_ARG"
+        test "$(sed -n '1p' "$saved_state/start")" = "$DETACHED_REFERENCE" || continue
+        test "$(read_state_candidate "$saved_state")" = "$DETACHED_CANDIDATE" || continue
+        test -z "$SAVED_BRANCH" ||
+            die "multiple resumable states match the requested reference and candidate"
         SAVED_BRANCH=$(sed -n '1p' "$saved_state/branch")
     done
     test -n "$SAVED_BRANCH" || die "detached HEAD has no matching resumable state"
@@ -543,10 +602,25 @@ if [[ "$USER_NAME $USER_EMAIL" =~ ([Bb]ot|[Cc]odex|[Cc]opilot|[Cc]laude|github-a
     die "bot Git identity is not allowed: $USER_NAME <$USER_EMAIL>"
 fi
 
-START=$(git rev-parse --verify "$START_ARG^{commit}") || die "invalid start commit: $START_ARG"
+REFERENCE=$(git rev-parse --verify "$REFERENCE_ARG^{commit}") ||
+    die "invalid reference commit: $REFERENCE_ARG"
+CANDIDATE=$(git rev-parse --verify "$CANDIDATE_ARG^{commit}") ||
+    die "invalid candidate commit: $CANDIDATE_ARG"
 ORIGINAL_TIP=$(git rev-parse HEAD)
-git merge-base --is-ancestor "$START" "$ORIGINAL_TIP" ||
-    die "$START_ARG is not an ancestor of HEAD"
+CANDIDATE_PARENT=$(git rev-parse "$CANDIDATE^" 2>/dev/null) ||
+    die "candidate has no parent: $CANDIDATE_ARG"
+is_first_parent_ancestor "$REFERENCE" "$CANDIDATE" ||
+    die "reference is not on the candidate's first-parent history"
+is_first_parent_ancestor "$CANDIDATE" "$ORIGINAL_TIP" ||
+    die "$CANDIDATE_ARG is not an ancestor of HEAD"
+changes_engine "$CANDIDATE_PARENT" "$CANDIDATE" ||
+    die "candidate does not change the engine"
+while IFS= read -r commit; do
+    parent=$(git rev-parse "$commit^")
+    if changes_engine "$parent" "$commit"; then
+        die "engine-changing commit exists between reference and candidate: $commit"
+    fi
+done < <(git rev-list --reverse --first-parent "$REFERENCE..$CANDIDATE^")
 
 git fetch "$REMOTE"
 REMOTE_TIP=$(remote_head "$REMOTE" "$REMOTE_BRANCH")
@@ -563,15 +637,15 @@ fi
 while IFS= read -r commit; do
     test "$(git rev-list --parents -n 1 "$commit" | wc -w | tr -d ' ')" = 2 ||
         die "merge commits are not supported: $commit"
-done < <(git rev-list --reverse --first-parent "$START..$ORIGINAL_TIP")
+done < <(git rev-list --reverse --first-parent "$REFERENCE..$ORIGINAL_TIP")
 
 NOTIFY_COMMAND=$(resolve_notify_command)
 test -x "${NOTIFY_COMMAND%% *}" || die "notification hook is not executable: $NOTIFY_COMMAND"
 
 GIT_DIR=$(git rev-parse --absolute-git-dir)
-START_SHORT=$(short_hash "$START")
+REFERENCE_SHORT=$(short_hash "$REFERENCE")
 TIP_SHORT=$(short_hash "$ORIGINAL_TIP")
-STATE_KEY=$(printf '%s-%s-%s' "$BRANCH" "$START_SHORT" "$TIP_SHORT" | tr -c 'A-Za-z0-9._-' '_')
+STATE_KEY=$(printf '%s-%s-%s' "$BRANCH" "$REFERENCE_SHORT" "$TIP_SHORT" | tr -c 'A-Za-z0-9._-' '_')
 STATE_ROOT=${SPRT_TAG_STATE_ROOT:-$GIT_DIR/sprt-tag}
 STATE_DIR=$STATE_ROOT/$STATE_KEY
 WORK_ROOT=${SPRT_TAG_WORK_ROOT:-$HOME/tmp}
@@ -580,7 +654,11 @@ WORKTREE=$WORK_ROOT/enyo-sprt-tag-$STATE_KEY
 mkdir -p "$STATE_ROOT" "$WORK_ROOT"
 if test -d "$STATE_DIR"; then
     test "$(read_value "$STATE_DIR/original_tip")" = "$ORIGINAL_TIP" || die "state tip mismatch"
-    test "$(read_value "$STATE_DIR/start")" = "$START" || die "state start mismatch"
+    test "$(read_value "$STATE_DIR/start")" = "$REFERENCE" || die "state reference mismatch"
+    test "$(read_state_candidate "$STATE_DIR")" = "$CANDIDATE" || die "state candidate mismatch"
+    if ! test -f "$STATE_DIR/candidate"; then
+        write_value "$STATE_DIR/candidate" "$CANDIDATE"
+    fi
     WORKTREE=$(read_value "$STATE_DIR/worktree")
     if ! test -d "$WORKTREE"; then
         restore_worktree
@@ -588,18 +666,19 @@ if test -d "$STATE_DIR"; then
     printf 'Resuming state from %s\n' "$STATE_DIR"
 else
     mkdir -p "$STATE_DIR"
-    write_value "$STATE_DIR/start" "$START"
+    write_value "$STATE_DIR/start" "$REFERENCE"
+    write_value "$STATE_DIR/candidate" "$CANDIDATE"
     write_value "$STATE_DIR/original_tip" "$ORIGINAL_TIP"
     write_value "$STATE_DIR/original_remote_tip" "$REMOTE_TIP"
     write_value "$STATE_DIR/branch" "$BRANCH"
     write_value "$STATE_DIR/upstream" "$UPSTREAM"
     write_value "$STATE_DIR/worktree" "$WORKTREE"
     write_value "$STATE_DIR/next_index" 0
-    write_value "$STATE_DIR/reference_hash" "$START_SHORT"
+    write_value "$STATE_DIR/reference_hash" "$REFERENCE_SHORT"
     : >"$STATE_DIR/mapping.tsv"
-    git rev-list --reverse --first-parent "$START..$ORIGINAL_TIP" >"$STATE_DIR/commits"
+    git rev-list --reverse --first-parent "$REFERENCE..$ORIGINAL_TIP" >"$STATE_DIR/commits"
     test ! -e "$WORKTREE" || die "rewrite worktree path already exists: $WORKTREE"
-    git worktree add --detach "$WORKTREE" "$START" >/dev/null
+    git worktree add --detach "$WORKTREE" "$REFERENCE" >/dev/null
 fi
 
 TOTAL=$(wc -l <"$STATE_DIR/commits" | tr -d ' ')
