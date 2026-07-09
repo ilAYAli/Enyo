@@ -141,7 +141,8 @@ static inline void prioritize_moves(
     Move tt_move = 0,
     const Move * killers = nullptr,
     Move countermove = Move{},
-    const typename Worker::CmhPieceTable * cmh_slice = nullptr)
+    const typename Worker::CmhPieceTable * cmh_slice = nullptr,
+    const std::array<std::array<uint64_t, square_nb>, square_nb> * root_node_counts = nullptr)
 {
     auto & board = worker.si.board;
     out.clear();
@@ -197,6 +198,15 @@ static inline void prioritize_moves(
                 score = worker.history[Us][move.src_sq()][move.dst_sq()];
                 if (cmh_slice) {
                     score += (*cmh_slice)[static_cast<size_t>(move.src_piece())][move.dst_sq()];
+                }
+                if (root_node_counts) {
+                    const uint64_t n = (*root_node_counts)[move.src_sq()][move.dst_sq()];
+                    if (n) {
+                        const int bits = 64 - __builtin_clzll(n);
+                        score += std::min(
+                            cfgmgr.root_node_order_cap,
+                            cfgmgr.root_node_order_scale * bits);
+                    }
                 }
             }
         }
