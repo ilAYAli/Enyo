@@ -271,10 +271,10 @@ bool load_eval_file(const std::string & value)
         NNUE::Stockfish::Disable();
         Network::enabled = true;
         ucilog(
-            "info string evaluator=enyo-nnue path='{}' sha256={} hidden={} input_buckets={} feature_channels={} output_buckets={} head_features={} dense_format=float\n",
+            "info string evaluator=enyo-nnue path='{}' sha256={} hidden={} input_buckets={} feature_channels={} output_buckets={} head_features={} full_threats={} dense_format=float\n",
             path, *sha256, Network::TRAINED_HIDDEN, Network::INPUT_BUCKETS,
             Network::FEATURE_CHANNELS, Network::OUTPUT_BUCKETS,
-            Network::OUTPUT_HEAD_FEATURES);
+            Network::OUTPUT_HEAD_FEATURES, Network::FULL_THREATS_ENABLED);
         return true;
     }
     if (enyo.status == NNUE::LoadStatus::invalid)

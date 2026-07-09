@@ -59,6 +59,7 @@ int           TRAINED_HIDDEN = N_HIDDEN;
 int           OUTPUT_BUCKETS = DEFAULT_OUTPUT_BUCKETS;
 int           OUTPUT_WIDTH = N_L3;
 int           OUTPUT_HEAD_FEATURES = DEFAULT_OUTPUT_HEAD_FEATURES;
+bool          FULL_THREATS_ENABLED = false;
 
 // Phase-6 runtime switch. Engine `evaluate()` checks this + INPUT_WEIGHTS
 // and re-routes to EvaluateFromScratch when both are set.
@@ -173,6 +174,7 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
     OUTPUT_BUCKETS = DEFAULT_OUTPUT_BUCKETS;
     OUTPUT_WIDTH = N_L3;
     OUTPUT_HEAD_FEATURES = DEFAULT_OUTPUT_HEAD_FEATURES;
+    FULL_THREATS_ENABLED = false;
     INPUT_WEIGHTS = weights;
     INPUT_BIASES  = biases;
     L1_WEIGHTS_T  = nullptr;
@@ -212,6 +214,7 @@ void EnyoStorage::Activate(const NetworkLayout & layout, DenseLayerFormat format
     TRAINED_HIDDEN = layout.trained_hidden;
     OUTPUT_BUCKETS = layout.output_buckets;
     OUTPUT_HEAD_FEATURES = layout.output_head_features;
+    FULL_THREATS_ENABLED = layout.full_threats;
     OUTPUT_WIDTH = N_L3 + OUTPUT_HEAD_FEATURES;
     ShuffleInputLayout(INPUT_BUCKETS, FEATURE_CHANNELS);
 

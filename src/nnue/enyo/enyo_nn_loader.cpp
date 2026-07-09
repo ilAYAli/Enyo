@@ -71,7 +71,7 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
         || runtime_hidden != N_HIDDEN
         || l2_size != N_L2
         || l3_size != N_L3
-        || flags != 0
+        || (flags & ~NETWORK_FLAG_FULL_THREATS) != 0
         || !IsSupportedTrainedHidden(static_cast<int>(trained_hidden))
         || !IsSupportedFeatureLayout(
             static_cast<int>(input_buckets), static_cast<int>(feature_channels))
@@ -79,11 +79,13 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
         || !IsSupportedOutputHeadFeatures(static_cast<int>(output_head_features)))
         return {NNUE::LoadStatus::invalid, "unsupported Enyo network header"};
 
+    const bool full_threats = (flags & NETWORK_FLAG_FULL_THREATS) != 0;
     const size_t expected_payload = NetworkSize(
         static_cast<int>(input_buckets),
         static_cast<int>(output_buckets),
         static_cast<int>(output_head_features),
-        static_cast<int>(feature_channels));
+        static_cast<int>(feature_channels),
+        full_threats);
     if (payload_size != expected_payload
         || reader.size() != NETWORK_HEADER_SIZE + expected_payload)
         return {NNUE::LoadStatus::invalid, "Enyo network payload size does not match its header"};
@@ -95,6 +97,7 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
         static_cast<int>(output_head_features),
         static_cast<int>(trained_hidden),
         NETWORK_HEADER_SIZE,
+        full_threats,
     };
     if (!reader.seek(NETWORK_HEADER_SIZE))
         return {NNUE::LoadStatus::invalid, reader.error()};
@@ -114,7 +117,8 @@ static NNUE::LoadResult LoadEnyoNetwork(NNUE::BinaryReader & reader) {
 
     EnyoStorage::Clear();
     const size_t input_weight_bytes = sizeof(acc_t)
-        * static_cast<size_t>(FeatureCount(layout.input_buckets, layout.feature_channels))
+        * static_cast<size_t>(InputFeatureCount(
+            layout.input_buckets, layout.feature_channels, layout.full_threats))
         * N_HIDDEN;
     const int output_width = N_L3 + layout.output_head_features;
     const size_t output_weight_bytes = sizeof(float)

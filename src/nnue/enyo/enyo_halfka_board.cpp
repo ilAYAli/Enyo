@@ -111,6 +111,15 @@ int EvaluateFromScratch(const enyo::Board& b) {
     std::memset(&acc, 0, sizeof(acc));
     ResetAccumulator(&acc, enyo::white, wk_sq, pieces, n);
     ResetAccumulator(&acc, enyo::black, bk_sq, pieces, n);
+    if (FULL_THREATS_ENABLED) {
+        const auto threats = NNUE::Stockfish::FullThreats::GetActiveFeatures(b);
+        for (auto side : {enyo::white, enyo::black}) {
+            Delta delta{};
+            for (size_t i = 0; i < threats[side].size; ++i)
+                delta.add[delta.a++] = ThreatFeatureIdx(threats[side].values[i]);
+            ApplyDelta(acc.values[side], acc.values[side], &delta);
+        }
+    }
 
     const MaterialSummary summary = SummarizeMaterial(b);
     const HeadFeatures head_features = MaterialHeadFeatures(summary);

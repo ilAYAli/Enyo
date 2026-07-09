@@ -3,6 +3,8 @@
 // KING_BUCKETS and the feature-index formula are derived from Berserk
 // (GPL-3.0), adapted to Enyo's square and piece conventions.
 
+#include "nnue/stockfish/full_threats.hpp"
+
 #include "types.hpp"
 
 #include <array>
@@ -32,7 +34,9 @@ inline constexpr int HALFKA_V2_FEATURE_CHANNELS = 11;
 inline constexpr int DEFAULT_FEATURE_CHANNELS = LEGACY_FEATURE_CHANNELS;
 inline constexpr int MAX_INPUT_CHANNELS = LEGACY_FEATURE_CHANNELS;
 inline constexpr int N_SQUARES      = 64;
-inline constexpr int N_FEATURES     = N_KING_BUCKETS * MAX_INPUT_CHANNELS * N_SQUARES;
+inline constexpr int N_BASE_FEATURES = N_KING_BUCKETS * MAX_INPUT_CHANNELS * N_SQUARES;
+inline constexpr int N_THREAT_FEATURES = NNUE::Stockfish::FullThreats::dimensions;
+inline constexpr int N_FEATURES = N_BASE_FEATURES + N_THREAT_FEATURES;
 inline constexpr int N_HIDDEN       = 1024;
 inline constexpr std::array<int, 3> SUPPORTED_TRAINED_HIDDEN = {512, 768, 1024};
 inline constexpr int N_L1           = 2 * N_HIDDEN;     // 2048
@@ -63,6 +67,7 @@ inline constexpr std::array<uint8_t, 8> NETWORK_HEADER_MAGIC = {
     'E', 'N', 'Y', 'O', 'N', 'N', '2', 0,
 };
 inline constexpr uint32_t NETWORK_FORMAT_VERSION = 2;
+inline constexpr uint32_t NETWORK_FLAG_FULL_THREATS = 1u << 0;
 inline constexpr size_t NETWORK_HEADER_SIZE = 64;
 
 // ---------------------------------------------------------------------
@@ -110,6 +115,19 @@ inline constexpr int FeatureCount(
     int feature_channels = DEFAULT_FEATURE_CHANNELS)
 {
     return input_buckets * feature_channels * N_SQUARES;
+}
+
+inline constexpr int InputFeatureCount(
+    int input_buckets,
+    int feature_channels = DEFAULT_FEATURE_CHANNELS,
+    bool full_threats = false)
+{
+    return FeatureCount(input_buckets, feature_channels)
+        + (full_threats ? N_THREAT_FEATURES : 0);
+}
+
+inline int ThreatFeatureIdx(NNUE::Stockfish::FeatureIndex index) {
+    return FeatureCount(INPUT_BUCKETS, FEATURE_CHANNELS) + static_cast<int>(index);
 }
 
 // ---------------------------------------------------------------------
@@ -359,6 +377,7 @@ struct alignas(64) Accumulator {
 struct alignas(64) AccumulatorKingState {
     acc_t    values[N_HIDDEN];
     uint64_t pcs[12]; // per-piece bitboard snapshot (for diff-based refresh)
+    NNUE::Stockfish::FullThreats::ActiveFeatures threats;
 };
 
 // ---------------------------------------------------------------------
@@ -402,6 +421,7 @@ extern int            TRAINED_HIDDEN;
 extern int            OUTPUT_BUCKETS;
 extern int            OUTPUT_WIDTH;
 extern int            OUTPUT_HEAD_FEATURES;
+extern bool           FULL_THREATS_ENABLED;
 
 // Phase-2 test helper: point the weight externs at externally-allocated
 // arrays.  Caller is responsible for the storage outliving subsequent
@@ -416,10 +436,11 @@ inline constexpr size_t NetworkSize(
     int input_buckets,
     int output_buckets = DEFAULT_OUTPUT_BUCKETS,
     int output_head_features = DEFAULT_OUTPUT_HEAD_FEATURES,
-    int feature_channels = DEFAULT_FEATURE_CHANNELS)
+    int feature_channels = DEFAULT_FEATURE_CHANNELS,
+    bool full_threats = false)
 {
     return sizeof(int16_t)
-        * static_cast<size_t>(FeatureCount(input_buckets, feature_channels))
+        * static_cast<size_t>(InputFeatureCount(input_buckets, feature_channels, full_threats))
         * static_cast<size_t>(N_HIDDEN)
     + sizeof(int16_t) * N_HIDDEN               // input biases
     + sizeof(int8_t)  * N_L1 * N_L2            // L1 weights
@@ -456,6 +477,7 @@ struct NetworkLayout {
     int output_head_features = 0;
     int trained_hidden = N_HIDDEN;
     size_t header_size = 0;
+    bool full_threats = false;
 };
 
 inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
@@ -487,7 +509,8 @@ inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
                         output_buckets,
                         output_head_features,
                         N_HIDDEN,
-                        0};
+                        0,
+                        false};
             }
         }
     }
@@ -549,14 +572,14 @@ inline constexpr bool IsSupportedQuantizedNetworkSize(size_t size)
 }
 
 // ---------------------------------------------------------------------
-// Delta: up to 32 features to add and 32 to remove between two
+// Delta: enough room for all piece features plus a full FullThreats diff.
 // accumulator states.
 // ---------------------------------------------------------------------
 struct Delta {
     uint8_t r = 0;
     uint8_t a = 0;
-    int rem[32];
-    int add[32];
+    int rem[192];
+    int add[192];
 };
 
 // ---------------------------------------------------------------------
@@ -746,6 +769,7 @@ inline void ResetRefreshTable(AccumulatorKingState* refreshTable) {
         AccumulatorKingState* state = refreshTable + b;
         std::memcpy(state->values, INPUT_BIASES, sizeof(acc_t) * N_HIDDEN);
         std::memset(state->pcs, 0, sizeof(state->pcs));
+        state->threats.size = 0;
     }
 }
 

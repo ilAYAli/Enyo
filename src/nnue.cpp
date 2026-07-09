@@ -81,6 +81,29 @@ void reset_network_refresh_table_if_needed(NNUE::Net & net)
     net.network_refresh_generation = Network::NETWORK_GENERATION;
 }
 
+template<size_t Capacity>
+void append_feature_difference(
+    Network::Delta & delta,
+    const NNUE::Stockfish::FeatureList<Capacity> & previous,
+    const NNUE::Stockfish::FeatureList<Capacity> & current)
+{
+    size_t old_index = 0;
+    size_t new_index = 0;
+    while (old_index < previous.size || new_index < current.size) {
+        if (new_index == current.size
+            || (old_index < previous.size
+                && previous.values[old_index] < current.values[new_index])) {
+            delta.rem[delta.r++] = Network::ThreatFeatureIdx(previous.values[old_index++]);
+        } else if (old_index == previous.size
+            || current.values[new_index] < previous.values[old_index]) {
+            delta.add[delta.a++] = Network::ThreatFeatureIdx(current.values[new_index++]);
+        } else {
+            ++old_index;
+            ++new_index;
+        }
+    }
+}
+
 void refresh_network_from_table(NNUE::Net & net,
                               Network::Accumulator & accumulator,
                               const enyo::Board & board,
@@ -123,6 +146,12 @@ void refresh_network_from_table(NNUE::Net & net,
         }
 
         state.pcs[pc] = curr;
+    }
+
+    if (Network::FULL_THREATS_ENABLED) {
+        const auto threats = NNUE::Stockfish::FullThreats::GetActiveFeatures(board);
+        append_feature_difference(delta, state.threats, threats[side]);
+        state.threats = threats[side];
     }
 
     Network::ApplyDelta(state.values, state.values, &delta);
@@ -739,6 +768,11 @@ void Net::ensure_network(enyo::Board &board)
 {
     if (!use_network())
         return;
+
+    if (Network::FULL_THREATS_ENABLED) {
+        refresh_network(board);
+        return;
+    }
 
     Network::Accumulator & current = network_accumulator_stack[currentAccumulator];
     bool need[2] = {
