@@ -5,7 +5,7 @@ set -euo pipefail
 usage()
 {
     cat >&2 <<'EOF'
-usage: ./scripts/sprt_tag.sh --candidate COMMIT --reference COMMIT
+usage: ./scripts/sprt_tag.sh --candidate COMMIT --reference COMMIT [--net NET]
 
 Run a distributed SPRT for CANDIDATE against REFERENCE, then continue with each
 subsequent first-parent commit through the current branch tip. CANDIDATE must be
@@ -13,7 +13,7 @@ the first engine-changing commit after REFERENCE; non-engine commits may appear
 between them. Each candidate commit is recreated with its aggregate Elo and LLR
 appended to the subject. Worker-local engine binaries are moved from the old
 commit hash to the rewritten hash, and the branch is force-pushed with an exact
-lease only after the complete chain succeeds.
+lease only after the complete chain succeeds. NET defaults to candidate.net.
 EOF
 }
 
@@ -55,6 +55,14 @@ acquire_lock()
 require_command()
 {
     command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+resolve_net_path()
+{
+    case "$1" in
+        /*|./*|../*) printf '%s\n' "$1" ;;
+        *) printf '%s/assets/nets/%s\n' "$HOME" "$1" ;;
+    esac
 }
 
 write_value()
@@ -209,14 +217,14 @@ run_sprt()
             --run "$run" \
             --wait \
             --notify-command "$NOTIFY_COMMAND" \
-            --comment "sprt-tag enyo_$candidate_hash vs enyo_$reference_hash" \
+            --comment "sprt-tag enyo_$candidate_hash vs enyo_$reference_hash using $(basename "$NET")" \
             --book "$BOOK" \
             --candidate "~/assets/engines/enyo_$candidate_hash" \
-            --candidate-uci "nnue_file=~/assets/nets/default.net" \
+            --candidate-uci "nnue_file=$NET" \
             --concurrency "$CONCURRENCY" \
             --games "$GAMES" \
             --reference "~/assets/engines/enyo_$reference_hash" \
-            --reference-uci "nnue_file=~/assets/nets/default.net" \
+            --reference-uci "nnue_file=$NET" \
             --restart on \
             --tc "$TC" \
             --threads "$THREADS"
@@ -494,6 +502,8 @@ restore_worktree()
 
 REFERENCE_ARG=
 CANDIDATE_ARG=
+NET_ARG=candidate.net
+NET_SPECIFIED=0
 while (( $# > 0 )); do
     case "$1" in
         --reference)
@@ -520,6 +530,20 @@ while (( $# > 0 )); do
             test -n "$CANDIDATE_ARG" || die "--candidate requires a commit"
             shift
             ;;
+        --net)
+            (( $# >= 2 )) || die "--net requires a net"
+            (( NET_SPECIFIED == 0 )) || die "--net was specified more than once"
+            NET_ARG=$2
+            NET_SPECIFIED=1
+            shift 2
+            ;;
+        --net=*)
+            (( NET_SPECIFIED == 0 )) || die "--net was specified more than once"
+            NET_ARG=${1#*=}
+            test -n "$NET_ARG" || die "--net requires a net"
+            NET_SPECIFIED=1
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -531,11 +555,12 @@ while (( $# > 0 )); do
 done
 test -n "$REFERENCE_ARG" || die "--reference is required"
 test -n "$CANDIDATE_ARG" || die "--candidate is required"
+NET=$(resolve_net_path "$NET_ARG")
 
 interrupted()
 {
-    printf '\nInterrupted. Nothing needs cleanup; resume with:\n  ./scripts/sprt_tag.sh --candidate %q --reference %q\n' \
-        "$CANDIDATE_ARG" "$REFERENCE_ARG" >&2
+    printf '\nInterrupted. Nothing needs cleanup; resume with:\n  ./scripts/sprt_tag.sh --candidate %q --reference %q --net %q\n' \
+        "$CANDIDATE_ARG" "$REFERENCE_ARG" "$NET" >&2
     exit 130
 }
 
@@ -659,6 +684,11 @@ if test -d "$STATE_DIR"; then
     if ! test -f "$STATE_DIR/candidate"; then
         write_value "$STATE_DIR/candidate" "$CANDIDATE"
     fi
+    if test -f "$STATE_DIR/net"; then
+        test "$(read_value "$STATE_DIR/net")" = "$NET" || die "state net mismatch"
+    else
+        write_value "$STATE_DIR/net" "$NET"
+    fi
     WORKTREE=$(read_value "$STATE_DIR/worktree")
     if ! test -d "$WORKTREE"; then
         restore_worktree
@@ -668,6 +698,7 @@ else
     mkdir -p "$STATE_DIR"
     write_value "$STATE_DIR/start" "$REFERENCE"
     write_value "$STATE_DIR/candidate" "$CANDIDATE"
+    write_value "$STATE_DIR/net" "$NET"
     write_value "$STATE_DIR/original_tip" "$ORIGINAL_TIP"
     write_value "$STATE_DIR/original_remote_tip" "$REMOTE_TIP"
     write_value "$STATE_DIR/branch" "$BRANCH"
