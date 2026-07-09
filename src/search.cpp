@@ -824,12 +824,8 @@ moves_loop:
     const Worker::CmhPieceTable * cmh_slice = prev_move
         ? &worker.cmh[Us][static_cast<size_t>(prev_move.src_piece())][prev_move.dst_sq()]
         : nullptr;
-    // Only Root has a meaningful prior iteration to draw node counts from;
-    // inner nodes are a fresh position every visit.
-    const auto * root_node_counts =
-        NT == NodeType::Root ? &worker.prev_root_move_nodes : nullptr;
     PrioritizedMoves mp;
-    prioritize_moves<Us, ABSEARCH>(mp, worker, lm, tt_move, ss->killers, cm, cmh_slice, root_node_counts);
+    prioritize_moves<Us, ABSEARCH>(mp, worker, lm, tt_move, ss->killers, cm, cmh_slice);
 #else
     auto mp = MovePicker2<Us>(worker, lm, tt_move);
 #endif
@@ -1556,7 +1552,6 @@ void search_position(Worker & worker)
 
         si.nodes = 0;
         si.depth = depth;
-        worker.prev_root_move_nodes = worker.root_move_nodes;
         worker.root_move_nodes = {};
 
         if constexpr (Constexpr::debug_threads)

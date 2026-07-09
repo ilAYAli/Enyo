@@ -149,13 +149,6 @@ public:
     int node_tm_depth_gate = 8;
     int node_tm_scale_base = 150;
     int node_tm_scale_mult = 120;
-    // Root move ordering nudge from the previous iteration's node counts
-    // (quiet moves only, added alongside history/cmh). bit-length(nodes)
-    // is used as a coarse magnitude signal so one dominant move from last
-    // iteration doesn't eclipse history entirely; scale is per bit, capped
-    // so it can't swamp the additive score.
-    int root_node_order_scale = 200;
-    int root_node_order_cap = 3000;
     bool use_chess_960      = false;
     bool use_syzygy         = true;
     std::string nnue_file     = "";  // empty = embedded default
@@ -261,8 +254,6 @@ public:
             concat("node_tm_depth_gate", "spin", node_tm_depth_gate, int(1), int(30)) +
             concat("node_tm_scale_base", "spin", node_tm_scale_base, int(100), int(300)) +
             concat("node_tm_scale_mult", "spin", node_tm_scale_mult, int(0), int(300)) +
-            concat("root_node_order_scale", "spin", root_node_order_scale, int(0), int(2000)) +
-            concat("root_node_order_cap", "spin", root_node_order_cap, int(0), int(16384)) +
             concat("use_syzygy",    "check", use_syzygy) +
             //concat("UCI_Chess960",  "check", use_chess_960) +
             concat("nnue_file",     "string", nnue_file) +
@@ -352,10 +343,6 @@ public:
             node_tm_scale_base = std::max(100, std::stoi(value));
         else if (lc == "node_tm_scale_mult")
             node_tm_scale_mult = std::max(0, std::stoi(value));
-        else if (lc == "root_node_order_scale")
-            root_node_order_scale = std::max(0, std::stoi(value));
-        else if (lc == "root_node_order_cap")
-            root_node_order_cap = std::max(0, std::stoi(value));
         else if (lc == "uci_chess960")
             use_chess_960 = true;
         else if (lc == "use_syzygy")

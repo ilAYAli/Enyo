@@ -164,12 +164,6 @@ struct Worker {
     // best move that ate most of the iteration's nodes means the search
     // has converged, so the next iteration's soft deadline can shrink.
     std::array<std::array<uint64_t, square_nb>, square_nb> root_move_nodes{};
-    // Snapshot of root_move_nodes from the last *completed* iteration,
-    // taken right before the reset above. Used to nudge root move ordering
-    // this iteration toward moves that were expensive (contested) last
-    // time, so a hard-time cutoff mid-iteration lands on already-resolved
-    // serious candidates rather than an arbitrary history-ordered quiet.
-    std::array<std::array<uint64_t, square_nb>, square_nb> prev_root_move_nodes{};
     int id { };
 };
 
