@@ -140,6 +140,15 @@ public:
     int hist_bonus_scale = 33;
     int asp_delta = 16;
     int asp_depth = 5;
+    // Node-fraction time management: once an iteration reaches
+    // node_tm_depth_gate, the next iteration's soft deadline is rescaled by
+    // (node_tm_scale_base - node_tm_scale_mult * node_fraction) / 100,
+    // clamped to [0.5, 1.5], where node_fraction is the best root move's
+    // share of the iteration's total nodes. High fraction (search agrees) ->
+    // shrink the budget; low fraction (contested) -> keep or extend it.
+    int node_tm_depth_gate = 8;
+    int node_tm_scale_base = 150;
+    int node_tm_scale_mult = 120;
     bool use_chess_960      = false;
     bool use_syzygy         = true;
     std::string nnue_file     = "";  // empty = embedded default
@@ -242,6 +251,9 @@ public:
             concat("hist_bonus_scale", "spin", hist_bonus_scale, int(4), int(128)) +
             concat("asp_delta", "spin", asp_delta, int(4), int(100)) +
             concat("asp_depth", "spin", asp_depth, int(1), int(12)) +
+            concat("node_tm_depth_gate", "spin", node_tm_depth_gate, int(1), int(30)) +
+            concat("node_tm_scale_base", "spin", node_tm_scale_base, int(100), int(300)) +
+            concat("node_tm_scale_mult", "spin", node_tm_scale_mult, int(0), int(300)) +
             concat("use_syzygy",    "check", use_syzygy) +
             //concat("UCI_Chess960",  "check", use_chess_960) +
             concat("nnue_file",     "string", nnue_file) +
@@ -325,6 +337,12 @@ public:
             asp_delta = std::max(4, std::stoi(value));
         else if (lc == "asp_depth")
             asp_depth = std::max(1, std::stoi(value));
+        else if (lc == "node_tm_depth_gate")
+            node_tm_depth_gate = std::max(1, std::stoi(value));
+        else if (lc == "node_tm_scale_base")
+            node_tm_scale_base = std::max(100, std::stoi(value));
+        else if (lc == "node_tm_scale_mult")
+            node_tm_scale_mult = std::max(0, std::stoi(value));
         else if (lc == "uci_chess960")
             use_chess_960 = true;
         else if (lc == "use_syzygy")

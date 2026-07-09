@@ -946,6 +946,12 @@ moves_loop:
         ss->doubleExtensions = (ss - 1)->doubleExtensions + (extension == 2);
         int new_depth = depth -1 + extension;
 
+        // Snapshot for node-fraction time management: nodes spent in this
+        // root move's whole subtree (LMR + any re-search) get attributed to
+        // it below, regardless of which of the branches under "make move"
+        // actually ran.
+        const uint64_t root_nodes_before = si.nodes;
+
         // make move
         apply_move<Us, true, true>(b, move, &worker.si.nnue);
         bool child_pv_valid = false;
@@ -1031,6 +1037,10 @@ moves_loop:
         revert_move<Us, true, true>(b, &worker.si.nnue);
         if (thread::pool.stop.load(std::memory_order_relaxed))
             return Value::draw;
+
+        if constexpr (NT == NodeType::Root) {
+            worker.root_move_nodes[move.src_sq()][move.dst_sq()] += si.nodes - root_nodes_before;
+        }
 
         if (value > best_value) {
             best_value = value;
@@ -1542,6 +1552,7 @@ void search_position(Worker & worker)
 
         si.nodes = 0;
         si.depth = depth;
+        worker.root_move_nodes = {};
 
         if constexpr (Constexpr::debug_threads)
             fmt::print("<{}> thread: {}, depth: {}\n", __func__, worker.id, depth);
@@ -1643,6 +1654,31 @@ void search_position(Worker & worker)
                 && !either_mate
                 && std::abs(value - prev_iter_value) >= score_swing_cp;
             prev_iter_value = value;
+
+            // Node-fraction time management: rescale the soft deadline off
+            // this iteration's node split before the next iteration's
+            // soft_time_expired() check runs. Gated on soft_time_budget
+            // being clock-derived (nodesmove/no-time-limit searches leave
+            // it at -1) and on depth so early iterations — where node
+            // counts are tiny and the fraction is noisy — don't move the
+            // deadline around.
+            if (depth >= cfgmgr.node_tm_depth_gate
+                && si.soft_time_budget.count() >= 0
+                && is_active_root_move(worker.bestmove)
+                && si.nodes > 0) {
+                const uint64_t bestmove_nodes =
+                    worker.root_move_nodes[worker.bestmove.src_sq()][worker.bestmove.dst_sq()];
+                const double node_fraction = std::min(
+                    1.0, static_cast<double>(bestmove_nodes) / static_cast<double>(si.nodes));
+                const double scale = std::clamp(
+                    (cfgmgr.node_tm_scale_base - cfgmgr.node_tm_scale_mult * node_fraction) / 100.0,
+                    0.5, 1.5);
+                const auto scaled_soft = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    si.soft_time_budget * scale);
+                const auto hard_budget = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    si.stoptime - si.starttime);
+                si.soft_stoptime = si.starttime + std::min(scaled_soft, hard_budget);
+            }
         } else {
             eventlog::log<eventlog::Log::error>(
                 "pvbm empty at depth {}. pv_str='{}' len[0]={} table[0][0]={} prev_bestmove={} score={} fen={}\n",

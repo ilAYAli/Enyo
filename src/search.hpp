@@ -62,6 +62,11 @@ struct SearchInfo {
     std::chrono::high_resolution_clock::time_point starttime;
     std::chrono::high_resolution_clock::time_point stoptime;      // hard limit
     std::chrono::high_resolution_clock::time_point soft_stoptime; // optimum
+    // Original soft budget from time management, before any node-fraction
+    // rescaling. -1 when soft_stoptime isn't clock-derived (nodes_limit, no
+    // time control, or the disabled-budget cases), so search_position knows
+    // when it's safe to rescale soft_stoptime off this base.
+    std::chrono::milliseconds soft_time_budget{-1};
     std::chrono::milliseconds elapsed_time{};
     int depth = MAX_PLY;
     int wtime = -1;
@@ -153,6 +158,12 @@ struct Worker {
     std::array<std::array<std::array<Move, square_nb>, square_nb>, color_nb> countermove{};
     using CmhPieceTable = std::array<std::array<int16_t, square_nb>, piece_type_nb>;
     std::array<std::array<std::array<CmhPieceTable, square_nb>, piece_type_nb>, color_nb> cmh{};
+    // Nodes spent per root move (src/dst-indexed like history) during the
+    // current iterative-deepening iteration, reset at the top of each depth
+    // in search_position. Used for node-fraction time management: a
+    // best move that ate most of the iteration's nodes means the search
+    // has converged, so the next iteration's soft deadline can shrink.
+    std::array<std::array<uint64_t, square_nb>, square_nb> root_move_nodes{};
     int id { };
 };
 

@@ -527,6 +527,7 @@ TimeAllocation handle_time_management(Board& b, SearchInfo & si)
     } else {
         si.stoptime      = si.starttime + alloc.hard;
         si.soft_stoptime = si.starttime + alloc.soft;
+        si.soft_time_budget = alloc.soft;
     }
 
     return alloc;
