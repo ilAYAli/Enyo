@@ -95,7 +95,18 @@ result is unstable, and can use Syzygy tablebases when available.
 
 <h3>Evaluation</h3>
 <a href="https://github.com/ilAYAli/nnue" rel="nofollow">Enyo NNUE</a><br>
-The Enyo NNUE is trained from scratch using selfplay and binpacks
+Enyo uses a HalfKAv2-style factorised NNUE trained from scratch for Enyo. Training uses self-
+play/generated positions and binpack datasets, with Stockfish used only as a labeling oracle. No
+foreign weights, tensors, or NNUE parameters are used.
+
+<br>
+Current architecture:
+  - Type: HalfKAv2-style factorised NNUE
+  - Input buckets: 16 king buckets
+  - Feature channels: 12
+  - Hidden width: 1024
+  - L2 size: 16
+  - Output buckets: 8
 
 <h3>Utilities</H3>
 <a href="https://github.com/ilAYAli/Forge" rel="nofollow">Forge</a>
