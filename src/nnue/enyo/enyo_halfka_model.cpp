@@ -77,15 +77,17 @@ void InitLookupIndices() {
     }
 }
 
-void ShuffleInputLayout(int input_buckets, int feature_channels) {
+void ShuffleInputLayout(int input_buckets, int feature_channels, bool full_threats) {
 #if !defined(__AVX512BW__) && !defined(__AVX2__)
     (void)input_buckets;
     (void)feature_channels;
+    (void)full_threats;
 #endif
 #if defined(__AVX512BW__)
     constexpr size_t width = sizeof(__m512i) / sizeof(int16_t);
     const size_t weight_chunks =
-        (static_cast<size_t>(FeatureCount(input_buckets, feature_channels)) * N_HIDDEN) / width;
+        (static_cast<size_t>(InputFeatureCount(input_buckets, feature_channels, full_threats))
+            * N_HIDDEN) / width;
     constexpr size_t bias_chunks = N_HIDDEN / width;
 
     auto* weights = reinterpret_cast<__m512i*>(EnyoStorage::input_weights);
@@ -134,7 +136,8 @@ void ShuffleInputLayout(int input_buckets, int feature_channels) {
 #elif defined(__AVX2__)
     constexpr size_t width = sizeof(__m256i) / sizeof(int16_t);
     const size_t weight_chunks =
-        (static_cast<size_t>(FeatureCount(input_buckets, feature_channels)) * N_HIDDEN) / width;
+        (static_cast<size_t>(InputFeatureCount(input_buckets, feature_channels, full_threats))
+            * N_HIDDEN) / width;
     constexpr size_t bias_chunks = N_HIDDEN / width;
 
     auto* weights = reinterpret_cast<__m256i*>(EnyoStorage::input_weights);
@@ -216,7 +219,7 @@ void EnyoStorage::Activate(const NetworkLayout & layout, DenseLayerFormat format
     OUTPUT_HEAD_FEATURES = layout.output_head_features;
     FULL_THREATS_ENABLED = layout.full_threats;
     OUTPUT_WIDTH = N_L3 + OUTPUT_HEAD_FEATURES;
-    ShuffleInputLayout(INPUT_BUCKETS, FEATURE_CHANNELS);
+    ShuffleInputLayout(INPUT_BUCKETS, FEATURE_CHANNELS, FULL_THREATS_ENABLED);
 
     INPUT_WEIGHTS = input_weights;
     INPUT_BIASES = input_biases;
