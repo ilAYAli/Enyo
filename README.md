@@ -41,7 +41,7 @@ The file contains one <code>uci_options</code> object; every entry is validated 
 path used by a UCI client.<br>
 Options absent from the file keep their compiled defaults, and later UCI commands take precedence.<br>
 It is of course also possible to issue UCI commands directly, like:<br>
-<code>setoption name nnue_file value ~/code/cpp/chess/enyo/net/enyo-1.0.0-rc1.nn</code>
+<code>setoption name nnue_file value ~/code/cpp/chess/enyo/net/default.nn</code>
 </pre>
 
 
