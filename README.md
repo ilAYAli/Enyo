@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/ilAYAli/Enyo/assets/1106732/49026c53-0cf8-4256-b938-34e607876a2d" alt="Enyo logo">
+  <img src="https://github.com/user-attachments/assets/f4a8d4f1-6a97-42c3-b545-fc6e6e0847fa" alt="Enyo logo">
 </p>
 
 <p align="center">
