@@ -14,8 +14,9 @@
 
 Enyo is a C++23 UCI chess engine combining iterative-deepening principal
 variation search with custom HalfKAv2-style factorised NNUE, trained from
-scratch. It has been developed over several years — predating the
-generative-AI era.
+scratch.
+
+It has been developed over several years — predating the generative-AI era.
 
 ## Evaluation
 
