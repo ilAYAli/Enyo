@@ -245,13 +245,15 @@ bool better_tablebase_root_candidate(
     const bool current_has_dtz = current.root.dtz >= 0;
 
     if (candidate.root.status == syzygy::Status::Win) {
-        if (candidate.eval != current.eval)
-            return candidate.eval > current.eval;
+        // Fastest conversion first: a shorter DTZ makes real progress towards
+        // mate, where NNUE eval alone has no notion of long, precise
+        // technique (e.g. RvsB endings) and will happily shuffle between
+        // moves that all merely fail to lose the win.
         if (candidate_has_dtz != current_has_dtz)
             return candidate_has_dtz;
         if (candidate_has_dtz && candidate.root.dtz != current.root.dtz)
             return candidate.root.dtz < current.root.dtz;
-        return false;
+        return candidate.eval > current.eval;
     }
 
     if (candidate_has_dtz != current_has_dtz)
@@ -281,18 +283,6 @@ std::vector<TablebaseRootCandidate> order_tablebase_root_candidates(
     });
 
     return candidates;
-}
-
-Movelist tablebase_moves_with_status(
-    const std::vector<TablebaseRootCandidate> & candidates,
-    syzygy::Status status)
-{
-    Movelist moves;
-    for (const auto & candidate : candidates) {
-        if (candidate.root.status == status)
-            moves.emplace(candidate.root.move);
-    }
-    return moves;
 }
 
 template <Color Us, NodeType Node>
@@ -1356,9 +1346,14 @@ void search_position(Worker & worker)
         }
     }
 
-    // Root WDL is the correctness gate. DTZ is useful as a fallback and
-    // tie-break, but it is not distance-to-mate, so TB wins still go through
-    // search after filtering out non-winning root moves.
+    // Root WDL is the correctness gate: it tells us which root moves keep
+    // the win. Among those, DTZ tells us which ones actually make progress
+    // towards it, so when a full DTZ ranking is available we narrow the
+    // winning root moves down to the fastest-converging ones before search
+    // picks the final move. Without that narrowing, search is free to pick
+    // any move that merely doesn't lose the win, and NNUE eval has no
+    // concept of long conversion technique (e.g. RvsB endings), so it
+    // wanders for dozens of moves instead of making progress.
     if (Constexpr::use_syzygy && cfgmgr.use_syzygy) {
         const auto num_pieces = count_bits(board.color_bb[white] | board.color_bb[black]);
         const auto tb_max = static_cast<int>(syzygy::largest());
@@ -1394,36 +1389,43 @@ void search_position(Worker & worker)
                     return true;
                 };
 
-                if (tb_status == syzygy::Status::Win) {
+                bool tb_root_complete = false;
+                const auto tb_root_moves = (worker.id == 0 && tb_dtz >= 0)
+                    ? syzygy::root_moves(board, root_candidates, &tb_root_complete)
+                    : std::vector<syzygy::RootMove>{};
+                const bool has_dtz_ranking = tb_root_complete && !tb_root_moves.empty()
+                    && std::ranges::all_of(tb_root_moves, [](const auto & move) {
+                        return move.dtz >= 0;
+                    });
+
+                if (worker.id == 0 && has_dtz_ranking) {
+                    const auto ordered = order_tablebase_root_candidates(board, &si.nnue, tb_root_moves);
+                    if (tb_status == syzygy::Status::Win) {
+                        const auto best_dtz = ordered.front().root.dtz;
+                        Movelist fastest;
+                        for (const auto & candidate : ordered) {
+                            if (candidate.root.status == syzygy::Status::Win && candidate.root.dtz == best_dtz)
+                                fastest.emplace(candidate.root.move);
+                        }
+                        let_search_choose = use_root_filter(fastest, "fastest win");
+                    } else {
+                        const auto best = ordered.empty() ? Move{} : ordered.front().root.move;
+                        if (best && is_active_root_move(best)) {
+                            thread::pool.stop = true;
+                            log_tablebase_root_bestmove(tb_status, best);
+                            ucilog("bestmove {}\n", best);
+                            return;
+                        }
+                    }
+                }
+
+                if (tb_status == syzygy::Status::Win && !let_search_choose) {
                     const auto filtered = syzygy::root_WDL_filter(board, root_candidates, &wdl_filter_complete);
                     if (wdl_filter_complete && !filtered.empty()) {
                         let_search_choose = use_root_filter(filtered, "winning");
                         if (worker.id == 0)
                             ucilog("info string tbhit {} WDL root filter complete {}/{}\n",
                                 verdict, filtered.size(), root_candidate_count);
-                    }
-                }
-
-                if (worker.id == 0 && !let_search_choose && tb_dtz >= 0) {
-                    bool tb_root_complete = false;
-                    const auto tb_root_moves = syzygy::root_moves(board, root_candidates, &tb_root_complete);
-                    const bool has_dtz_ranking = std::ranges::all_of(tb_root_moves, [](const auto & move) {
-                        return move.dtz >= 0;
-                    });
-                    if (tb_root_complete && !tb_root_moves.empty() && has_dtz_ranking) {
-                        const auto ordered = order_tablebase_root_candidates(board, &si.nnue, tb_root_moves);
-                        if (tb_status == syzygy::Status::Win && !wdl_filter_complete) {
-                            const auto winning = tablebase_moves_with_status(ordered, syzygy::Status::Win);
-                            let_search_choose = use_root_filter(winning, "winning");
-                        } else {
-                            const auto best = ordered.empty() ? Move{} : ordered.front().root.move;
-                            if (best && is_active_root_move(best)) {
-                                thread::pool.stop = true;
-                                log_tablebase_root_bestmove(tb_status, best);
-                                ucilog("bestmove {}\n", best);
-                                return;
-                            }
-                        }
                     }
                 }
 
