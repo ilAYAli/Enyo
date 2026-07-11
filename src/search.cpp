@@ -1501,6 +1501,13 @@ void search_position(Worker & worker)
     const int score_swing_cp = cfgmgr.tm_volatility_threshold;
     Move last_legal_bestmove {};
     bool score_info_emitted = false;
+    // Dedup consecutive "info depth ..." lines: once a forced line has no
+    // more legal alternatives to search (e.g. deep in a mate sequence),
+    // successive iterations re-confirm the same score and PV all the way
+    // to max_depth. Logging-only: the search itself still runs every
+    // iteration unchanged, only the redundant reprint is suppressed.
+    std::string last_reported_score_info;
+    std::string last_reported_pv;
 
     // Root search publishes worker.bestmove while the current iteration is
     // still in progress. If time cuts an iteration short, report the last
@@ -1718,19 +1725,26 @@ void search_position(Worker & worker)
                 ? worker.bestmove
                 : active_root_fallback());
 
-        std::string info_string = fmt::format("info depth {} score {} nodes {} nps {} time {} hashfull {}",
-            depth,
-            score_info,
-            thread::pool.get_nodes(),
-            thread::pool.get_nps(),
-            std::chrono::duration_cast<std::chrono::milliseconds>(si.elapsed_time).count(),
-            tt::ttable.get_hashfull());
+        const bool result_unchanged =
+            depth > 1 && score_info == last_reported_score_info && info_pv == last_reported_pv;
+        last_reported_score_info = score_info;
+        last_reported_pv = info_pv;
 
-        if (!info_pv.empty())
-            info_string += fmt::format(" pv {}", info_pv);
+        if (!result_unchanged) {
+            std::string info_string = fmt::format("info depth {} score {} nodes {} nps {} time {} hashfull {}",
+                depth,
+                score_info,
+                thread::pool.get_nodes(),
+                thread::pool.get_nps(),
+                std::chrono::duration_cast<std::chrono::milliseconds>(si.elapsed_time).count(),
+                tt::ttable.get_hashfull());
 
-        ucilog("{}\n", info_string);
-        score_info_emitted = true;
+            if (!info_pv.empty())
+                info_string += fmt::format(" pv {}", info_pv);
+
+            ucilog("{}\n", info_string);
+            score_info_emitted = true;
+        }
 
         if (shortest_mate.moves == 1) {
             eventlog::log<eventlog::Log::info>("Breaking search loop: found mate in 1, shortest_mate.move={}, worker.bestmove={}\n", 
