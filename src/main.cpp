@@ -9,6 +9,7 @@
 #include "version.hpp"
 #include "eventlog.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <cstdio>
 #include <cctype>
@@ -100,8 +101,6 @@ void apply_configured_uci_options(Uci & uci)
 // setoption name Ponder value false
 int main(int argc, char **argv)
 {
-    fmt::print("id {}\n", g_version);
-
     Board b{"startpos"};
     Uci uci(b);
 
@@ -128,6 +127,7 @@ int main(int argc, char **argv)
     bool perft = false;
 
     std::string config_file_path;
+    opterr = 0;
     while ((opt = getopt_long(argc, argv, short_opts, long_opts, nullptr)) != -1) {
         switch (opt) {
             case 'h':
@@ -165,9 +165,21 @@ int main(int argc, char **argv)
             case 'B':
                 pgn.black_player = optarg;
                 break;
+            case '?':
+                if (optopt != 0) {
+                    fmt::print(stderr, "error: option requires an argument: '-{}'\n",
+                        static_cast<char>(optopt));
+                } else if (optind > 0 && optind <= argc) {
+                    fmt::print(stderr, "error: invalid option: '{}'\n",
+                        argv[optind - 1]);
+                } else {
+                    fmt::print(stderr, "error: invalid command-line option\n");
+                }
+                fmt::print(stderr, "Usage: {} [options]\n", argv[0]);
+                return 1;
             default:
-                fmt::print("Error, no such option: '{}'\n", opt);
-                fmt::print("Usage: {} [options]\n", argv[0]);
+                fmt::print(stderr, "error: invalid command-line option\n");
+                fmt::print(stderr, "Usage: {} [options]\n", argv[0]);
                 return 1;
         }
     }
@@ -212,6 +224,8 @@ int main(int argc, char **argv)
         fmt::print(stderr, "error: --perft cannot be combined with the bench command\n");
         return 1;
     }
+
+    fmt::print("id {}\n", g_version);
 
     if (!config_file_path.empty()) {
         if (!cfgmgr.load_config(config_file_path)) {
