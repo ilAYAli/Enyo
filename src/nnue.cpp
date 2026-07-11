@@ -894,7 +894,7 @@ void Net::refresh_network(enyo::Board &board, enyo::Color side) {
 // also exceeds 63 for black pieces at high squares (UB).
 //
 // Cache hits on collisions returned a stale accumulator. Fixing
-// just this hash (distill_clean vs default.net) moved SPRT from
+// just this hash (distill_clean vs default.nn) moved SPRT from
 // -711 Elo to -336 Elo — a ~375 Elo improvement that was
 // silently costing every trained-net SPRT in the project.
 //
@@ -1243,7 +1243,7 @@ static bool LoadFromDisk(const std::string & path)
     std::error_code ec;
     if (!std::filesystem::exists(path, ec) || ec) {
         // Silent: a missing file is the normal case for the sentinel
-        // default ("default.net"), which is expected to fall through
+        // default ("default.nn"), which is expected to fall through
         // to the embedded blob. Real errors surface on open/read.
         return false;
     }
@@ -1265,7 +1265,7 @@ static bool LoadFromDisk(const std::string & path)
 bool Init(const std::string & file_name)
 {
     // Empty path or failed file load uses the embedded default network
-    // (produced by INCBIN at build time from net/default.net). This
+    // (produced by INCBIN at build time from net/default.nn). This
     // returns false for an explicit file failure so callers can reject it.
     if (!file_name.empty() && LoadFromDisk(file_name)) {
         fmt::print("nnue: loaded network from '{}'\n", file_name);

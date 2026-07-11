@@ -220,7 +220,7 @@ void load_embedded_default_eval()
 
     // INCBIN blob matches no known format: build defect, exit is correct.
     const auto msg = fmt::format(
-        "info string ERROR: embedded default net is not a recognized format\n");
+        "info string ERROR: embedded default.nn is not a recognized format\n");
     fmt::print("{}", msg);
     std::fflush(stdout);
     eventlog::log<eventlog::Log::error>("{}", msg);
@@ -234,7 +234,7 @@ bool reject_eval_file(
     const std::string & path, std::string_view reason, bool eval_state_dirty = true)
 {
     const auto msg = fmt::format(
-        "info string ERROR: nnue_file '{}' {}; falling back to embedded default net\n",
+        "info string ERROR: nnue_file '{}' {}; falling back to embedded default.nn\n",
         path, reason);
     fmt::print("{}", msg);
     std::fflush(stdout);

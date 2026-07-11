@@ -8,8 +8,8 @@
     --book '~/assets/books/AntiDraw_V2.1/WOMP_Openings_V1/WOMP_V1_+150_+159/WOMP_V1_6mvs_big_+140_+169.epd' \
     --reference '~/assets/engines/candidate' \
     --candidate '~/assets/engines/candidate' \
-    --reference-uci 'nnue_file=~/code/cpp/chess/enyo/net/default.net' \
-    --candidate-uci 'nnue_file=~/code/cpp/chess/enyo/net/default.net' \
+    --reference-uci 'nnue_file=~/code/cpp/chess/enyo/net/default.nn' \
+    --candidate-uci 'nnue_file=~/code/cpp/chess/enyo/net/default.nn' \
     --reference-uci use_syzygy=false \
     --candidate-uci use_syzygy=false \
     --reference-uci razor_depth=3 \
