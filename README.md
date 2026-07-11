@@ -1,130 +1,188 @@
-![logo](https://github.com/ilAYAli/Enyo/assets/1106732/49026c53-0cf8-4256-b938-34e607876a2d)
-
 <p align="center">
-<i>
-  <a href="https://en.wikipedia.org/wiki/Enyo" target="Enyo">Enyo</a> the greek godess of war and destruction.<br>
-</i>
-  Watch her play live at <a href="https://lichess.org/@/EnyoBot/tv" target="Lichess">Lichess</a>
+  <img src="https://github.com/ilAYAli/Enyo/assets/1106732/49026c53-0cf8-4256-b938-34e607876a2d" alt="Enyo logo">
 </p>
 
-<h3>Engine</h3>
-Enyo is a C++23 UCI chess engine combining iterative-deepening principal variation search with NNUE evaluation.
+<p align="center">
+  <em>
+    <a href="https://en.wikipedia.org/wiki/Enyo">Enyo</a>, the Greek goddess of war and destruction.
+  </em>
+  <br>
+  Watch Enyo play live on <a href="https://lichess.org/@/EnyoBot/tv">Lichess</a>.
+</p>
 
-<h3>Board representation</h3>
-Enyo was originally written from first principles rather than modeled after another engine,<br>
-and one of those early design choices stuck: squares are indexed from <code>h1</code>.<br>
-Internally, <code>h1</code> is 0, <code>g1</code> is 1, ..., and <code>a8</code> is 63.
-<br>
-This differs from the A1-indexed layout used by many chess libraries and tablebase APIs,<br>
-so Enyo converts square and bitboard layouts at external boundaries such as Syzygy/Pyrrhic probing,<br>
-NNUE export/import, FEN, PGN, and UCI handling.
-<br><br>
-<pre>
-H1 indexed: white king =  3, black king = 59
+# Enyo
+
+Enyo is a C++23 UCI chess engine combining iterative-deepening principal
+variation search with NNUE evaluation.
+
+## Features
+
+- UCI engine with configurable options through `setoption` and `settings.json`.
+- Iterative deepening, aspiration windows, quiescence search, and transposition
+  table support.
+- Selective search with razoring, null-move pruning, ProbCut, futility pruning,
+  late-move pruning and reductions, singular extensions, and SEE.
+- Move ordering using transposition-table moves, tactical ordering, killer
+  moves, countermoves, history, and continuation history.
+- Syzygy WDL/DTZ probing through Pyrrhic when tablebases are enabled.
+- Enyo-owned HalfKAv2-style factorised NNUE evaluation.
+
+## Build
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
+
+## Configuration
+
+Enyo can read UCI options from JSON before accepting normal UCI commands. The
+config file must contain a single `uci_options` object:
+
+```json
+{
+  "uci_options": {
+    "Threads": 4,
+    "Hash": 1024,
+    "nnue_file": "~/code/cpp/chess/enyo/net/default.nn",
+    "logfile": "/tmp/enyo.log",
+    "use_syzygy": true,
+    "SyzygyPath": "~/code/cpp/chess/assets/tablebases"
+  }
+}
+```
+
+Config lookup uses the explicit `--config` path when provided. Without
+`--config`, Enyo checks:
+
+- `~/.config/enyo/settings.json` for personal defaults.
+- `settings.json` next to the engine binary when shipped with a build.
+
+Every configured entry is validated and applied through the same path as a UCI
+`setoption` command. Options absent from the file keep their compiled defaults,
+and later UCI commands take precedence.
+
+Example UCI override:
+
+```text
+setoption name nnue_file value ~/code/cpp/chess/enyo/net/default.nn
+```
+
+## Board Representation
+
+Enyo was originally written from first principles rather than modeled after
+another engine. One early design choice remains: squares are indexed from `h1`.
+
+Internally, `h1` is `0`, `g1` is `1`, and `a8` is `63`. This differs from the
+A1-indexed layout used by many chess libraries and tablebase APIs, so Enyo
+converts square and bitboard layouts at external boundaries such as Syzygy and
+Pyrrhic probing, NNUE export/import, FEN, PGN, and UCI handling.
+
+```text
+H1 indexed: white king = 3, black king = 59
+
         A  B  C  D  E  F  G  H
       +------------------------+
-8  63 | ♖  ♘  ♗  ♕  ♔  ♗  ♘  ♖ | 56
-7  55 | ♙  ♙  ♙  ♙  ♙  ♙  ♙  ♙ | 48
+8  63 | R  N  B  Q  K  B  N  R | 56
+7  55 | P  P  P  P  P  P  P  P | 48
 6  47 | -  -  -  -  -  -  -  - | 40
 5  39 | -  -  -  -  -  -  -  - | 32
 4  31 | -  -  -  -  -  -  -  - | 24
 3  23 | -  -  -  -  -  -  -  - | 16
-2  15 | ♟  ♟  ♟  ♟  ♟  ♟  ♟  ♟ |  8
-1   7 | ♜  ♞  ♝  ♛  ♚  ♝  ♞  ♜ |  0
+2  15 | p  p  p  p  p  p  p  p |  8
+1   7 | r  n  b  q  k  b  n  r |  0
       +------------------------+
         7  6  5  4  3  2  1  0
-</pre>
+```
 
-<h3>Configuration</h3>
-Enyo reads <code>~/.config/enyo/settings.json</code>.<br>
-The file contains one <code>uci_options</code> object; every entry is validated and applied through the same <code>setoption</code><br>
-path used by a UCI client.<br>
-Options absent from the file keep their compiled defaults, and later UCI commands take precedence.<br>
-It is of course also possible to issue UCI commands directly, like:<br>
-<code>setoption name nnue_file value ~/code/cpp/chess/enyo/net/default.nn</code>
-</pre>
+## Search
 
+Enyo uses iterative deepening with aspiration windows and quiescence search for
+tactical positions. Selective techniques focus effort on promising lines while
+preserving tactical accuracy.
 
-<h3>Move generation</h3>
-Enyo represents positions with bitboards and uses magic-bitboard lookup tables for
-fast sliding-piece attack generation.
-</pre>
+Move ordering combines transposition-table and tactical information with killer,
+countermove, history, and continuation-history heuristics. The search handles
+repetition and fifty-move draws, adjusts time usage when the root result is
+unstable, and can use Syzygy tablebases when available.
 
-<h3>Benchmark</h3>
-<pre>
+## Evaluation
+
+Enyo uses a HalfKAv2-style factorised NNUE trained from scratch for Enyo.
+Training uses self-play/generated positions and binpack datasets, with
+Stockfish used only as a labeling oracle. No foreign weights, tensors, or NNUE
+parameters are used.
+
+Current architecture:
+
+| Component | Value |
+| --- | --- |
+| Type | HalfKAv2-style factorised NNUE |
+| Input buckets | 16 king buckets |
+| Feature channels | 12 |
+| Hidden width | 1024 |
+| L2 size | 16 |
+| Output buckets | 8 |
+
+Related project: [Enyo NNUE](https://github.com/ilAYAli/nnue).
+
+## Benchmarks
+
+```sh
 ./build/enyo bench
 ./scripts/bench_avg.py ./build/enyo 10
 ./build/enyo bench perft
-</pre>
-The <code>bench</code> argument runs a deterministic 24-position search suite
-with the configured evaluator.<br>
-It defaults to depth 11, one thread, a 16 MB hash, and no tablebases.<br>
-The reported node total is the search signature; nodes per second measures speed.<br>
-Use <code>bench_avg.py</code> for repeated timing.
-Use <code>bench perft</code> for the move-generation-only benchmark.
+```
 
+`bench` runs a deterministic 24-position search suite with the configured
+evaluator. It defaults to depth 11, one thread, a 16 MB hash, and no
+tablebases. The reported node total is the search signature; nodes per second
+measures speed.
 
-<h3>SPSA (Simultaneous Perturbation Stochastic Approximation) tuning</h3>
-Train, test, and promote are separate operations:
-<pre>
-./spsa/train --iterations 100        # train 100 iterations (default 500)
-./spsa/sprt                          # test current values with Forge
-./spsa/promote --dry-run             # inspect promotion
-./spsa/promote                       # update params.txt and src/config.hpp
-</pre>
-<code>train</code> only updates <code>spsa/state.json</code> and resumes an
-previous work. <code>sprt</code> launches a detached 1000-game
-test against the last promoted defaults. <code>promote</code> only updates the
-two tracked defaults files; it does not commit or push. Runtime CSV and lock
-files are kept under <code>spsa/.runtime</code>.
+Use `bench_avg.py` for repeated timing and `bench perft` for the
+move-generation-only benchmark.
 
-<h3>Search</h3>
-<p>
-Enyo uses iterative deepening with aspiration windows, and quiescence search for
-tactical positions.
-Selective techniques such as razoring, null-move pruning, ProbCut, futility pruning,
-late-move pruning and reductions, singular extensions, and static-exchange evaluation
-focus effort on promising lines.
-</p>
-<p>
-Move ordering combines transposition-table and tactical information with killer,
-countermove, history, and continuation-history heuristics.
-The search handles repetition and fifty-move draws, adjusts time usage when the root
-result is unstable, and can use Syzygy tablebases when available.
-</p>
+## SPSA Tuning
 
-<h3>Evaluation</h3>
-<a href="https://github.com/ilAYAli/nnue" rel="nofollow">Enyo NNUE</a><br>
-Enyo uses a HalfKAv2-style factorised NNUE trained from scratch for Enyo. Training uses self-
-play/generated positions and binpack datasets, with Stockfish used only as a labeling oracle. No
-foreign weights, tensors, or NNUE parameters are used.
+SPSA tuning separates training, testing, and promotion:
 
-<br>
-Current architecture:
-  - Type: HalfKAv2-style factorised NNUE
-  - Input buckets: 16 king buckets
-  - Feature channels: 12
-  - Hidden width: 1024
-  - L2 size: 16
-  - Output buckets: 8
+```sh
+./spsa/train --iterations 100
+./spsa/sprt
+./spsa/promote --dry-run
+./spsa/promote
+```
 
-<h3>Utilities</H3>
-<a href="https://github.com/ilAYAli/Forge" rel="nofollow">Forge</a>
-Distribute tasks between a set of configured workers<br>
-<a href="https://github.com/ilAYAli/replay" rel="nofollow">Replay</a>
-Game evaluation, used to resolve:
-Inaccuracies, Mistakes, Blunders, and Average centipawn loss.<br>
-<a href="https://github.com/ilAYAli/sprt" rel="nofollow">sprt</a>
-fastchess python wrapper<br>
-<a href="https://github.com/Disservin/fastchess" rel="nofollow">Fastchess</a>
-CLI tool for running SPRT validation<br>
-<a href="https://github.com/AndyGrant/Pyrrhic" rel="nofollow">Pyrrhic</a>
-Syzygy WDL/DTZ probing<br>
+- `train` updates `spsa/state.json` and resumes previous work when possible.
+- `sprt` launches a detached 1000-game Forge test against the last promoted
+  defaults.
+- `promote --dry-run` previews the promotion.
+- `promote` updates `spsa/params.txt` and `src/config.hpp`; it does not commit
+  or push.
 
+Runtime CSV and lock files are kept under `spsa/.runtime`.
 
-<h3>Acknowledgments</h3>
-Bluefever Software: Chess Engine In C <a href="https://github.com/bluefeversoft/vice" rel="nofollow">Vice</a><br>
-Chess Programming <a href="https://www.youtube.com/playlist?list=PLmN0neTso3Jxh8ZIylk74JpwfiWNI76Cs" rel="nofollow">BBC</a></br>
-<br>
-Enyo stands on the shoulders of giants and draws inspiration from many other chess engines.<br>
-Building a strong engine without studying and understanding prior art is close to impossible<br>
+For alternate SPSA batches, pass both the matching params and state files:
+
+```sh
+./spsa/sprt --params spsa/params_node_tm.txt --state spsa/state_node_tm.json
+```
+
+## Utilities
+
+- [Forge](https://github.com/ilAYAli/Forge): distributes tasks across
+  configured workers.
+- [Replay](https://github.com/ilAYAli/replay): evaluates games for
+  inaccuracies, mistakes, blunders, and average centipawn loss.
+- [sprt](https://github.com/ilAYAli/sprt): Python wrapper around fastchess.
+- [Fastchess](https://github.com/Disservin/fastchess): CLI tool for SPRT
+  validation.
+- [Pyrrhic](https://github.com/AndyGrant/Pyrrhic): Syzygy WDL/DTZ probing.
+
+## Acknowledgments
+
+- Bluefever Software's [Vice](https://github.com/bluefeversoft/vice), from the
+  Chess Engine In C series.
+- The Chess Programming [BBC video series](https://www.youtube.com/playlist?list=PLmN0neTso3Jxh8ZIylk74JpwfiWNI76Cs).
+- The broader chess-engine community and the many engines that make serious
+  engine development possible to study.
