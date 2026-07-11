@@ -13,7 +13,56 @@
 # Enyo
 
 Enyo is a C++23 UCI chess engine combining iterative-deepening principal
-variation search with NNUE evaluation.
+variation search with custom HalfKAv2-style factorised NNUE, trained from
+scratch. It has been developed over several years — predating the
+generative-AI era.
+
+## Evaluation
+
+Enyo uses a HalfKAv2-style factorised NNUE trained from scratch for Enyo.
+Training uses self-play/generated positions and binpack datasets, with
+Stockfish used only as a labeling oracle. No foreign weights, tensors, or NNUE
+parameters are used.
+
+Current architecture:
+
+| Component | Value |
+| --- | --- |
+| Type | HalfKAv2-style factorised NNUE |
+| Input buckets | 16 king buckets |
+| Feature channels | 12 |
+| Hidden width | 1024 |
+| L2 size | 16 |
+| Output buckets | 8 |
+
+Related project: [Enyo NNUE](https://github.com/ilAYAli/nnue).
+
+## Board Representation
+
+Enyo was originally written from first principles rather than modeled after
+another engine. One early design choice remains: squares are indexed from `h1`.
+
+Internally, `h1` is `0`, `g1` is `1`, and `a8` is `63`. This differs from the
+A1-indexed layout used by many chess libraries and tablebase APIs, so Enyo
+converts square and bitboard layouts at external boundaries such as Syzygy and
+Pyrrhic probing, NNUE export/import, FEN, PGN, and UCI handling.
+
+```text
+H1 indexed: white king = 3, black king = 59
+
+        A  B  C  D  E  F  G  H
+      +------------------------+
+8  63 | R  N  B  Q  K  B  N  R | 56
+7  55 | P  P  P  P  P  P  P  P | 48
+6  47 | -  -  -  -  -  -  -  - | 40
+5  39 | -  -  -  -  -  -  -  - | 32
+4  31 | -  -  -  -  -  -  -  - | 24
+3  23 | -  -  -  -  -  -  -  - | 16
+2  15 | p  p  p  p  p  p  p  p |  8
+1   7 | r  n  b  q  k  b  n  r |  0
+      +------------------------+
+        7  6  5  4  3  2  1  0
+```
 
 ## Features
 
@@ -68,32 +117,6 @@ Example UCI override:
 setoption name nnue_file value ~/code/cpp/chess/enyo/net/default.nn
 ```
 
-## Board Representation
-
-Enyo was originally written from first principles rather than modeled after
-another engine. One early design choice remains: squares are indexed from `h1`.
-
-Internally, `h1` is `0`, `g1` is `1`, and `a8` is `63`. This differs from the
-A1-indexed layout used by many chess libraries and tablebase APIs, so Enyo
-converts square and bitboard layouts at external boundaries such as Syzygy and
-Pyrrhic probing, NNUE export/import, FEN, PGN, and UCI handling.
-
-```text
-H1 indexed: white king = 3, black king = 59
-
-        A  B  C  D  E  F  G  H
-      +------------------------+
-8  63 | R  N  B  Q  K  B  N  R | 56
-7  55 | P  P  P  P  P  P  P  P | 48
-6  47 | -  -  -  -  -  -  -  - | 40
-5  39 | -  -  -  -  -  -  -  - | 32
-4  31 | -  -  -  -  -  -  -  - | 24
-3  23 | -  -  -  -  -  -  -  - | 16
-2  15 | p  p  p  p  p  p  p  p |  8
-1   7 | r  n  b  q  k  b  n  r |  0
-      +------------------------+
-        7  6  5  4  3  2  1  0
-```
 
 ## Search
 
@@ -106,25 +129,6 @@ countermove, history, and continuation-history heuristics. The search handles
 repetition and fifty-move draws, adjusts time usage when the root result is
 unstable, and can use Syzygy tablebases when available.
 
-## Evaluation
-
-Enyo uses a HalfKAv2-style factorised NNUE trained from scratch for Enyo.
-Training uses self-play/generated positions and binpack datasets, with
-Stockfish used only as a labeling oracle. No foreign weights, tensors, or NNUE
-parameters are used.
-
-Current architecture:
-
-| Component | Value |
-| --- | --- |
-| Type | HalfKAv2-style factorised NNUE |
-| Input buckets | 16 king buckets |
-| Feature channels | 12 |
-| Hidden width | 1024 |
-| L2 size | 16 |
-| Output buckets | 8 |
-
-Related project: [Enyo NNUE](https://github.com/ilAYAli/nnue).
 
 ## Benchmarks
 
