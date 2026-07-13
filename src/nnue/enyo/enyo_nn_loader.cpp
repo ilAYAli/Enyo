@@ -28,11 +28,15 @@ bool IsSupportedOutputHeadFeatures(int features) {
 }
 
 NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout) {
-    std::array<uint8_t, NETWORK_HEADER_MAGIC.size()> magic{};
+    std::array<uint8_t, NETWORK_V2_HEADER_MAGIC.size()> magic{};
     if (!reader.read(magic.data(), magic.size(), "network magic"))
         return {NNUE::LoadStatus::not_recognized, {}};
 
-    if (std::memcmp(magic.data(), NETWORK_HEADER_MAGIC.data(), magic.size()) != 0) {
+    const bool is_v2_magic = std::memcmp(
+        magic.data(), NETWORK_V2_HEADER_MAGIC.data(), magic.size()) == 0;
+    const bool is_v3_magic = std::memcmp(
+        magic.data(), NETWORK_V3_HEADER_MAGIC.data(), magic.size()) == 0;
+    if (!is_v2_magic && !is_v3_magic) {
         layout = DetectNetworkLayout(reader.size());
         if (layout.input_buckets == 0)
             return {NNUE::LoadStatus::not_recognized, {}};
@@ -66,12 +70,13 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
         || !reader.read_little_endian(payload_size, "payload size"))
         return {NNUE::LoadStatus::invalid, reader.error()};
 
-    if (version != NETWORK_FORMAT_VERSION
+    if ((is_v2_magic && version != NETWORK_FORMAT_VERSION)
+        || (is_v3_magic && version != NETWORK_V3_FORMAT_VERSION)
         || header_size != NETWORK_HEADER_SIZE
         || runtime_hidden != N_HIDDEN
         || l2_size != N_L2
         || l3_size != N_L3
-        || (flags & ~NETWORK_FLAG_FULL_THREATS) != 0
+        || (flags & ~(NETWORK_FLAG_FULL_THREATS | NETWORK_FLAG_FULL_HEADS)) != 0
         || !IsSupportedTrainedHidden(static_cast<int>(trained_hidden))
         || !IsSupportedFeatureLayout(
             static_cast<int>(input_buckets), static_cast<int>(feature_channels))
@@ -80,12 +85,17 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
         return {NNUE::LoadStatus::invalid, "unsupported Enyo network header"};
 
     const bool full_threats = (flags & NETWORK_FLAG_FULL_THREATS) != 0;
+    const bool full_heads = (flags & NETWORK_FLAG_FULL_HEADS) != 0;
+    if (full_heads != is_v3_magic
+        || (full_heads && (output_buckets <= 1 || full_threats || output_head_features != 0)))
+        return {NNUE::LoadStatus::invalid, "unsupported Enyo full-head network header"};
     const size_t expected_payload = NetworkSize(
         static_cast<int>(input_buckets),
         static_cast<int>(output_buckets),
         static_cast<int>(output_head_features),
         static_cast<int>(feature_channels),
-        full_threats);
+        full_threats,
+        full_heads);
     if (payload_size != expected_payload
         || reader.size() != NETWORK_HEADER_SIZE + expected_payload)
         return {NNUE::LoadStatus::invalid, "Enyo network payload size does not match its header"};
@@ -98,6 +108,7 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
         static_cast<int>(trained_hidden),
         NETWORK_HEADER_SIZE,
         full_threats,
+        full_heads,
     };
     if (!reader.seek(NETWORK_HEADER_SIZE))
         return {NNUE::LoadStatus::invalid, reader.error()};
@@ -121,6 +132,13 @@ static NNUE::LoadResult LoadEnyoNetwork(NNUE::BinaryReader & reader) {
             layout.input_buckets, layout.feature_channels, layout.full_threats))
         * N_HIDDEN;
     const int output_width = N_L3 + layout.output_head_features;
+    const size_t head_count = layout.full_heads
+        ? static_cast<size_t>(layout.output_buckets)
+        : 1u;
+    const size_t l1_weight_bytes = head_count * N_L1 * N_L2 * sizeof(int8_t);
+    const size_t l1_bias_bytes = head_count * N_L2 * sizeof(int32_t);
+    const size_t l2_weight_bytes = head_count * N_L2 * N_L3 * sizeof(float);
+    const size_t l2_bias_bytes = head_count * N_L3 * sizeof(float);
     const size_t output_weight_bytes = sizeof(float)
         * static_cast<size_t>(layout.output_buckets)
         * static_cast<size_t>(output_width) * N_OUTPUT;
@@ -129,10 +147,10 @@ static NNUE::LoadResult LoadEnyoNetwork(NNUE::BinaryReader & reader) {
 
     if (!reader.read(EnyoStorage::input_weights, input_weight_bytes, "INPUT_WEIGHTS")
         || !reader.read(EnyoStorage::input_biases, sizeof(EnyoStorage::input_biases), "INPUT_BIASES")
-        || !reader.read(EnyoStorage::l1_weights, sizeof(EnyoStorage::l1_weights), "L1_WEIGHTS")
-        || !reader.read(EnyoStorage::l1_biases, sizeof(EnyoStorage::l1_biases), "L1_BIASES")
-        || !reader.read(EnyoStorage::l2_weights, sizeof(EnyoStorage::l2_weights), "L2_WEIGHTS")
-        || !reader.read(EnyoStorage::l2_biases, sizeof(EnyoStorage::l2_biases), "L2_BIASES")
+        || !reader.read(EnyoStorage::l1_weights, l1_weight_bytes, "L1_WEIGHTS")
+        || !reader.read(EnyoStorage::l1_biases, l1_bias_bytes, "L1_BIASES")
+        || !reader.read(EnyoStorage::l2_weights, l2_weight_bytes, "L2_WEIGHTS")
+        || !reader.read(EnyoStorage::l2_biases, l2_bias_bytes, "L2_BIASES")
         || !reader.read(EnyoStorage::output_weights, output_weight_bytes, "OUTPUT_WEIGHTS")
         || !reader.read(EnyoStorage::output_biases, output_bias_bytes, "OUTPUT_BIASES"))
         return {NNUE::LoadStatus::invalid, reader.error()};

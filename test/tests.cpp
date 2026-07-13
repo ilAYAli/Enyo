@@ -23,6 +23,8 @@
 
 #include <chrono>
 #include <array>
+#include <bit>
+#include <cstring>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
@@ -1833,6 +1835,11 @@ void write_u32_le(std::vector<char> & bytes, size_t offset, uint32_t value) {
         bytes[offset + i] = static_cast<char>((value >> (8 * i)) & 0xff);
 }
 
+void write_f32_le(std::vector<char> & bytes, size_t offset, float value) {
+    static_assert(std::endian::native == std::endian::little);
+    std::memcpy(bytes.data() + offset, &value, sizeof(value));
+}
+
 void write_i16_le(std::vector<char> & bytes, size_t offset, int16_t value) {
     const auto encoded = static_cast<uint16_t>(value);
     bytes[offset] = static_cast<char>(encoded & 0xff);
@@ -1893,6 +1900,75 @@ fs::path write_zero_v2_network_blob(
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     return path;
+}
+
+fs::path write_full_head_v3_network_blob(std::string_view name) {
+    constexpr int output_buckets = 8;
+    const size_t payload_size = Network::NetworkSize(
+        16, output_buckets, 0, 12, false, true);
+    std::vector<char> bytes(Network::NETWORK_HEADER_SIZE + payload_size, 0);
+    std::copy(
+        Network::NETWORK_V3_HEADER_MAGIC.begin(),
+        Network::NETWORK_V3_HEADER_MAGIC.end(),
+        bytes.begin());
+    write_u32_le(bytes, 8, Network::NETWORK_V3_FORMAT_VERSION);
+    write_u32_le(bytes, 12, Network::NETWORK_HEADER_SIZE);
+    write_u32_le(bytes, 16, 16);
+    write_u32_le(bytes, 20, 12);
+    write_u32_le(bytes, 24, Network::N_HIDDEN);
+    write_u32_le(bytes, 28, Network::N_HIDDEN);
+    write_u32_le(bytes, 32, Network::N_L2);
+    write_u32_le(bytes, 36, Network::N_L3);
+    write_u32_le(bytes, 40, output_buckets);
+    write_u32_le(bytes, 44, 0);
+    write_u32_le(bytes, 48, Network::NETWORK_FLAG_FULL_HEADS);
+    write_u32_le(bytes, 52, static_cast<uint32_t>(payload_size));
+
+    const size_t payload = Network::NETWORK_HEADER_SIZE;
+    const size_t input_weights = sizeof(int16_t)
+        * Network::FeatureCount(16, 12) * Network::N_HIDDEN;
+    const size_t input_biases = sizeof(int16_t) * Network::N_HIDDEN;
+    const size_t l1_weights = output_buckets * sizeof(int8_t)
+        * Network::N_L1 * Network::N_L2;
+    const size_t l1_bias_offset = payload + input_weights + input_biases + l1_weights;
+    const size_t l1_biases = output_buckets * sizeof(int32_t) * Network::N_L2;
+    const size_t l2_weight_offset = l1_bias_offset + l1_biases;
+    const size_t l2_weights = output_buckets * sizeof(float)
+        * Network::N_L2 * Network::N_L3;
+    const size_t l2_biases = output_buckets * sizeof(float) * Network::N_L3;
+    const size_t output_weight_offset = l2_weight_offset + l2_weights + l2_biases;
+
+    for (int bucket = 0; bucket < output_buckets; ++bucket) {
+        write_u32_le(
+            bytes,
+            l1_bias_offset + static_cast<size_t>(bucket) * Network::N_L2 * sizeof(int32_t),
+            32);
+        write_f32_le(
+            bytes,
+            l2_weight_offset
+                + static_cast<size_t>(bucket) * Network::N_L2 * Network::N_L3 * sizeof(float),
+            1.0f);
+        write_f32_le(
+            bytes,
+            output_weight_offset
+                + static_cast<size_t>(bucket) * Network::N_L3 * sizeof(float),
+            static_cast<float>(bucket + 1));
+    }
+
+    const auto path = fs::temp_directory_path() / std::string(name);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return path;
+}
+
+void overwrite_u32_le(const fs::path & path, size_t offset, uint32_t value) {
+    std::array<char, sizeof(value)> bytes{};
+    for (size_t i = 0; i < bytes.size(); ++i)
+        bytes[i] = static_cast<char>((value >> (8 * i)) & 0xff);
+
+    std::fstream io(path, std::ios::binary | std::ios::in | std::ios::out);
+    io.seekp(static_cast<std::streamoff>(offset));
+    io.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
 
 bool network_accumulators_match(const Network::Accumulator & a,
@@ -2223,6 +2299,43 @@ TEST(network_model, loads_output_bucket_network_blob) {
     EXPECT_EQ(Network::OUTPUT_WIDTH, Network::N_L3);
     EXPECT_NE(Network::OUTPUT_WEIGHTS, nullptr);
     EXPECT_NE(Network::OUTPUT_BIASES, nullptr);
+    fs::remove(path);
+    ensure_network_mock_weights();
+}
+
+TEST(network_model, full_head_v3_selects_every_dense_stack) {
+    const auto path = write_full_head_v3_network_blob("enyo_full_head_v3.nn");
+    const auto path_string = path.string();
+    ASSERT_TRUE(Network::LoadNetwork(path_string.c_str()));
+    ASSERT_TRUE(Network::FULL_HEADS_ENABLED);
+    EXPECT_EQ(Network::OUTPUT_BUCKETS, 8);
+
+    Network::Accumulator accumulator{};
+    for (int bucket = 0; bucket < 8; ++bucket)
+        EXPECT_EQ(Network::Propagate(&accumulator, 0, bucket), bucket + 1);
+
+    fs::remove(path);
+    ensure_network_mock_weights();
+}
+
+TEST(network_model, rejects_v3_without_full_head_flag) {
+    const auto path = write_full_head_v3_network_blob("enyo_invalid_v3_missing_flag.nn");
+    overwrite_u32_le(path, 48, 0);
+    EXPECT_FALSE(Network::LoadNetwork(path.string().c_str()));
+    fs::remove(path);
+    ensure_network_mock_weights();
+}
+
+TEST(network_model, rejects_v2_with_full_head_flag) {
+    const auto path = write_full_head_v3_network_blob("enyo_invalid_v2_full_head_flag.nn");
+    {
+        std::fstream io(path, std::ios::binary | std::ios::in | std::ios::out);
+        io.write(
+            reinterpret_cast<const char*>(Network::NETWORK_HEADER_MAGIC.data()),
+            static_cast<std::streamsize>(Network::NETWORK_HEADER_MAGIC.size()));
+    }
+    overwrite_u32_le(path, 8, Network::NETWORK_FORMAT_VERSION);
+    EXPECT_FALSE(Network::LoadNetwork(path.string().c_str()));
     fs::remove(path);
     ensure_network_mock_weights();
 }

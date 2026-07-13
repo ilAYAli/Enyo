@@ -63,11 +63,17 @@ enum class DenseLayerFormat {
     Float,
     Quantized,
 };
-inline constexpr std::array<uint8_t, 8> NETWORK_HEADER_MAGIC = {
+inline constexpr std::array<uint8_t, 8> NETWORK_V2_HEADER_MAGIC = {
     'E', 'N', 'Y', 'O', 'N', 'N', '2', 0,
 };
+inline constexpr std::array<uint8_t, 8> NETWORK_V3_HEADER_MAGIC = {
+    'E', 'N', 'Y', 'O', 'N', 'N', '3', 0,
+};
+inline constexpr auto NETWORK_HEADER_MAGIC = NETWORK_V2_HEADER_MAGIC;
 inline constexpr uint32_t NETWORK_FORMAT_VERSION = 2;
+inline constexpr uint32_t NETWORK_V3_FORMAT_VERSION = 3;
 inline constexpr uint32_t NETWORK_FLAG_FULL_THREATS = 1u << 0;
+inline constexpr uint32_t NETWORK_FLAG_FULL_HEADS = 1u << 1;
 inline constexpr size_t NETWORK_HEADER_SIZE = 64;
 
 // ---------------------------------------------------------------------
@@ -422,6 +428,7 @@ extern int            OUTPUT_BUCKETS;
 extern int            OUTPUT_WIDTH;
 extern int            OUTPUT_HEAD_FEATURES;
 extern bool           FULL_THREATS_ENABLED;
+extern bool           FULL_HEADS_ENABLED;
 
 // Phase-2 test helper: point the weight externs at externally-allocated
 // arrays.  Caller is responsible for the storage outliving subsequent
@@ -437,16 +444,20 @@ inline constexpr size_t NetworkSize(
     int output_buckets = DEFAULT_OUTPUT_BUCKETS,
     int output_head_features = DEFAULT_OUTPUT_HEAD_FEATURES,
     int feature_channels = DEFAULT_FEATURE_CHANNELS,
-    bool full_threats = false)
+    bool full_threats = false,
+    bool full_heads = false)
 {
+    const size_t head_count = full_heads
+        ? static_cast<size_t>(output_buckets)
+        : 1u;
     return sizeof(int16_t)
         * static_cast<size_t>(InputFeatureCount(input_buckets, feature_channels, full_threats))
         * static_cast<size_t>(N_HIDDEN)
     + sizeof(int16_t) * N_HIDDEN               // input biases
-    + sizeof(int8_t)  * N_L1 * N_L2            // L1 weights
-    + sizeof(int32_t) * N_L2                   // L1 biases
-    + sizeof(float)   * N_L2 * N_L3            // L2 weights
-    + sizeof(float)   * N_L3                   // L2 biases
+    + head_count * sizeof(int8_t)  * N_L1 * N_L2 // L1 weights
+    + head_count * sizeof(int32_t) * N_L2        // L1 biases
+    + head_count * sizeof(float)   * N_L2 * N_L3 // L2 weights
+    + head_count * sizeof(float)   * N_L3        // L2 biases
     + sizeof(float)   * static_cast<size_t>(output_buckets)
         * static_cast<size_t>(N_L3 + output_head_features) * N_OUTPUT
     + sizeof(float)   * static_cast<size_t>(output_buckets) * N_OUTPUT;
@@ -468,7 +479,13 @@ inline constexpr size_t QuantizedNetworkSize()
 
 inline constexpr size_t NETWORK_SIZE = NetworkSize(DEFAULT_INPUT_BUCKETS);
 inline constexpr size_t MAX_NETWORK_SIZE =
-    NetworkSize(MAX_INPUT_BUCKETS, MAX_OUTPUT_BUCKETS, MAX_OUTPUT_HEAD_FEATURES);
+    NetworkSize(
+        MAX_INPUT_BUCKETS,
+        MAX_OUTPUT_BUCKETS,
+        MAX_OUTPUT_HEAD_FEATURES,
+        DEFAULT_FEATURE_CHANNELS,
+        false,
+        true);
 
 struct NetworkLayout {
     int input_buckets = 0;
@@ -478,6 +495,7 @@ struct NetworkLayout {
     int trained_hidden = N_HIDDEN;
     size_t header_size = 0;
     bool full_threats = false;
+    bool full_heads = false;
 };
 
 inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
@@ -510,6 +528,7 @@ inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
                         output_head_features,
                         N_HIDDEN,
                         0,
+                        false,
                         false};
             }
         }
@@ -1025,7 +1044,19 @@ inline size_t FindNNZ(uint16_t* dest, const int32_t* inputs, size_t chunks) {
 
 // L1AffineReLU — sparse int8 matmul + ReLU.  Writes float output.
 // dest: float[N_L2], src: int8[N_L1].
-inline void L1AffineReLU(float* dest, const int8_t* src) {
+inline void L1AffineReLU(float* dest, const int8_t* src, int output_bucket = 0) {
+    const size_t head = FULL_HEADS_ENABLED
+        ? static_cast<size_t>(output_bucket)
+        : 0u;
+    const size_t base = head * N_L1 * N_L2;
+    const int8_t* const L1_WEIGHTS = Network::L1_WEIGHTS + base;
+    const int8_t* const L1_WEIGHTS_T = Network::L1_WEIGHTS_T != nullptr
+        ? Network::L1_WEIGHTS_T + base
+        : nullptr;
+    const int8_t* const L1_WEIGHTS_SPARSE = Network::L1_WEIGHTS_SPARSE != nullptr
+        ? Network::L1_WEIGHTS_SPARSE + base
+        : nullptr;
+    const int32_t* const L1_BIASES = Network::L1_BIASES + head * N_L2;
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #if defined(__ARM_FEATURE_DOTPROD)
     if (L1_WEIGHTS_SPARSE != nullptr) {
@@ -1304,12 +1335,24 @@ inline void L1AffineReLU(float* dest, const int8_t* src) {
 }
 
 #if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__ARM_FEATURE_DOTPROD)
-inline void L1AffineReLUFromAccumulator(float* dest, const Accumulator* acc, int stm)
+inline void L1AffineReLUFromAccumulator(
+    float* dest,
+    const Accumulator* acc,
+    int stm,
+    int output_bucket = 0)
 {
+    const size_t head = FULL_HEADS_ENABLED
+        ? static_cast<size_t>(output_bucket)
+        : 0u;
+    const size_t base = head * N_L1 * N_L2;
+    const int8_t* const L1_WEIGHTS_SPARSE = Network::L1_WEIGHTS_SPARSE != nullptr
+        ? Network::L1_WEIGHTS_SPARSE + base
+        : nullptr;
+    const int32_t* const L1_BIASES = Network::L1_BIASES + head * N_L2;
     if (L1_WEIGHTS_SPARSE == nullptr) {
         alignas(64) int8_t l1_input[N_L1];
         InputReLU(l1_input, acc, stm);
-        L1AffineReLU(dest, l1_input);
+        L1AffineReLU(dest, l1_input, output_bucket);
         return;
     }
 
@@ -1383,7 +1426,12 @@ inline __m128 hadd_psx4(__m256* regs) {
 
 // L2AffineReLU — dense float matmul + ReLU. dest: float[N_L3],
 // src: float[N_L2].
-inline void L2AffineReLU(float* dest, const float* src) {
+inline void L2AffineReLU(float* dest, const float* src, int output_bucket = 0) {
+    const size_t head = FULL_HEADS_ENABLED
+        ? static_cast<size_t>(output_bucket)
+        : 0u;
+    const float* const L2_WEIGHTS = Network::L2_WEIGHTS + head * N_L2 * N_L3;
+    const float* const L2_BIASES = Network::L2_BIASES + head * N_L3;
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
     const float32x4_t src0 = vld1q_f32(&src[0]);
     const float32x4_t src1 = vld1q_f32(&src[4]);
@@ -1553,16 +1601,16 @@ inline int Propagate(
 #if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__ARM_FEATURE_DOTPROD)
     alignas(64) float l2_input[N_L2];
     alignas(64) float l3_input[N_L3];
-    L1AffineReLUFromAccumulator(l2_input, acc, stm);
-    L2AffineReLU(l3_input, l2_input);
+    L1AffineReLUFromAccumulator(l2_input, acc, stm, output_bucket);
+    L2AffineReLU(l3_input, l2_input, output_bucket);
     return static_cast<int>(L3Transform(l3_input, output_bucket, head_features) / 32.0f);
 #else
     alignas(64) int8_t l1_input[N_L1];
     alignas(64) float  l2_input[N_L2];
     alignas(64) float  l3_input[N_L3];
     InputReLU(l1_input, acc, stm);
-    L1AffineReLU(l2_input, l1_input);
-    L2AffineReLU(l3_input, l2_input);
+    L1AffineReLU(l2_input, l1_input, output_bucket);
+    L2AffineReLU(l3_input, l2_input, output_bucket);
     return static_cast<int>(L3Transform(l3_input, output_bucket, head_features) / 32.0f);
 #endif
 }
