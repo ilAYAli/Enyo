@@ -23,6 +23,8 @@ alignas(64) int8_t l1_weights_sparse[MAX_OUTPUT_BUCKETS * N_L1 * N_L2];
 alignas(64) int32_t l1_biases[MAX_OUTPUT_BUCKETS * N_L2];
 alignas(64) float l2_weights[MAX_OUTPUT_BUCKETS * N_L2 * N_L3];
 alignas(64) float l2_biases[MAX_OUTPUT_BUCKETS * N_L3];
+alignas(64) float l2_squared_weights[N_L2 * N_L3];
+alignas(64) float l2_squared_biases[N_L3];
 alignas(64) float output_weights[MAX_OUTPUT_BUCKETS * MAX_OUTPUT_WIDTH * N_OUTPUT];
 alignas(64) float output_biases[MAX_OUTPUT_BUCKETS * N_OUTPUT];
 alignas(64) int16_t quantized_l2_weights[N_L2 * N_L3];
@@ -43,6 +45,8 @@ alignas(16) uint16_t LOOKUP_INDICES[256][8];
 const int32_t* L1_BIASES     = nullptr;
 const float*  L2_WEIGHTS     = nullptr;
 const float*  L2_BIASES      = nullptr;
+const float*  L2_SQUARED_WEIGHTS = nullptr;
+const float*  L2_SQUARED_BIASES = nullptr;
 const float*  OUTPUT_WEIGHTS = nullptr;
 const float*  OUTPUT_BIASES  = nullptr;
 float         OUTPUT_BIAS    = 0.0f;
@@ -61,6 +65,7 @@ int           OUTPUT_WIDTH = N_L3;
 int           OUTPUT_HEAD_FEATURES = DEFAULT_OUTPUT_HEAD_FEATURES;
 bool          FULL_THREATS_ENABLED = false;
 bool          FULL_HEADS_ENABLED = false;
+bool          MIXED_ACTIVATION_ENABLED = false;
 
 // Phase-6 runtime switch. Engine `evaluate()` checks this + INPUT_WEIGHTS
 // and re-routes to EvaluateFromScratch when both are set.
@@ -180,10 +185,13 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
     OUTPUT_HEAD_FEATURES = DEFAULT_OUTPUT_HEAD_FEATURES;
     FULL_THREATS_ENABLED = false;
     FULL_HEADS_ENABLED = false;
+    MIXED_ACTIVATION_ENABLED = false;
     INPUT_WEIGHTS = weights;
     INPUT_BIASES  = biases;
     L1_WEIGHTS_T  = nullptr;
     L1_WEIGHTS_SPARSE = nullptr;
+    L2_SQUARED_WEIGHTS = nullptr;
+    L2_SQUARED_BIASES = nullptr;
     OUTPUT_BIASES = nullptr;
     OUTPUT_BIAS = 0.0f;
     QUANTIZED_L2_WEIGHTS = nullptr;
@@ -204,6 +212,8 @@ void EnyoStorage::Clear() {
     std::memset(l1_biases, 0, sizeof(l1_biases));
     std::memset(l2_weights, 0, sizeof(l2_weights));
     std::memset(l2_biases, 0, sizeof(l2_biases));
+    std::memset(l2_squared_weights, 0, sizeof(l2_squared_weights));
+    std::memset(l2_squared_biases, 0, sizeof(l2_squared_biases));
     std::memset(output_weights, 0, sizeof(output_weights));
     std::memset(output_biases, 0, sizeof(output_biases));
     std::memset(quantized_l2_weights, 0, sizeof(quantized_l2_weights));
@@ -235,6 +245,7 @@ void EnyoStorage::Activate(const NetworkLayout & layout, DenseLayerFormat format
     OUTPUT_HEAD_FEATURES = layout.output_head_features;
     FULL_THREATS_ENABLED = layout.full_threats;
     FULL_HEADS_ENABLED = layout.full_heads;
+    MIXED_ACTIVATION_ENABLED = layout.mixed_activation;
     OUTPUT_WIDTH = N_L3 + OUTPUT_HEAD_FEATURES;
     ShuffleInputLayout(INPUT_BUCKETS, FEATURE_CHANNELS, FULL_THREATS_ENABLED);
 
@@ -249,6 +260,10 @@ void EnyoStorage::Activate(const NetworkLayout & layout, DenseLayerFormat format
     const bool quantized = format == DenseLayerFormat::Quantized;
     L2_WEIGHTS = quantized ? nullptr : l2_weights;
     L2_BIASES = quantized ? nullptr : l2_biases;
+    L2_SQUARED_WEIGHTS = !quantized && layout.mixed_activation
+        ? l2_squared_weights : nullptr;
+    L2_SQUARED_BIASES = !quantized && layout.mixed_activation
+        ? l2_squared_biases : nullptr;
     OUTPUT_WEIGHTS = quantized ? nullptr : output_weights;
     OUTPUT_BIASES = quantized ? nullptr : output_biases;
     OUTPUT_BIAS = quantized ? 0.0f : output_biases[0];

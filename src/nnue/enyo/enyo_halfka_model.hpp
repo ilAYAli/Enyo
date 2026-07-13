@@ -69,11 +69,16 @@ inline constexpr std::array<uint8_t, 8> NETWORK_V2_HEADER_MAGIC = {
 inline constexpr std::array<uint8_t, 8> NETWORK_V3_HEADER_MAGIC = {
     'E', 'N', 'Y', 'O', 'N', 'N', '3', 0,
 };
+inline constexpr std::array<uint8_t, 8> NETWORK_V4_HEADER_MAGIC = {
+    'E', 'N', 'Y', 'O', 'N', 'N', '4', 0,
+};
 inline constexpr auto NETWORK_HEADER_MAGIC = NETWORK_V2_HEADER_MAGIC;
 inline constexpr uint32_t NETWORK_FORMAT_VERSION = 2;
 inline constexpr uint32_t NETWORK_V3_FORMAT_VERSION = 3;
+inline constexpr uint32_t NETWORK_V4_FORMAT_VERSION = 4;
 inline constexpr uint32_t NETWORK_FLAG_FULL_THREATS = 1u << 0;
 inline constexpr uint32_t NETWORK_FLAG_FULL_HEADS = 1u << 1;
+inline constexpr uint32_t NETWORK_FLAG_MIXED_ACTIVATION = 1u << 2;
 inline constexpr size_t NETWORK_HEADER_SIZE = 64;
 
 // ---------------------------------------------------------------------
@@ -413,6 +418,8 @@ extern uint16_t       LOOKUP_INDICES[256][8];
 extern const int32_t* L1_BIASES;
 extern const float*   L2_WEIGHTS;
 extern const float*   L2_BIASES;
+extern const float*   L2_SQUARED_WEIGHTS;
+extern const float*   L2_SQUARED_BIASES;
 extern const float*   OUTPUT_WEIGHTS;
 extern const float*   OUTPUT_BIASES;
 extern float          OUTPUT_BIAS;
@@ -429,6 +436,7 @@ extern int            OUTPUT_WIDTH;
 extern int            OUTPUT_HEAD_FEATURES;
 extern bool           FULL_THREATS_ENABLED;
 extern bool           FULL_HEADS_ENABLED;
+extern bool           MIXED_ACTIVATION_ENABLED;
 
 // Phase-2 test helper: point the weight externs at externally-allocated
 // arrays.  Caller is responsible for the storage outliving subsequent
@@ -445,7 +453,8 @@ inline constexpr size_t NetworkSize(
     int output_head_features = DEFAULT_OUTPUT_HEAD_FEATURES,
     int feature_channels = DEFAULT_FEATURE_CHANNELS,
     bool full_threats = false,
-    bool full_heads = false)
+    bool full_heads = false,
+    bool mixed_activation = false)
 {
     const size_t head_count = full_heads
         ? static_cast<size_t>(output_buckets)
@@ -458,6 +467,7 @@ inline constexpr size_t NetworkSize(
     + head_count * sizeof(int32_t) * N_L2        // L1 biases
     + head_count * sizeof(float)   * N_L2 * N_L3 // L2 weights
     + head_count * sizeof(float)   * N_L3        // L2 biases
+    + (mixed_activation ? sizeof(float) * (N_L2 * N_L3 + N_L3) : 0)
     + sizeof(float)   * static_cast<size_t>(output_buckets)
         * static_cast<size_t>(N_L3 + output_head_features) * N_OUTPUT
     + sizeof(float)   * static_cast<size_t>(output_buckets) * N_OUTPUT;
@@ -485,7 +495,8 @@ inline constexpr size_t MAX_NETWORK_SIZE =
         MAX_OUTPUT_HEAD_FEATURES,
         DEFAULT_FEATURE_CHANNELS,
         false,
-        true);
+        true,
+        false);
 
 struct NetworkLayout {
     int input_buckets = 0;
@@ -496,6 +507,7 @@ struct NetworkLayout {
     size_t header_size = 0;
     bool full_threats = false;
     bool full_heads = false;
+    bool mixed_activation = false;
 };
 
 inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
@@ -1432,6 +1444,20 @@ inline void L2AffineReLU(float* dest, const float* src, int output_bucket = 0) {
         : 0u;
     const float* const L2_WEIGHTS = Network::L2_WEIGHTS + head * N_L2 * N_L3;
     const float* const L2_BIASES = Network::L2_BIASES + head * N_L3;
+    if (MIXED_ACTIVATION_ENABLED) {
+        for (int i = 0; i < N_L3; ++i) {
+            const int offset = i * N_L2;
+            float s = L2_BIASES[i] + L2_SQUARED_BIASES[i];
+            for (int j = 0; j < N_L2; ++j) {
+                const float clipped = std::min(src[j], 127.0f);
+                const float squared = clipped * clipped / 127.0f;
+                s += src[j] * L2_WEIGHTS[offset + j]
+                   + squared * L2_SQUARED_WEIGHTS[offset + j];
+            }
+            dest[i] = s < 0.0f ? 0.0f : s;
+        }
+        return;
+    }
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
     const float32x4_t src0 = vld1q_f32(&src[0]);
     const float32x4_t src1 = vld1q_f32(&src[4]);

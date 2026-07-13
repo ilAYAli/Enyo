@@ -1961,6 +1961,50 @@ fs::path write_full_head_v3_network_blob(std::string_view name) {
     return path;
 }
 
+fs::path write_mixed_activation_v4_network_blob(std::string_view name) {
+    constexpr int output_buckets = 8;
+    const size_t payload_size = Network::NetworkSize(
+        16, output_buckets, 0, 12, false, false, true);
+    std::vector<char> bytes(Network::NETWORK_HEADER_SIZE + payload_size, 0);
+    std::copy(
+        Network::NETWORK_V4_HEADER_MAGIC.begin(),
+        Network::NETWORK_V4_HEADER_MAGIC.end(),
+        bytes.begin());
+    write_u32_le(bytes, 8, Network::NETWORK_V4_FORMAT_VERSION);
+    write_u32_le(bytes, 12, Network::NETWORK_HEADER_SIZE);
+    write_u32_le(bytes, 16, 16);
+    write_u32_le(bytes, 20, 12);
+    write_u32_le(bytes, 24, Network::N_HIDDEN);
+    write_u32_le(bytes, 28, Network::N_HIDDEN);
+    write_u32_le(bytes, 32, Network::N_L2);
+    write_u32_le(bytes, 36, Network::N_L3);
+    write_u32_le(bytes, 40, output_buckets);
+    write_u32_le(bytes, 44, 0);
+    write_u32_le(bytes, 48, Network::NETWORK_FLAG_MIXED_ACTIVATION);
+    write_u32_le(bytes, 52, static_cast<uint32_t>(payload_size));
+
+    const size_t payload = Network::NETWORK_HEADER_SIZE;
+    const size_t input_weights = sizeof(int16_t)
+        * Network::FeatureCount(16, 12) * Network::N_HIDDEN;
+    const size_t input_biases = sizeof(int16_t) * Network::N_HIDDEN;
+    const size_t l1_weights = sizeof(int8_t) * Network::N_L1 * Network::N_L2;
+    const size_t l1_biases = sizeof(int32_t) * Network::N_L2;
+    const size_t l2_weights = sizeof(float) * Network::N_L2 * Network::N_L3;
+    const size_t l2_biases = sizeof(float) * Network::N_L3;
+    const size_t l2_squared_weights = sizeof(float) * Network::N_L2 * Network::N_L3;
+    const size_t squared_bias_offset = payload + input_weights + input_biases
+        + l1_weights + l1_biases + l2_weights + l2_biases + l2_squared_weights;
+    const size_t output_weight_offset = squared_bias_offset
+        + sizeof(float) * Network::N_L3;
+    write_f32_le(bytes, squared_bias_offset, 1.0f);
+    write_f32_le(bytes, output_weight_offset, 32.0f);
+
+    const auto path = fs::temp_directory_path() / std::string(name);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return path;
+}
+
 void overwrite_u32_le(const fs::path & path, size_t offset, uint32_t value) {
     std::array<char, sizeof(value)> bytes{};
     for (size_t i = 0; i < bytes.size(); ++i)
@@ -2336,6 +2380,20 @@ TEST(network_model, rejects_v2_with_full_head_flag) {
     }
     overwrite_u32_le(path, 8, Network::NETWORK_FORMAT_VERSION);
     EXPECT_FALSE(Network::LoadNetwork(path.string().c_str()));
+    fs::remove(path);
+    ensure_network_mock_weights();
+}
+
+TEST(network_model, mixed_activation_v4_loads_and_uses_residual) {
+    const auto path = write_mixed_activation_v4_network_blob("enyo_mixed_activation_v4.nn");
+    ASSERT_TRUE(Network::LoadNetwork(path.string().c_str()));
+    ASSERT_TRUE(Network::MIXED_ACTIVATION_ENABLED);
+    ASSERT_NE(Network::L2_SQUARED_WEIGHTS, nullptr);
+    ASSERT_NE(Network::L2_SQUARED_BIASES, nullptr);
+
+    Network::Accumulator accumulator{};
+    EXPECT_EQ(Network::Propagate(&accumulator, 0, 0), 1);
+
     fs::remove(path);
     ensure_network_mock_weights();
 }
