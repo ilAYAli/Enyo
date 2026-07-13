@@ -118,6 +118,7 @@ int EvaluateFromScratch(const enyo::Board& b) {
             for (size_t i = 0; i < threats[side].size; ++i)
                 delta.add[delta.a++] = ThreatFeatureIdx(threats[side].values[i]);
             ApplyDelta(acc.values[side], acc.values[side], &delta);
+            ApplyPsqtDelta(acc.psqt[side], acc.psqt[side], &delta);
         }
     }
 

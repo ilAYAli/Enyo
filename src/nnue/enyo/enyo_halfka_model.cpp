@@ -27,6 +27,8 @@ alignas(64) float l2_squared_weights[N_L2 * N_L3];
 alignas(64) float l2_squared_biases[N_L3];
 alignas(64) float output_weights[MAX_OUTPUT_BUCKETS * MAX_OUTPUT_WIDTH * N_OUTPUT];
 alignas(64) float output_biases[MAX_OUTPUT_BUCKETS * N_OUTPUT];
+alignas(64) float psqt_weights[N_FEATURES * MAX_OUTPUT_BUCKETS];
+alignas(64) float psqt_biases[MAX_OUTPUT_BUCKETS];
 alignas(64) int16_t quantized_l2_weights[N_L2 * N_L3];
 alignas(64) int32_t quantized_l2_biases[N_L3];
 alignas(64) int16_t quantized_output_weights[N_L3 * N_OUTPUT];
@@ -49,6 +51,8 @@ const float*  L2_SQUARED_WEIGHTS = nullptr;
 const float*  L2_SQUARED_BIASES = nullptr;
 const float*  OUTPUT_WEIGHTS = nullptr;
 const float*  OUTPUT_BIASES  = nullptr;
+const float*  PSQT_WEIGHTS   = nullptr;
+const float*  PSQT_BIASES    = nullptr;
 float         OUTPUT_BIAS    = 0.0f;
 const int16_t* QUANTIZED_L2_WEIGHTS = nullptr;
 const int32_t* QUANTIZED_L2_BIASES = nullptr;
@@ -66,6 +70,7 @@ int           OUTPUT_HEAD_FEATURES = DEFAULT_OUTPUT_HEAD_FEATURES;
 bool          FULL_THREATS_ENABLED = false;
 bool          FULL_HEADS_ENABLED = false;
 bool          MIXED_ACTIVATION_ENABLED = false;
+bool          PSQT_RESIDUAL_ENABLED = false;
 
 // Phase-6 runtime switch. Engine `evaluate()` checks this + INPUT_WEIGHTS
 // and re-routes to EvaluateFromScratch when both are set.
@@ -186,6 +191,7 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
     FULL_THREATS_ENABLED = false;
     FULL_HEADS_ENABLED = false;
     MIXED_ACTIVATION_ENABLED = false;
+    PSQT_RESIDUAL_ENABLED = false;
     INPUT_WEIGHTS = weights;
     INPUT_BIASES  = biases;
     L1_WEIGHTS_T  = nullptr;
@@ -193,6 +199,8 @@ void SetWeights(const acc_t* weights, const acc_t* biases) {
     L2_SQUARED_WEIGHTS = nullptr;
     L2_SQUARED_BIASES = nullptr;
     OUTPUT_BIASES = nullptr;
+    PSQT_WEIGHTS = nullptr;
+    PSQT_BIASES = nullptr;
     OUTPUT_BIAS = 0.0f;
     QUANTIZED_L2_WEIGHTS = nullptr;
     QUANTIZED_L2_BIASES = nullptr;
@@ -216,6 +224,8 @@ void EnyoStorage::Clear() {
     std::memset(l2_squared_biases, 0, sizeof(l2_squared_biases));
     std::memset(output_weights, 0, sizeof(output_weights));
     std::memset(output_biases, 0, sizeof(output_biases));
+    std::memset(psqt_weights, 0, sizeof(psqt_weights));
+    std::memset(psqt_biases, 0, sizeof(psqt_biases));
     std::memset(quantized_l2_weights, 0, sizeof(quantized_l2_weights));
     std::memset(quantized_l2_biases, 0, sizeof(quantized_l2_biases));
     std::memset(quantized_output_weights, 0, sizeof(quantized_output_weights));
@@ -246,6 +256,7 @@ void EnyoStorage::Activate(const NetworkLayout & layout, DenseLayerFormat format
     FULL_THREATS_ENABLED = layout.full_threats;
     FULL_HEADS_ENABLED = layout.full_heads;
     MIXED_ACTIVATION_ENABLED = layout.mixed_activation;
+    PSQT_RESIDUAL_ENABLED = layout.psqt_residual;
     OUTPUT_WIDTH = N_L3 + OUTPUT_HEAD_FEATURES;
     ShuffleInputLayout(INPUT_BUCKETS, FEATURE_CHANNELS, FULL_THREATS_ENABLED);
 
@@ -266,6 +277,8 @@ void EnyoStorage::Activate(const NetworkLayout & layout, DenseLayerFormat format
         ? l2_squared_biases : nullptr;
     OUTPUT_WEIGHTS = quantized ? nullptr : output_weights;
     OUTPUT_BIASES = quantized ? nullptr : output_biases;
+    PSQT_WEIGHTS = !quantized && layout.psqt_residual ? psqt_weights : nullptr;
+    PSQT_BIASES = !quantized && layout.psqt_residual ? psqt_biases : nullptr;
     OUTPUT_BIAS = quantized ? 0.0f : output_biases[0];
     QUANTIZED_L2_WEIGHTS = quantized ? quantized_l2_weights : nullptr;
     QUANTIZED_L2_BIASES = quantized ? quantized_l2_biases : nullptr;

@@ -38,7 +38,9 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
         magic.data(), NETWORK_V3_HEADER_MAGIC.data(), magic.size()) == 0;
     const bool is_v4_magic = std::memcmp(
         magic.data(), NETWORK_V4_HEADER_MAGIC.data(), magic.size()) == 0;
-    if (!is_v2_magic && !is_v3_magic && !is_v4_magic) {
+    const bool is_v5_magic = std::memcmp(
+        magic.data(), NETWORK_V5_HEADER_MAGIC.data(), magic.size()) == 0;
+    if (!is_v2_magic && !is_v3_magic && !is_v4_magic && !is_v5_magic) {
         layout = DetectNetworkLayout(reader.size());
         if (layout.input_buckets == 0)
             return {NNUE::LoadStatus::not_recognized, {}};
@@ -75,12 +77,13 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
     if ((is_v2_magic && version != NETWORK_FORMAT_VERSION)
         || (is_v3_magic && version != NETWORK_V3_FORMAT_VERSION)
         || (is_v4_magic && version != NETWORK_V4_FORMAT_VERSION)
+        || (is_v5_magic && version != NETWORK_V5_FORMAT_VERSION)
         || header_size != NETWORK_HEADER_SIZE
         || runtime_hidden != N_HIDDEN
         || l2_size != N_L2
         || l3_size != N_L3
         || (flags & ~(NETWORK_FLAG_FULL_THREATS | NETWORK_FLAG_FULL_HEADS
-                      | NETWORK_FLAG_MIXED_ACTIVATION)) != 0
+                      | NETWORK_FLAG_MIXED_ACTIVATION | NETWORK_FLAG_PSQT_RESIDUAL)) != 0
         || !IsSupportedTrainedHidden(static_cast<int>(trained_hidden))
         || !IsSupportedFeatureLayout(
             static_cast<int>(input_buckets), static_cast<int>(feature_channels))
@@ -91,6 +94,7 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
     const bool full_threats = (flags & NETWORK_FLAG_FULL_THREATS) != 0;
     const bool full_heads = (flags & NETWORK_FLAG_FULL_HEADS) != 0;
     const bool mixed_activation = (flags & NETWORK_FLAG_MIXED_ACTIVATION) != 0;
+    const bool psqt_residual = (flags & NETWORK_FLAG_PSQT_RESIDUAL) != 0;
     if (full_heads != is_v3_magic
         || (full_heads && (output_buckets <= 1 || full_threats || output_head_features != 0)))
         return {NNUE::LoadStatus::invalid, "unsupported Enyo full-head network header"};
@@ -98,6 +102,10 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
         || (mixed_activation && (full_heads || full_threats || output_buckets != 8
                                  || output_head_features != 0)))
         return {NNUE::LoadStatus::invalid, "unsupported Enyo mixed-activation header"};
+    if (psqt_residual != is_v5_magic
+        || (psqt_residual && (full_heads || full_threats || mixed_activation
+                             || output_buckets != 8 || output_head_features != 0)))
+        return {NNUE::LoadStatus::invalid, "unsupported Enyo PSQT-residual header"};
     const size_t expected_payload = NetworkSize(
         static_cast<int>(input_buckets),
         static_cast<int>(output_buckets),
@@ -105,7 +113,8 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
         static_cast<int>(feature_channels),
         full_threats,
         full_heads,
-        mixed_activation);
+        mixed_activation,
+        psqt_residual);
     if (payload_size != expected_payload
         || reader.size() != NETWORK_HEADER_SIZE + expected_payload)
         return {NNUE::LoadStatus::invalid, "Enyo network payload size does not match its header"};
@@ -120,6 +129,7 @@ NNUE::LoadResult ReadLayout(NNUE::BinaryReader & reader, NetworkLayout & layout)
         full_threats,
         full_heads,
         mixed_activation,
+        psqt_residual,
     };
     if (!reader.seek(NETWORK_HEADER_SIZE))
         return {NNUE::LoadStatus::invalid, reader.error()};
@@ -159,6 +169,13 @@ static NNUE::LoadResult LoadEnyoNetwork(NNUE::BinaryReader & reader) {
         * static_cast<size_t>(output_width) * N_OUTPUT;
     const size_t output_bias_bytes = sizeof(float)
         * static_cast<size_t>(layout.output_buckets) * N_OUTPUT;
+    const size_t psqt_weight_bytes = layout.psqt_residual
+        ? sizeof(float) * static_cast<size_t>(InputFeatureCount(
+            layout.input_buckets, layout.feature_channels, layout.full_threats))
+            * static_cast<size_t>(layout.output_buckets)
+        : 0;
+    const size_t psqt_bias_bytes = layout.psqt_residual
+        ? sizeof(float) * static_cast<size_t>(layout.output_buckets) : 0;
 
     if (!reader.read(EnyoStorage::input_weights, input_weight_bytes, "INPUT_WEIGHTS")
         || !reader.read(EnyoStorage::input_biases, sizeof(EnyoStorage::input_biases), "INPUT_BIASES")
@@ -175,7 +192,9 @@ static NNUE::LoadResult LoadEnyoNetwork(NNUE::BinaryReader & reader) {
             l2_squared_bias_bytes,
             "L2_SQUARED_BIASES")
         || !reader.read(EnyoStorage::output_weights, output_weight_bytes, "OUTPUT_WEIGHTS")
-        || !reader.read(EnyoStorage::output_biases, output_bias_bytes, "OUTPUT_BIASES"))
+        || !reader.read(EnyoStorage::output_biases, output_bias_bytes, "OUTPUT_BIASES")
+        || !reader.read(EnyoStorage::psqt_weights, psqt_weight_bytes, "PSQT_WEIGHTS")
+        || !reader.read(EnyoStorage::psqt_biases, psqt_bias_bytes, "PSQT_BIASES"))
         return {NNUE::LoadStatus::invalid, reader.error()};
 
     if (!reader.at_end())

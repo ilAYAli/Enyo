@@ -72,13 +72,18 @@ inline constexpr std::array<uint8_t, 8> NETWORK_V3_HEADER_MAGIC = {
 inline constexpr std::array<uint8_t, 8> NETWORK_V4_HEADER_MAGIC = {
     'E', 'N', 'Y', 'O', 'N', 'N', '4', 0,
 };
+inline constexpr std::array<uint8_t, 8> NETWORK_V5_HEADER_MAGIC = {
+    'E', 'N', 'Y', 'O', 'N', 'N', '5', 0,
+};
 inline constexpr auto NETWORK_HEADER_MAGIC = NETWORK_V2_HEADER_MAGIC;
 inline constexpr uint32_t NETWORK_FORMAT_VERSION = 2;
 inline constexpr uint32_t NETWORK_V3_FORMAT_VERSION = 3;
 inline constexpr uint32_t NETWORK_V4_FORMAT_VERSION = 4;
+inline constexpr uint32_t NETWORK_V5_FORMAT_VERSION = 5;
 inline constexpr uint32_t NETWORK_FLAG_FULL_THREATS = 1u << 0;
 inline constexpr uint32_t NETWORK_FLAG_FULL_HEADS = 1u << 1;
 inline constexpr uint32_t NETWORK_FLAG_MIXED_ACTIVATION = 1u << 2;
+inline constexpr uint32_t NETWORK_FLAG_PSQT_RESIDUAL = 1u << 3;
 inline constexpr size_t NETWORK_HEADER_SIZE = 64;
 
 // ---------------------------------------------------------------------
@@ -382,11 +387,13 @@ struct alignas(64) Accumulator {
     uint16_t lazy_add[2][2];
     uint32_t move;                // move that produced this accumulator
     int32_t  eval[2];
+    float    psqt[2][MAX_OUTPUT_BUCKETS];
     alignas(64) acc_t values[2][N_HIDDEN]; // [perspective][hidden_idx]
 };
 
 struct alignas(64) AccumulatorKingState {
     acc_t    values[N_HIDDEN];
+    float    psqt[MAX_OUTPUT_BUCKETS];
     uint64_t pcs[12]; // per-piece bitboard snapshot (for diff-based refresh)
     NNUE::Stockfish::FullThreats::ActiveFeatures threats;
 };
@@ -422,6 +429,8 @@ extern const float*   L2_SQUARED_WEIGHTS;
 extern const float*   L2_SQUARED_BIASES;
 extern const float*   OUTPUT_WEIGHTS;
 extern const float*   OUTPUT_BIASES;
+extern const float*   PSQT_WEIGHTS;
+extern const float*   PSQT_BIASES;
 extern float          OUTPUT_BIAS;
 extern const int16_t* QUANTIZED_L2_WEIGHTS;
 extern const int32_t* QUANTIZED_L2_BIASES;
@@ -437,6 +446,7 @@ extern int            OUTPUT_HEAD_FEATURES;
 extern bool           FULL_THREATS_ENABLED;
 extern bool           FULL_HEADS_ENABLED;
 extern bool           MIXED_ACTIVATION_ENABLED;
+extern bool           PSQT_RESIDUAL_ENABLED;
 
 // Phase-2 test helper: point the weight externs at externally-allocated
 // arrays.  Caller is responsible for the storage outliving subsequent
@@ -454,7 +464,8 @@ inline constexpr size_t NetworkSize(
     int feature_channels = DEFAULT_FEATURE_CHANNELS,
     bool full_threats = false,
     bool full_heads = false,
-    bool mixed_activation = false)
+    bool mixed_activation = false,
+    bool psqt_residual = false)
 {
     const size_t head_count = full_heads
         ? static_cast<size_t>(output_buckets)
@@ -470,7 +481,11 @@ inline constexpr size_t NetworkSize(
     + (mixed_activation ? sizeof(float) * (N_L2 * N_L3 + N_L3) : 0)
     + sizeof(float)   * static_cast<size_t>(output_buckets)
         * static_cast<size_t>(N_L3 + output_head_features) * N_OUTPUT
-    + sizeof(float)   * static_cast<size_t>(output_buckets) * N_OUTPUT;
+    + sizeof(float)   * static_cast<size_t>(output_buckets) * N_OUTPUT
+    + (psqt_residual ? sizeof(float)
+        * (static_cast<size_t>(InputFeatureCount(input_buckets, feature_channels, full_threats))
+            * static_cast<size_t>(output_buckets)
+            + static_cast<size_t>(output_buckets)) : 0);
 }
 
 inline constexpr size_t QuantizedNetworkSize()
@@ -508,6 +523,7 @@ struct NetworkLayout {
     bool full_threats = false;
     bool full_heads = false;
     bool mixed_activation = false;
+    bool psqt_residual = false;
 };
 
 inline constexpr NetworkLayout DetectNetworkLayout(size_t size) {
@@ -682,6 +698,24 @@ inline void ApplyDelta(acc_t* dest, const acc_t* src, const Delta* delta) {
 #endif
 }
 
+inline void ApplyPsqtDelta(float* dest, const float* src, const Delta* delta) {
+    if (!PSQT_RESIDUAL_ENABLED) {
+        if (dest != src)
+            std::memset(dest, 0, sizeof(float) * MAX_OUTPUT_BUCKETS);
+        return;
+    }
+    for (int bucket = 0; bucket < OUTPUT_BUCKETS; ++bucket) {
+        float value = src[bucket];
+        for (size_t r = 0; r < delta->r; ++r)
+            value -= PSQT_WEIGHTS[
+                static_cast<size_t>(delta->rem[r]) * OUTPUT_BUCKETS + bucket];
+        for (size_t a = 0; a < delta->a; ++a)
+            value += PSQT_WEIGHTS[
+                static_cast<size_t>(delta->add[a]) * OUTPUT_BUCKETS + bucket];
+        dest[bucket] = value;
+    }
+}
+
 // ApplySubAdd — remove feature f1, add feature f2. The hot path for
 // quiet moves (piece from f1 to f2).
 inline void ApplySubAdd(acc_t* dest, const acc_t* src, int f1, int f2) {
@@ -799,6 +833,9 @@ inline void ResetRefreshTable(AccumulatorKingState* refreshTable) {
     for (size_t b = 0; b < 2 * 2 * N_KING_BUCKETS; ++b) {
         AccumulatorKingState* state = refreshTable + b;
         std::memcpy(state->values, INPUT_BIASES, sizeof(acc_t) * N_HIDDEN);
+        std::memset(state->psqt, 0, sizeof(state->psqt));
+        if (PSQT_RESIDUAL_ENABLED)
+            std::memcpy(state->psqt, PSQT_BIASES, sizeof(float) * OUTPUT_BUCKETS);
         std::memset(state->pcs, 0, sizeof(state->pcs));
         state->threats.size = 0;
     }
@@ -822,6 +859,9 @@ inline void ResetAccumulator(Accumulator* dest, enyo::Color view,
     const int v = static_cast<int>(view);
     acc_t* values = dest->values[v];
     std::memcpy(values, INPUT_BIASES, sizeof(acc_t) * N_HIDDEN);
+    std::memset(dest->psqt[v], 0, sizeof(dest->psqt[v]));
+    if (PSQT_RESIDUAL_ENABLED)
+        std::memcpy(dest->psqt[v], PSQT_BIASES, sizeof(float) * OUTPUT_BUCKETS);
 
     Delta delta;
     delta.r = 0;
@@ -834,6 +874,7 @@ inline void ResetAccumulator(Accumulator* dest, enyo::Color view,
                                           king_enyo_sq, view);
     }
     ApplyDelta(values, values, &delta);
+    ApplyPsqtDelta(dest->psqt[v], dest->psqt[v], &delta);
     dest->correct[v] = 1;
     dest->eval_correct[enyo::white] = 0;
     dest->eval_correct[enyo::black] = 0;
@@ -1624,12 +1665,16 @@ inline int Propagate(
     if (DENSE_LAYER_FORMAT == DenseLayerFormat::Quantized)
         return PropagateQuantizedDense(acc, stm);
 
+    const float psqt = PSQT_RESIDUAL_ENABLED
+        ? acc->psqt[stm][output_bucket] - acc->psqt[!stm][output_bucket]
+        : 0.0f;
+
 #if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__ARM_FEATURE_DOTPROD)
     alignas(64) float l2_input[N_L2];
     alignas(64) float l3_input[N_L3];
     L1AffineReLUFromAccumulator(l2_input, acc, stm, output_bucket);
     L2AffineReLU(l3_input, l2_input, output_bucket);
-    return static_cast<int>(L3Transform(l3_input, output_bucket, head_features) / 32.0f);
+    return static_cast<int>((L3Transform(l3_input, output_bucket, head_features) + psqt) / 32.0f);
 #else
     alignas(64) int8_t l1_input[N_L1];
     alignas(64) float  l2_input[N_L2];
@@ -1637,7 +1682,7 @@ inline int Propagate(
     InputReLU(l1_input, acc, stm);
     L1AffineReLU(l2_input, l1_input, output_bucket);
     L2AffineReLU(l3_input, l2_input, output_bucket);
-    return static_cast<int>(L3Transform(l3_input, output_bucket, head_features) / 32.0f);
+    return static_cast<int>((L3Transform(l3_input, output_bucket, head_features) + psqt) / 32.0f);
 #endif
 }
 

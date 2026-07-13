@@ -155,10 +155,15 @@ void refresh_network_from_table(NNUE::Net & net,
     }
 
     Network::ApplyDelta(state.values, state.values, &delta);
+    Network::ApplyPsqtDelta(state.psqt, state.psqt, &delta);
     std::memcpy(
         accumulator.values[side],
         state.values,
         sizeof(Network::acc_t) * Network::N_HIDDEN);
+    std::memcpy(
+        accumulator.psqt[side],
+        state.psqt,
+        sizeof(float) * Network::MAX_OUTPUT_BUCKETS);
     accumulator.correct[side] = 1;
     invalidate_network_eval(accumulator);
 }
@@ -188,6 +193,7 @@ void update_network_feature(Network::Accumulator & accumulator,
         else
             delta.rem[delta.r++] = feature;
         Network::ApplyDelta(accumulator.values[side], accumulator.values[side], &delta);
+        Network::ApplyPsqtDelta(accumulator.psqt[side], accumulator.psqt[side], &delta);
     }
 }
 
@@ -211,6 +217,7 @@ void move_network_feature(Network::Accumulator & accumulator,
         delta.add[delta.a++] = Network::FeatureIdx(
             pieceType, pieceColor, to_square, king_square, side);
         Network::ApplyDelta(accumulator.values[side], accumulator.values[side], &delta);
+        Network::ApplyPsqtDelta(accumulator.psqt[side], accumulator.psqt[side], &delta);
     }
 }
 
@@ -241,6 +248,7 @@ void move_network_feature_from(Network::Accumulator & dest,
         delta.add[delta.a++] = Network::FeatureIdx(
             pieceType, pieceColor, to_square, king_square, side);
         Network::ApplyDelta(dest.values[side], src.values[side], &delta);
+        Network::ApplyPsqtDelta(dest.psqt[side], src.psqt[side], &delta);
     }
 }
 
@@ -297,6 +305,14 @@ void move_network_feature_from_for_side(Network::Accumulator & dest,
             Network::FeatureIdx(enyo::rook, mover, rook_from, king_square, side),
             to_feature,
             Network::FeatureIdx(enyo::rook, mover, rook_to, king_square, side));
+        Network::Delta delta{};
+        delta.rem[delta.r++] = from_feature;
+        delta.rem[delta.r++] = Network::FeatureIdx(
+            enyo::rook, mover, rook_from, king_square, side);
+        delta.add[delta.a++] = to_feature;
+        delta.add[delta.a++] = Network::FeatureIdx(
+            enyo::rook, mover, rook_to, king_square, side);
+        Network::ApplyPsqtDelta(dest.psqt[side], src.psqt[side], &delta);
         return;
     }
 
@@ -307,10 +323,20 @@ void move_network_feature_from_for_side(Network::Accumulator & dest,
             from_feature,
             Network::FeatureIdx(captured_piece, ~mover, captured_square, king_square, side),
             to_feature);
+        Network::Delta delta{};
+        delta.rem[delta.r++] = from_feature;
+        delta.rem[delta.r++] = Network::FeatureIdx(
+            captured_piece, ~mover, captured_square, king_square, side);
+        delta.add[delta.a++] = to_feature;
+        Network::ApplyPsqtDelta(dest.psqt[side], src.psqt[side], &delta);
         return;
     }
 
     Network::ApplySubAdd(dest.values[side], src.values[side], from_feature, to_feature);
+    Network::Delta delta{};
+    delta.rem[delta.r++] = from_feature;
+    delta.add[delta.a++] = to_feature;
+    Network::ApplyPsqtDelta(dest.psqt[side], src.psqt[side], &delta);
 }
 
 void build_network_lazy_for_side(Network::Accumulator & accumulator,
@@ -369,6 +395,13 @@ void apply_network_lazy_from_for_side(Network::Accumulator & dest,
                                     const Network::Accumulator & src,
                                     enyo::Color side)
 {
+    Network::Delta delta{};
+    for (uint8_t i = 0; i < dest.lazy_rem_count[side]; ++i)
+        delta.rem[delta.r++] = dest.lazy_rem[side][i];
+    for (uint8_t i = 0; i < dest.lazy_add_count[side]; ++i)
+        delta.add[delta.a++] = dest.lazy_add[side][i];
+    Network::ApplyPsqtDelta(dest.psqt[side], src.psqt[side], &delta);
+
     if (dest.lazy_rem_count[side] == 2 && dest.lazy_add_count[side] == 2) {
         Network::ApplySubSubAddAdd(
             dest.values[side],
