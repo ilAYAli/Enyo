@@ -22,19 +22,9 @@ It has been developed over several years — predating the generative-AI era.
 
 Enyo uses a HalfKAv2-style factorised NNUE trained from scratch for Enyo.
 Training uses self-play/generated positions and binpack datasets, with
-Stockfish used only as a labeling oracle. No foreign weights, tensors, or NNUE
-parameters are used.
+Stockfish used only as a labeling oracle.
 
-Current architecture:
-
-| Component | Value |
-| --- | --- |
-| Type | HalfKAv2-style factorised NNUE |
-| Input buckets | 16 king buckets |
-| Feature channels | 12 |
-| Hidden width | 1024 |
-| L2 size | 16 |
-| Output buckets | 8 |
+No foreign weights are used.
 
 Related project: [Enyo NNUE](https://github.com/ilAYAli/nnue).
 
@@ -94,10 +84,10 @@ config file must contain a single `uci_options` object:
   "uci_options": {
     "Threads": 4,
     "Hash": 1024,
-    "nnue_file": "~/code/cpp/chess/enyo/net/default.nn",
+    "nnue_file": "~/assets/nnue/default.nn",
     "logfile": "/tmp/enyo.log",
     "use_syzygy": true,
-    "SyzygyPath": "~/code/cpp/chess/assets/tablebases"
+    "SyzygyPath": "~/assets/tablebases"
   }
 }
 ```
@@ -115,7 +105,7 @@ and later UCI commands take precedence.
 Example UCI override:
 
 ```text
-setoption name nnue_file value ~/code/cpp/chess/enyo/net/default.nn
+setoption name nnue_file value ~/assets/nnue/enyo-1.30.0-rc3.nn
 ```
 
 
@@ -131,58 +121,10 @@ repetition and fifty-move draws, adjusts time usage when the root result is
 unstable, and can use Syzygy tablebases when available.
 
 
-## Benchmarks
+## Development
 
-```sh
-./build/enyo bench
-./scripts/bench_avg.py ./build/enyo 10
-./build/enyo bench perft
-```
-
-`bench` runs a deterministic 24-position search suite with the configured
-evaluator. It defaults to depth 11, one thread, a 16 MB hash, and no
-tablebases. The reported node total is the search signature; nodes per second
-measures speed.
-
-Use `bench_avg.py` for repeated timing and `bench perft` for the
-move-generation-only benchmark.
-
-## SPSA Tuning
-
-SPSA tuning separates training, testing, and promotion:
-
-```sh
-./spsa/train --iterations 100
-./spsa/sprt
-./spsa/promote --dry-run
-./spsa/promote
-```
-
-- `train` updates `spsa/state.json` and resumes previous work when possible.
-- `sprt` launches a detached 1000-game Forge test against the last promoted
-  defaults.
-- `promote --dry-run` previews the promotion.
-- `promote` updates `spsa/params.txt` and `src/config.hpp`; it does not commit
-  or push.
-
-Runtime CSV and lock files are kept under `spsa/.runtime`.
-
-For alternate SPSA batches, pass both the matching params and state files:
-
-```sh
-./spsa/sprt --params spsa/params_node_tm.txt --state spsa/state_node_tm.json
-```
-
-## Utilities
-
-- [Forge](https://github.com/ilAYAli/Forge): distributes tasks across
-  configured workers.
-- [Replay](https://github.com/ilAYAli/replay): evaluates games for
-  inaccuracies, mistakes, blunders, and average centipawn loss.
-- [sprt](https://github.com/ilAYAli/sprt): Python wrapper around fastchess.
-- [Fastchess](https://github.com/Disservin/fastchess): CLI tool for SPRT
-  validation.
-- [Pyrrhic](https://github.com/AndyGrant/Pyrrhic): Syzygy WDL/DTZ probing.
+See [README_dev.md](README_dev.md) for benchmarks, SPSA tuning, SPRT
+validation, and development utilities.
 
 ## Acknowledgments
 
